@@ -52,7 +52,6 @@ class TimeSeriesCanvas(FigureCanvas):
 
         self.fig.tight_layout(pad=1.0)
 
-
     def update_data(self, t: np.ndarray, y: np.ndarray):
         """
         Update the line data and rescale axes.
@@ -100,7 +99,6 @@ class TrackMapCanvas(FigureCanvas):
         self.colorbar = None
 
         self.fig.tight_layout(pad=1.0)
-
 
     def plot_track(self, xs: np.ndarray, zs: np.ndarray, speeds: np.ndarray):
         """
@@ -338,56 +336,23 @@ class MainWindow(QMainWindow):
         car = session_data.get("car_model", "Unknown")
         player_name = session_data.get("player_name", "")
         player_surname = session_data.get("player_surname", "")
+        player_nick = session_data.get("player_nick", "")
         
         # Format track name (remove config if empty)
         track_name = f"{track} ({track_config})" if track_config else track
         
-        # Store for later use
-        self.session_info = session_data
-        
         # Update labels
-        self.driver_name_label.setText(f"Driver: {player_name} {player_surname}")
+        self.driver_name_label.setText(f"Driver: {player_name} {player_surname} ({player_nick})")
         self.car_label.setText(f"Car: {car}")
         self.track_label.setText(f"Track: {track_name}")
 
-
     def update_live_data(self, live_data):
         """
-        Called periodically (~6 times/sec) with live telemetry.
+        Placeholder for real-time UI updates (not wired yet).
         live_data: dict with current_lap, speed, gear, rpm, fuel, etc.
         """
-        # Extract live data
-        current_lap = live_data.get("current_lap", 1)
-        speed = live_data.get("speed", 0)
-        gear = live_data.get("gear", 0)
-        rpm = live_data.get("rpm", 0)
-        fuel = live_data.get("fuel", 0)
-        position = live_data.get("position", 0)
-        is_in_pit = live_data.get("is_in_pit", 0)
-        best_time = live_data.get("best_time", "")
-        last_time = live_data.get("last_time", "")
-        
-        # Format pit status
-        pit_status = "🏁 IN PIT" if is_in_pit else "🏎️ ON TRACK"
-        
-        # Format gear display
-        if gear == 0:
-            gear_display = "R"
-        elif gear == 1:
-            gear_display = "N"
-        else:
-            gear_display = str(gear - 1)
-        
-        # Update all labels
-        self.lap_label.setText(f"Lap: {current_lap}")
-        self.position_label.setText(f"Position: P{position}")
-        self.status_label.setText(f"Status: {pit_status}")
-        self.speed_label.setText(f"Speed: {speed:.1f} km/h")
-        self.gear_label.setText(f"Gear: {gear_display}")
-        self.rpm_label.setText(f"RPM: {rpm:,}")
-        self.fuel_label.setText(f"Fuel: {fuel:.1f} L")
-        self.last_lap_label.setText(f"Last: {last_time if last_time else '--:--:---'}")
-        self.best_lap_label.setText(f"Best: {best_time if best_time else '--:--:---'}")
+        # You can wire this later via a live_data signal from the worker
+        pass
 
     # ------------------ Wiring methods ------------------ #
 
@@ -441,6 +406,8 @@ class MainWindow(QMainWindow):
     def handle_lap_complete(self, lap_id, samples):
         """
         Entry point for the LapBuffer callback.
+        samples: list of dicts with:
+                 t, x, z, speed, gear, rpms, brake, throttle
         """
         if not samples:
             return
