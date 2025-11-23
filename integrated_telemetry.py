@@ -20,7 +20,7 @@ def main(game: str = "ac"):
     if game == "ac":
         telemetry_thread = AcTelemetryWorker()
     elif game == "acc":
-        telemetry_thread = AccTelemetryWorker()
+        telemetry_thread = AccTelemetryWorker(host="127.0.0.1", port=9000, password="")
     else:
         raise ValueError(f"Unknown game '{game}'. Use 'ac' or 'acc'.")
 
