@@ -1,144 +1,252 @@
-currently supports:
-- assetto corsa (ac) ✅
-- assetto corsa competizione (acc) ⚠️ backend skeleton ready, packet parsing still todo
+# F1 Live Telemetry Dashboard
 
-this is a live telemetry dashboard for sim games (for systems coursework team 17).
-right now the ui + backend are wired for ac, and acc is being prepared via a separate telemetry backend.
+## Currently Supports:
+- **Assetto Corsa (AC)** ✅
+- **Assetto Corsa Competizione (ACC)** ⚠️ limited telemetry via broadcasting API
 
---------------------------------------------------
-assetto corsa (ac) setup steps
---------------------------------------------------
+This is a live telemetry dashboard for sim games (for systems coursework team 17).
+Right now the UI + backend are wired for AC, and ACC is being prepared via a separate telemetry backend.
 
-1. enable shared memory in ac
-   - go to: options -> general -> scroll to ui modules and shared memory
-   - shared memory = ON
-   - shared memory layout = 1
-   - udp plugin = OFF
-   - udp frequency = 333 hz
-   - enable data > apps = ON
+---
 
-2. start a session on track
-   - telemetry only becomes active when:
-     - car is loaded
-     - you are in the cockpit
-     - physics thread is running
-   - so: start a practice / hotlap / race session
-   - wait until the car is fully loaded and look around once to make sure physics is running
+## Assetto Corsa (AC) Setup Steps
 
-3. shared memory details (windows only)
-   - while ac is running:
-     - press ctrl+shift+esc
-     - go to the "details" tab
-     - look for: acs.exe / acs_x64.exe
-     - right click -> open file location (just to sanity check the game is running)
-   - the script reads these windows named shared memory blocks (not files on disk):
-     - `acpmf_static`
-     - `acpmf_physics`
-     - `acpmf_graphics`
+### 1. Enable Shared Memory in AC
+- Go to: **Options → General → Scroll to UI Modules and Shared Memory**
+- **Shared Memory** = ON
+- **Shared Memory Layout** = 1
+- **UDP Plugin** = OFF
+- **UDP Frequency** = 333 Hz
+- **Enable Data > Apps** = ON
 
-4. run on the same user session
-   - run ac normally (no admin needed)
-   - run the python script from the same windows user account
-   - do not run one as admin and the other as non-admin (named shared memory is session / permission sensitive)
+### 2. Start a Session on Track
+Telemetry only becomes active when:
+- Car is loaded
+- You are in the cockpit
+- Physics thread is running
 
---------------------------------------------------
-assetto corsa competizione (acc) setup steps (planned)
---------------------------------------------------
+So: Start a practice / hotlap / race session and wait until the car is fully loaded. Look around once to make sure physics is running.
 
-acc support is being added via a separate telemetry backend:
-- file: `telemetry/acc_udp.py`
-- this listens to acc’s udp broadcasting and feeds normalized samples into the same ui + lap logic
+### 3. Shared Memory Details (Windows Only)
+While AC is running:
+- Press `Ctrl+Shift+Esc`
+- Go to the "Details" tab
+- Look for: `acs.exe` / `acs_x64.exe`
+- Right click → Open file location (just to sanity check the game is running)
 
-to prepare acc:
+The script reads these Windows named shared memory blocks (not files on disk):
+- `acpmf_static`
+- `acpmf_physics`
+- `acpmf_graphics`
 
-1. enable udp broadcasting in acc
-   - in acc, go to options -> (network / general, depending on version) -> broadcasting
-   - turn broadcasting ON
-   - set the target ip + port, e.g.:
-     - ip: `127.0.0.1`
-     - port: `9000` (this is the default in `AccTelemetryWorker` right now)
+### 4. Run on the Same User Session
+- Run AC normally (no admin needed)
+- Run the Python script from the same Windows user account
+- Do not run one as admin and the other as non-admin (named shared memory is session/permission sensitive)
 
-2. make sure the port matches the code
-   - in `telemetry/acc_udp.py`:
-     - `AccTelemetryWorker(host="127.0.0.1", port=9000)`
-   - if you change the port in acc, update it here as well
+---
 
-3. start a session on track in acc
-   - similar to ac: telemetry is only meaningful when you are on track and driving
-   - start a practice / hotlap / race so there is realtime data to broadcast
+## Assetto Corsa Competizione (ACC) Setup Steps
 
-4. important: packet parsing is still TODO
-   - the backend skeleton is already there, but:
-     - `parse_acc_packet()` in `telemetry/acc_udp.py` is not implemented yet
-   - until you implement this using the official acc broadcasting sdk / docs:
-     - acc backend will not actually produce lap data for the dashboard
-   - once implemented, it should output a dict like:
-     - `{"t", "lap_id", "x", "z", "speed_kmh", "gear", "rpms", "brake", "throttle"}`
+ACC support uses UDP broadcasting protocol:
+- **File:** `telemetry/acc_udp.py`
+- Listens to ACC's broadcasting API and feeds normalized samples into the same UI + lap logic
 
---------------------------------------------------
-running the app (current status)
---------------------------------------------------
+### ⚠️ Important Limitations:
+- **ACC broadcasting provides:** position (x,y,z), speed, gear, lap times, position
+- **ACC broadcasting does NOT provide:** RPM, brake input, throttle input, fuel level
+- RPM/brake/throttle graphs will show zeros or be empty when using ACC
+- For full telemetry, you'd need ACC's physics shared memory plugin (not implemented)
 
-requirements:
-- python 3.x
-- pyqt5
-- matplotlib
-- numpy
-(see `requirements.txt` for exact versions)
+### 1. Configure ACC Broadcasting
+- Close ACC completely first
+- Navigate to: `Documents\Assetto Corsa Competizione\Config\`
+- Create or edit `broadcasting.json`:
 
-basic run (assetto corsa):
+```json
+{
+  "updListenerPort": 9232,
+  "connectionPassword": "",
+  "commandPassword": ""
+}
+```
 
-1. install deps
-   - `pip install -r requirements.txt`
+- Save the file
+- This tells ACC to listen for broadcasting clients on port 9232
 
-2. start assetto corsa and get on track (see ac setup steps above)
+### 2. Make Sure the Port Matches the Code
+In `telemetry/acc_udp.py` or when starting the worker:
+```python
+AccTelemetryWorker(host="127.0.0.1", port=9232, password="")
+```
 
-3. run the telemetry dashboard
-   - `python integrated_telemetry.py`
-   - this currently starts the assetto corsa backend (ac)
+If you change `updListenerPort` in `broadcasting.json`, update the Python code to match. Default is 9232, but you can use any available port.
 
-you should see:
-- a window called “ac telemetry dashboard – prototype”
-- once you complete a full lap in ac:
-  - track map (colored by speed)
-  - per-lap graphs (speed / gear / rpm / brake)
-  - lap table filled with laptime
+### 3. Start ACC and Get on Track FIRST
+- ACC must be running before you start the Python script
+- Start a practice / hotlap / race session
+- Telemetry only flows when you're on track and driving
 
-acc run (future):
+### 4. Run the Python Script
+The script will:
+1. Bind to the configured port
+2. Send a registration packet to ACC
+3. Receive registration confirmation
+4. Request track data and entry list
+5. Continuously receive telemetry updates
 
-- `integrated_telemetry.py` is structured to support multiple backends:
-  - `AcTelemetryWorker` (ac)
-  - `AccTelemetryWorker` (acc)
-- after `parse_acc_packet()` is implemented and the game selector is wired:
-  - you’ll be able to start the app with acc as the source instead of ac
-  - the ui and lap logic shouldn’t need any changes
+If connection fails, check:
+- ACC is running and you're on track
+- `broadcasting.json` port matches your Python code
+- Firewall isn't blocking the port
+- No other program is using that port
 
---------------------------------------------------
-current notes / roadmap
---------------------------------------------------
+### How ACC Broadcasting Works:
+- ACC acts as the UDP server (listens on port 9232)
+- Your Python script acts as the client (connects to ACC)
+- **Connection flow:**
+  1. Python script binds to port 9232
+  2. Python sends REGISTER packet to `127.0.0.1:9232`
+  3. ACC responds with REGISTRATION_RESULT
+  4. Python requests TRACK_DATA and ENTRY_LIST
+  5. ACC continuously broadcasts REALTIME_CAR_UPDATE packets
+  6. Python parses packets and feeds data to dashboard
 
-short-term:
-- wire static info & live labels in ui (driver name, car, track, etc.)
-- add a real-time `live_data` signal so speed / gear / rpm / fuel update continuously
-- polish dark theme (colorbar + minor styling)
+---
 
-acc-related:
-- implement `parse_acc_packet()` in `telemetry/acc_udp.py` using the official acc broadcasting sdk
-- confirm lap counting logic for acc (equivalent of `completedLaps` in ac)
-- verify we can extract world coordinates (x, z) from acc to draw the track map
+## Running the App
 
-future ideas:
-- support more sims via their own backend files (e.g. iracing, f1 games, rfactor 2)
-- multi-driver comparison per lap
-- export laps to csv / parquet for offline analysis
-- integrate a custom ai chatbot / engineer inside the app for strategy / driving hints
+### Requirements:
+- Python 3.x
+- PyQt5
+- Matplotlib
+- NumPy
 
---------------------------------------------------
-about
---------------------------------------------------
+See `requirements.txt` for exact versions.
 
-live telemetry dashboard for simulation games.
-designed to be:
-- modular (one backend per sim: ac, acc, etc.)
-- reusable (same ui + lap logic, multiple sources)
-- a base for more advanced stuff (ai engineer, strategy, overlays, etc.)
+### Basic Run (Assetto Corsa):
+
+1. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Start Assetto Corsa and get on track** (see AC setup steps above)
+
+3. **Run the telemetry dashboard**
+   ```bash
+   python integrated_telemetry.py
+   ```
+   This currently starts the Assetto Corsa backend (AC) by default.
+
+**You should see:**
+- A window called "AC Telemetry Dashboard – Prototype"
+- Once you complete a full lap in AC:
+  - Track map (colored by speed)
+  - Per-lap graphs (speed / gear / RPM / brake)
+  - Lap table filled with laptime
+
+### ACC Run:
+
+1. **Configure ACC** (see ACC setup steps above)
+
+2. **Start ACC and get on track**
+
+3. **Modify `integrated_telemetry.py` to use ACC backend:**
+   ```python
+   # Change from:
+   telemetry_thread = AcTelemetryWorker()
+   
+   # To:
+   from telemetry.acc_udp import AccTelemetryWorker
+   telemetry_thread = AccTelemetryWorker(host="127.0.0.1", port=9232, password="")
+   ```
+
+4. **Run the dashboard**
+   ```bash
+   python integrated_telemetry.py
+   ```
+
+**Expected behavior with ACC:**
+- ✅ Track map will work (position data available)
+- ✅ Speed graph will work
+- ✅ Gear graph will work
+- ✅ Lap times will work
+- ❌ RPM graph will show zeros (not in broadcasting API)
+- ❌ Brake graph will show zeros (not in broadcasting API)
+- ❌ Fuel will show "--" (not in broadcasting API)
+
+---
+
+## Current Notes / Roadmap
+
+### Completed:
+- ✅ AC backend with full telemetry (shared memory)
+- ✅ ACC backend with broadcasting protocol
+- ✅ Packet parsing for ACC (registration, realtime updates, track data)
+- ✅ Lap detection and buffering for both AC and ACC
+- ✅ Live data updates for session info panel
+
+### Short-term:
+- Add game selector in UI (choose AC or ACC at startup)
+- Polish dark theme (colorbar + minor styling)
+- Better error handling and connection status display
+
+### ACC Improvements:
+- Investigate ACC physics shared memory plugin for full telemetry
+- Add pit status detection from ACC data
+- Handle multi-car scenarios (currently focuses on player car)
+
+### Future Ideas:
+- Support more sims via their own backend files (e.g. iRacing, F1 games, rFactor 2)
+- Multi-driver comparison per lap
+- Export laps to CSV / Parquet for offline analysis
+- Integrate a custom AI chatbot / engineer inside the app for strategy / driving hints
+- Overlay mode (transparent window over game)
+
+---
+
+## About
+
+Live telemetry dashboard for simulation games.
+
+**Designed to be:**
+- **Modular** - One backend per sim: AC, ACC, etc.
+- **Reusable** - Same UI + lap logic, multiple sources
+- **Extensible** - A base for more advanced features (AI engineer, strategy, overlays, etc.)
+
+---
+
+## Troubleshooting
+
+### AC Issues:
+
+**"Could not open shared memory":**
+- Make sure AC is running and you're in a session
+- Check you're running Python script as same user (no admin mismatch)
+- Verify shared memory is enabled in AC settings
+
+### ACC Issues:
+
+**"Connection failed" or no telemetry:**
+- Start ACC BEFORE running the Python script
+- Make sure you're on track (not in menus)
+- Check `broadcasting.json` exists and has correct port
+- Verify port isn't blocked by firewall
+- Try restarting ACC after editing `broadcasting.json`
+
+**"RPM/brake/throttle showing zeros":**
+- This is expected - ACC broadcasting API doesn't provide this data
+- Only position, speed, gear, and lap timing are available
+- For full telemetry, would need ACC's physics plugin (different API)
+
+### General Issues:
+
+**Graphs not updating:**
+- Complete a full lap (cross start/finish line)
+- Telemetry is buffered per-lap and displays after lap completion
+- Check console output for errors
+
+**"Module not found" errors:**
+- Run `pip install -r requirements.txt`
+- Make sure you're in the correct Python environment
