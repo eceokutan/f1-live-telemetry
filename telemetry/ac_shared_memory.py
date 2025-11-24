@@ -182,6 +182,7 @@ class AcTelemetryWorker(QtCore.QThread):
     status_update = QtCore.pyqtSignal(str)        # status message
     session_info_update = QtCore.pyqtSignal(dict) # session info (track, car, driver)
     live_data_update = QtCore.pyqtSignal(dict)    # live telemetry updates
+    realtime_sample = QtCore.pyqtSignal(dict)     # realtime telemetry sample (every frame)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -240,6 +241,19 @@ class AcTelemetryWorker(QtCore.QThread):
                 lap_id = gfx.completedLaps
                 speed = phys.speedKmh
 
+                # Create sample dict
+                sample_data = {
+                    "lap_id": lap_id,
+                    "t": elapsed,
+                    "x": x,
+                    "z": z,
+                    "speed": speed,
+                    "gear": phys.gear,
+                    "rpms": phys.rpms,
+                    "brake": phys.brake,
+                    "throttle": phys.gas,
+                }
+
                 # Feed sample into lap buffer
                 lap_buffer.add_sample(
                     lap_id=lap_id,
@@ -252,6 +266,9 @@ class AcTelemetryWorker(QtCore.QThread):
                     brake=phys.brake,
                     throttle=phys.gas,
                 )
+
+                # Emit real-time sample for live visualization
+                self.realtime_sample.emit(sample_data)
 
                 # Emit live data every 10 frames (~6 times/sec at 60Hz)
                 frame_count += 1

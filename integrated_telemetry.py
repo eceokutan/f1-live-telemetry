@@ -27,12 +27,14 @@ def main(game: str = "ac"):
     # Connect signals
     telemetry_thread.lap_completed.connect(window.handle_lap_complete)
     telemetry_thread.status_update.connect(lambda msg: print(f"[Status] {msg}"))
-    
+
     # Connect new signals (these exist in both backends now)
     if hasattr(telemetry_thread, 'session_info_update'):
         telemetry_thread.session_info_update.connect(window.update_session_info)
     if hasattr(telemetry_thread, 'live_data_update'):
         telemetry_thread.live_data_update.connect(window.update_live_data)
+    if hasattr(telemetry_thread, 'realtime_sample'):
+        telemetry_thread.realtime_sample.connect(window.handle_realtime_sample)
 
     # Start telemetry thread
     telemetry_thread.start()

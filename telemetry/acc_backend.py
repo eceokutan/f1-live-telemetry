@@ -310,6 +310,7 @@ class AccTelemetryWorker(QtCore.QThread):
     status_update = QtCore.pyqtSignal(str)
     session_info_update = QtCore.pyqtSignal(dict)
     live_data_update = QtCore.pyqtSignal(dict)
+    realtime_sample = QtCore.pyqtSignal(dict)  # realtime telemetry sample (every frame)
 
     def __init__(self, host="127.0.0.1", port=9000, password="", display_name="PythonTelemetry"):
         super().__init__()
@@ -457,12 +458,12 @@ class AccTelemetryWorker(QtCore.QThread):
         """Handle car telemetry update and buffer lap data"""
         car_index = car_update.get("car_index", 0)
         laps = car_update.get("laps", 0)
-        
+
         # Initialize if first time seeing this car
         if car_index not in self.current_lap_samples:
             self.current_lap_samples[car_index] = []
             self.last_lap_count[car_index] = laps
-        
+
         # Add sample to current lap
         sample = {
             "t": time.time(),
@@ -476,13 +477,16 @@ class AccTelemetryWorker(QtCore.QThread):
             "throttle": 0,  # Would need physics data
         }
         self.current_lap_samples[car_index].append(sample)
-        
+
+        # Emit real-time sample for live visualization
+        self.realtime_sample.emit(sample)
+
         # Check for lap completion
         if laps > self.last_lap_count[car_index]:
             # Lap completed!
             if self.current_lap_samples[car_index]:
                 self.lap_completed.emit(laps, self.current_lap_samples[car_index])
-            
+
             # Reset for next lap
             self.current_lap_samples[car_index] = [sample]
             self.last_lap_count[car_index] = laps

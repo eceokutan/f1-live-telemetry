@@ -154,6 +154,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AC Telemetry Dashboard – Prototype")
         self.resize(1400, 800)
 
+        # Real-time data buffers for current lap
+        self.current_lap_samples = []
+        self.current_lap_id = None
+
         central = QWidget()
         self.setCentralWidget(central)
 
@@ -433,40 +437,83 @@ class MainWindow(QMainWindow):
 
     # ------------------ Public API for backend ------------------ #
 
+    def handle_realtime_sample(self, sample):
+        """
+        Handle real-time telemetry sample (called every frame ~60Hz).
+        sample: dict with lap_id, t, x, z, speed, gear, rpms, brake, throttle
+        """
+        lap_id = sample.get("lap_id", 0)
+
+        # If lap changed, clear current lap buffer
+        if self.current_lap_id is None or lap_id != self.current_lap_id:
+            self.current_lap_samples = []
+            self.current_lap_id = lap_id
+
+        # Add sample to current lap buffer
+        self.current_lap_samples.append(sample)
+
+        # Update visualizations with current lap data (throttle updates to avoid overload)
+        # Only update every 5 samples (~12 updates/sec at 60Hz)
+        if len(self.current_lap_samples) % 5 == 0:
+            self._update_realtime_visualizations()
+
+    def _update_realtime_visualizations(self):
+        """Update all visualizations with current lap data"""
+        if len(self.current_lap_samples) < 2:
+            return
+
+        # Extract arrays from samples
+        xs = np.array([s["x"] for s in self.current_lap_samples], dtype=float)
+        zs = np.array([s["z"] for s in self.current_lap_samples], dtype=float)
+        speeds = np.array([s["speed"] for s in self.current_lap_samples], dtype=float)
+        times = np.array([s["t"] for s in self.current_lap_samples], dtype=float)
+        gears = np.array([s.get("gear", 0) for s in self.current_lap_samples], dtype=float)
+        rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
+        brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)
+
+        # Update track map
+        self.track_canvas.plot_track(xs, zs, speeds)
+
+        # Normalize times to start from 0
+        times = times - times[0]
+
+        # Update time-series graphs
+        self.speed_canvas.update_data(times, speeds)
+        self.gear_canvas.update_data(times, gears)
+        self.rpm_canvas.update_data(times, rpms)
+        self.brake_canvas.update_data(times, brakes * 100)  # Scale 0-1 to 0-100%
+
     def handle_lap_complete(self, lap_id, samples):
         """
         Entry point for the LapBuffer callback.
+        Called when a lap is completed.
         samples: list of dicts with:
                  t, x, z, speed, gear, rpms, brake, throttle
         """
         if not samples:
             return
 
-        xs = np.array([s["x"] for s in samples], dtype=float)
-        zs = np.array([s["z"] for s in samples], dtype=float)
-        speeds = np.array([s["speed"] for s in samples], dtype=float)
         times = np.array([s["t"] for s in samples], dtype=float)
-        gears = np.array([s.get("gear", 0) for s in samples], dtype=float)
-        rpms = np.array([s.get("rpms", 0) for s in samples], dtype=float)
-        brakes = np.array([s.get("brake", 0) for s in samples], dtype=float)
 
+        # Update window title
         self.setWindowTitle(f"AC Telemetry Dashboard – Lap {lap_id}")
-        self.track_canvas.plot_track(xs, zs, speeds)
 
         # Normalize times to start from 0 for each lap
         times = times - times[0]
-        
-        self.speed_canvas.update_data(times, speeds)
-        self.gear_canvas.update_data(times, gears)
-        self.rpm_canvas.update_data(times, rpms)
-        self.brake_canvas.update_data(times, brakes * 100)  # Scale 0-1 to 0-100%
 
-        # Update lap table (simple version for now)
+        # Update lap table with lap time
         row = min(lap_id - 1, self.lap_table.rowCount() - 1)
-        if row >= 0:
-            lap_time = f"{times[-1]:.3f}s"
+        if row >= 0 and len(times) > 0:
+            lap_time_seconds = times[-1]
+            minutes = int(lap_time_seconds // 60)
+            seconds = lap_time_seconds % 60
+            lap_time = f"{minutes}:{seconds:06.3f}"
             self.lap_table.setItem(row, 0, QTableWidgetItem(lap_time))
             self.lap_table.setItem(row, 1, QTableWidgetItem("--"))
+
+        # The visualization is already showing the current lap in real-time,
+        # so we don't need to redraw here. The real-time handler will
+        # automatically start showing the next lap.
 
 
 def main():
