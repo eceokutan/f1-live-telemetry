@@ -348,11 +348,41 @@ class MainWindow(QMainWindow):
 
     def update_live_data(self, live_data):
         """
-        Placeholder for real-time UI updates (not wired yet).
+        Called periodically (~6 times/sec) with live telemetry.
         live_data: dict with current_lap, speed, gear, rpm, fuel, etc.
         """
-        # You can wire this later via a live_data signal from the worker
-        pass
+        # Extract live data
+        current_lap = live_data.get("current_lap", 1)
+        speed = live_data.get("speed", 0)
+        gear = live_data.get("gear", 0)
+        rpm = live_data.get("rpm", 0)
+        fuel = live_data.get("fuel", 0)
+        position = live_data.get("position", 0)
+        is_in_pit = live_data.get("is_in_pit", 0)
+        best_time = live_data.get("best_time", "")
+        last_time = live_data.get("last_time", "")
+        
+        # Format pit status
+        pit_status = "🏁 IN PIT" if is_in_pit else "🏎️ ON TRACK"
+        
+        # Format gear display
+        if gear == 0:
+            gear_display = "R"
+        elif gear == 1:
+            gear_display = "N"
+        else:
+            gear_display = str(gear - 1)
+        
+        # Update all labels
+        self.lap_label.setText(f"Lap: {current_lap}")
+        self.position_label.setText(f"Position: P{position}")
+        self.status_label.setText(f"Status: {pit_status}")
+        self.speed_label.setText(f"Speed: {speed:.1f} km/h")
+        self.gear_label.setText(f"Gear: {gear_display}")
+        self.rpm_label.setText(f"RPM: {rpm:,}")
+        self.fuel_label.setText(f"Fuel: {fuel:.1f} L")
+        self.last_lap_label.setText(f"Last: {last_time if last_time else '--:--:---'}")
+        self.best_lap_label.setText(f"Best: {best_time if best_time else '--:--:---'}")
 
     # ------------------ Wiring methods ------------------ #
 
