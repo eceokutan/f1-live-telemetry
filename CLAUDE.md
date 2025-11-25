@@ -68,10 +68,11 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 **[telemetry/ac_shared_memory.py](telemetry/ac_shared_memory.py)** - Assetto Corsa backend
 - `AcTelemetryWorker` - Reads from AC's Windows named shared memory blocks:
   - `acpmf_static` - Static session info (track, car model, player name)
-  - `acpmf_physics` - Physics data (speed, RPM, throttle, brake, gear, fuel)
+  - `acpmf_physics` - Physics data (speed, RPM, throttle, brake, gear, fuel, tire pressure, tire temperature)
   - `acpmf_graphics` - Graphics/session data (lap count, lap times, position X/Y/Z)
 - Uses `ctypes.Structure` to map binary shared memory to Python objects
 - Polls at ~60Hz and feeds `LapBuffer`
+- **Full telemetry available:** RPM, throttle, brake, tire pressure (PSI), tire temperature (°C) for all 4 tires [FL, FR, RL, RR]
 - **Windows only** - Requires AC running in same user session
 
 **[telemetry/acc_backend.py](telemetry/acc_backend.py)** - ACC backend
@@ -88,9 +89,10 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   3. Wait for `REGISTRATION_RESULT`
   4. Request `TRACK_DATA` and `ENTRY_LIST`
   5. Continuously receive `REALTIME_CAR_UPDATE` packets
-- **Limitation:** ACC broadcasting API does NOT provide RPM, throttle, brake, or fuel data
+- **Limitation:** ACC broadcasting API does NOT provide RPM, throttle, brake, fuel, tire pressure, or tire temperature data
   - These fields will show zeros in the UI when using ACC backend
-  - Position (X/Y/Z), speed, gear, and lap timing are available
+  - Only position (X/Y/Z), speed, gear, and lap timing are available via broadcasting API
+  - For full telemetry, would need ACC's physics shared memory plugin (different API)
 
 ### Data Flow
 
@@ -129,7 +131,8 @@ Update lap table with lap time
 
 The dashboard now updates in real-time as you drive:
 - **Track map** - Shows current lap path colored by speed, updates ~12 times/sec
-- **Time-series graphs** - Speed, gear, RPM, brake update live as you drive
+- **Time-series graphs** - Speed, gear, RPM, brake, tire pressure (4 tires), tire temperature (4 tires) update live as you drive
+- **Multi-line tire graphs** - Each tire (FL, FR, RL, RR) is shown as a separate colored line on the same plot
 - **Automatic lap switching** - When you cross start/finish, visualization automatically clears and starts showing the new lap
 - **Throttled updates** - Only updates every 5 samples (from 60Hz telemetry) to avoid UI overload
 
@@ -160,6 +163,9 @@ Each sample dict must contain:
 - `gear` (int) - Current gear (0=neutral, -1=reverse)
 - `rpm` (int) - Engine RPM
 - `brake` (float) - Brake input (0.0 to 1.0)
+- `throttle` (float) - Throttle input (0.0 to 1.0)
+- `tyre_pressure_fl/fr/rl/rr` (float) - Tire pressure in PSI for Front Left, Front Right, Rear Left, Rear Right
+- `tyre_temp_fl/fr/rl/rr` (float) - Tire core temperature in °C for all 4 tires
 
 Additional fields can be added as kwargs to `add_sample()` and will be preserved in the sample dict.
 

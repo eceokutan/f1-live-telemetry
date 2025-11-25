@@ -252,6 +252,15 @@ class AcTelemetryWorker(QtCore.QThread):
                     "rpms": phys.rpms,
                     "brake": phys.brake,
                     "throttle": phys.gas,
+                    # Tire data (4 values: FL, FR, RL, RR)
+                    "tyre_pressure_fl": phys.wheelsPressure[0],
+                    "tyre_pressure_fr": phys.wheelsPressure[1],
+                    "tyre_pressure_rl": phys.wheelsPressure[2],
+                    "tyre_pressure_rr": phys.wheelsPressure[3],
+                    "tyre_temp_fl": phys.tyreCoreTemperature[0],
+                    "tyre_temp_fr": phys.tyreCoreTemperature[1],
+                    "tyre_temp_rl": phys.tyreCoreTemperature[2],
+                    "tyre_temp_rr": phys.tyreCoreTemperature[3],
                 }
 
                 # Feed sample into lap buffer
@@ -265,6 +274,15 @@ class AcTelemetryWorker(QtCore.QThread):
                     rpms=phys.rpms,
                     brake=phys.brake,
                     throttle=phys.gas,
+                    # Tire data
+                    tyre_pressure_fl=phys.wheelsPressure[0],
+                    tyre_pressure_fr=phys.wheelsPressure[1],
+                    tyre_pressure_rl=phys.wheelsPressure[2],
+                    tyre_pressure_rr=phys.wheelsPressure[3],
+                    tyre_temp_fl=phys.tyreCoreTemperature[0],
+                    tyre_temp_fr=phys.tyreCoreTemperature[1],
+                    tyre_temp_rl=phys.tyreCoreTemperature[2],
+                    tyre_temp_rr=phys.tyreCoreTemperature[3],
                 )
 
                 # Emit real-time sample for live visualization

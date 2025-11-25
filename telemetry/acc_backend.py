@@ -475,6 +475,15 @@ class AccTelemetryWorker(QtCore.QThread):
             "rpms": 0,  # ACC doesn't expose RPM directly
             "brake": 0,  # Would need physics data
             "throttle": 0,  # Would need physics data
+            # Tire data not available in ACC broadcasting API
+            "tyre_pressure_fl": 0,
+            "tyre_pressure_fr": 0,
+            "tyre_pressure_rl": 0,
+            "tyre_pressure_rr": 0,
+            "tyre_temp_fl": 0,
+            "tyre_temp_fr": 0,
+            "tyre_temp_rl": 0,
+            "tyre_temp_rr": 0,
         }
         self.current_lap_samples[car_index].append(sample)
 

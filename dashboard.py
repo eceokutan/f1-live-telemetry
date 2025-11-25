@@ -24,7 +24,7 @@ import matplotlib.cm as cm
 # ------------------ Generic Matplotlib Canvas for Time Series ------------------ #
 
 class TimeSeriesCanvas(FigureCanvas):
-    def __init__(self, title: str, parent=None, width=4, height=2, dpi=100):
+    def __init__(self, title: str, parent=None, width=4, height=1.5, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
@@ -38,19 +38,19 @@ class TimeSeriesCanvas(FigureCanvas):
 
         for spine in self.ax.spines.values():
             spine.set_color("#CCCCCC")
-        self.ax.tick_params(colors="#CCCCCC")
+        self.ax.tick_params(colors="#CCCCCC", labelsize=7)
         self.ax.xaxis.label.set_color("#CCCCCC")
         self.ax.yaxis.label.set_color("#CCCCCC")
         self.ax.title.set_color("#FFFFFF")
 
         self.title = title
-        self.ax.set_title(title, fontsize=9)
+        self.ax.set_title(title, fontsize=8)
         self.ax.grid(True, color="#333333", alpha=0.6)
-        self.ax.set_xlabel("Time [s]", fontsize=8)
+        self.ax.set_xlabel("Time [s]", fontsize=7)
 
         self.line, = self.ax.plot([], [], linewidth=1.5, color="#6FA8FF")
 
-        self.fig.tight_layout(pad=1.0)
+        self.fig.tight_layout(pad=0.5)
 
     def update_data(self, t: np.ndarray, y: np.ndarray):
         """
@@ -59,6 +59,60 @@ class TimeSeriesCanvas(FigureCanvas):
         if t.size == 0 or y.size == 0:
             return
         self.line.set_data(t, y)
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.draw()
+
+
+# ------------------ Multi-Line Time Series (for Tires) ------------------ #
+
+class MultiLineCanvas(FigureCanvas):
+    def __init__(self, title: str, labels: list, parent=None, width=4, height=1.5, dpi=100):
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        self.ax = self.fig.add_subplot(111)
+        super().__init__(self.fig)
+        self.setParent(parent)
+
+        bg = "#111111"
+        ax_bg = "#181818"
+
+        self.fig.patch.set_facecolor(bg)
+        self.ax.set_facecolor(ax_bg)
+
+        for spine in self.ax.spines.values():
+            spine.set_color("#CCCCCC")
+        self.ax.tick_params(colors="#CCCCCC", labelsize=7)
+        self.ax.xaxis.label.set_color("#CCCCCC")
+        self.ax.yaxis.label.set_color("#CCCCCC")
+        self.ax.title.set_color("#FFFFFF")
+
+        self.title = title
+        self.ax.set_title(title, fontsize=8)
+        self.ax.grid(True, color="#333333", alpha=0.6)
+        self.ax.set_xlabel("Time [s]", fontsize=7)
+
+        # Create lines for each data series (FL, FR, RL, RR)
+        colors = ["#FF6B6B", "#4ECDC4", "#FFD93D", "#6BCB77"]
+        self.lines = []
+        for label, color in zip(labels, colors):
+            line, = self.ax.plot([], [], linewidth=1.5, color=color, label=label)
+            self.lines.append(line)
+
+        self.ax.legend(loc="upper right", fontsize=6, framealpha=0.8)
+        self.fig.tight_layout(pad=0.5)
+
+    def update_data(self, t: np.ndarray, y_data: list):
+        """
+        Update multiple lines.
+        y_data: list of numpy arrays, one for each line
+        """
+        if t.size == 0:
+            return
+
+        for line, y in zip(self.lines, y_data):
+            if y.size > 0:
+                line.set_data(t, y)
+
         self.ax.relim()
         self.ax.autoscale_view()
         self.draw()
@@ -152,7 +206,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("AC Telemetry Dashboard – Prototype")
-        self.resize(1400, 800)
+        self.resize(1600, 900)
 
         # Real-time data buffers for current lap
         self.current_lap_samples = []
@@ -209,27 +263,41 @@ class MainWindow(QMainWindow):
 
         # ----- Middle column: Graphs -----
         mid_col = QVBoxLayout()
-        mid_col.setSpacing(6)
+        mid_col.setSpacing(4)
 
         title_label = QLabel("Live Telemetry Analysis")
         title_label.setAlignment(QtCore.Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         mid_col.addWidget(title_label)
 
-        # Graph canvases
-        self.speed_canvas = TimeSeriesCanvas("Speed", self)
+        # Graph canvases (made more compact)
+        self.speed_canvas = TimeSeriesCanvas("Speed [km/h]", self)
         self.gear_canvas = TimeSeriesCanvas("Gear", self)
         self.rpm_canvas = TimeSeriesCanvas("RPM", self)
-        self.brake_canvas = TimeSeriesCanvas("Brake", self)
+        self.brake_canvas = TimeSeriesCanvas("Brake [%]", self)
+
+        # Tire graphs (multi-line: FL, FR, RL, RR)
+        self.tyre_pressure_canvas = MultiLineCanvas(
+            "Tyre Pressure [PSI]",
+            ["FL", "FR", "RL", "RR"],
+            self
+        )
+        self.tyre_temp_canvas = MultiLineCanvas(
+            "Tyre Temperature [°C]",
+            ["FL", "FR", "RL", "RR"],
+            self
+        )
 
         mid_col.addWidget(self.speed_canvas)
         mid_col.addWidget(self.gear_canvas)
         mid_col.addWidget(self.rpm_canvas)
         mid_col.addWidget(self.brake_canvas)
+        mid_col.addWidget(self.tyre_pressure_canvas)
+        mid_col.addWidget(self.tyre_temp_canvas)
 
         # Add Graph button
         add_graph_btn = QPushButton("+ Add Graph")
-        add_graph_btn.setFixedHeight(32)
+        add_graph_btn.setFixedHeight(24)
         mid_col.addWidget(add_graph_btn)
 
         # ----- Right column: Driver info + transcripts -----
@@ -321,9 +389,9 @@ class MainWindow(QMainWindow):
         right_col.addWidget(comment_group)
 
         # ----- Add columns to root layout -----
-        root_layout.addLayout(left_col, 3)   # Increased from 2
-        root_layout.addLayout(mid_col, 4)    # Increased from 3
-        root_layout.addLayout(right_col, 2)  # Same
+        root_layout.addLayout(left_col, 3)   # Track map + lap table
+        root_layout.addLayout(mid_col, 5)    # 6 graphs (speed, gear, rpm, brake, tyre pressure, tyre temp)
+        root_layout.addLayout(right_col, 2)  # Session info + transcripts
 
         # Optional dark-ish background for sci-fi vibes
         self._apply_basic_style()
@@ -471,6 +539,17 @@ class MainWindow(QMainWindow):
         rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
         brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)
 
+        # Tire data (FL, FR, RL, RR)
+        tyre_pressure_fl = np.array([s.get("tyre_pressure_fl", 0) for s in self.current_lap_samples], dtype=float)
+        tyre_pressure_fr = np.array([s.get("tyre_pressure_fr", 0) for s in self.current_lap_samples], dtype=float)
+        tyre_pressure_rl = np.array([s.get("tyre_pressure_rl", 0) for s in self.current_lap_samples], dtype=float)
+        tyre_pressure_rr = np.array([s.get("tyre_pressure_rr", 0) for s in self.current_lap_samples], dtype=float)
+
+        tyre_temp_fl = np.array([s.get("tyre_temp_fl", 0) for s in self.current_lap_samples], dtype=float)
+        tyre_temp_fr = np.array([s.get("tyre_temp_fr", 0) for s in self.current_lap_samples], dtype=float)
+        tyre_temp_rl = np.array([s.get("tyre_temp_rl", 0) for s in self.current_lap_samples], dtype=float)
+        tyre_temp_rr = np.array([s.get("tyre_temp_rr", 0) for s in self.current_lap_samples], dtype=float)
+
         # Update track map
         self.track_canvas.plot_track(xs, zs, speeds)
 
@@ -482,6 +561,14 @@ class MainWindow(QMainWindow):
         self.gear_canvas.update_data(times, gears)
         self.rpm_canvas.update_data(times, rpms)
         self.brake_canvas.update_data(times, brakes * 100)  # Scale 0-1 to 0-100%
+
+        # Update tire graphs
+        self.tyre_pressure_canvas.update_data(times, [
+            tyre_pressure_fl, tyre_pressure_fr, tyre_pressure_rl, tyre_pressure_rr
+        ])
+        self.tyre_temp_canvas.update_data(times, [
+            tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
+        ])
 
     def handle_lap_complete(self, lap_id, samples):
         """
