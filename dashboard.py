@@ -514,11 +514,17 @@ class MainWindow(QMainWindow):
 
         # If lap changed, clear current lap buffer
         if self.current_lap_id is None or lap_id != self.current_lap_id:
+            print(f"🔄 UI: Starting new lap buffer (Lap {lap_id + 1})")
             self.current_lap_samples = []
             self.current_lap_id = lap_id
 
         # Add sample to current lap buffer
         self.current_lap_samples.append(sample)
+
+        # Debug: Print first sample received
+        if len(self.current_lap_samples) == 1:
+            print(f"📥 UI: First sample received - Speed: {sample.get('speed', 0):.1f} km/h, "
+                  f"Gear: {sample.get('gear', 0)}, RPM: {sample.get('rpms', 0)}")
 
         # Update visualizations with current lap data (throttle updates to avoid overload)
         # Only update every 5 samples (~12 updates/sec at 60Hz)
@@ -529,6 +535,10 @@ class MainWindow(QMainWindow):
         """Update all visualizations with current lap data"""
         if len(self.current_lap_samples) < 2:
             return
+
+        # Debug: Print visualization update
+        if len(self.current_lap_samples) % 50 == 0:  # Print every ~4 seconds
+            print(f"🎨 UI: Updating visualizations ({len(self.current_lap_samples)} samples buffered)")
 
         # Extract arrays from samples
         xs = np.array([s["x"] for s in self.current_lap_samples], dtype=float)
@@ -579,6 +589,8 @@ class MainWindow(QMainWindow):
         """
         if not samples:
             return
+
+        print(f"🏁 UI: Lap {lap_id} completed with {len(samples)} samples")
 
         times = np.array([s["t"] for s in samples], dtype=float)
 

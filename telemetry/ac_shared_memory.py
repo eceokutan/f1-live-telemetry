@@ -189,6 +189,9 @@ class AcTelemetryWorker(QtCore.QThread):
         self.running = False
 
     def run(self):
+        print("\n" + "="*60)
+        print("🔍 AC TELEMETRY WORKER STARTING")
+        print("="*60)
         self.status_update.emit("Connecting to Assetto Corsa...")
 
         mm_phys = open_shared_memory(SHM_NAME_PHYSICS, PHYSICS_SIZE)
@@ -196,9 +199,12 @@ class AcTelemetryWorker(QtCore.QThread):
         mm_static = open_shared_memory(SHM_NAME_STATIC, STATIC_SIZE)
 
         if mm_phys is None or mm_graph is None:
+            print("❌ ERROR: Could not connect to AC shared memory.")
+            print("   Make sure Assetto Corsa is running and you're in a session.")
             self.status_update.emit("ERROR: Could not connect to AC shared memory.")
             return
 
+        print("✅ Successfully connected to AC shared memory!")
         self.status_update.emit("Connected! Start driving...")
 
         # Read static info once and emit it
@@ -215,9 +221,13 @@ class AcTelemetryWorker(QtCore.QThread):
                     "max_rpm": static_data.maxRpm,
                     "max_fuel": static_data.maxFuel,
                 }
+                print(f"📊 Session Info:")
+                print(f"   Track: {session_data['track']} ({session_data['track_config']})")
+                print(f"   Car: {session_data['car_model']}")
+                print(f"   Driver: {session_data['player_name']} {session_data['player_surname']}")
                 self.session_info_update.emit(session_data)
             except Exception as e:
-                print(f"Warning: Could not read static info: {e}")
+                print(f"⚠️  Warning: Could not read static info: {e}")
 
         # LapBuffer with callback that emits a Qt signal
         lap_buffer = LapBuffer(
@@ -227,6 +237,11 @@ class AcTelemetryWorker(QtCore.QThread):
         t0 = time.time()
         self.running = True
         frame_count = 0
+        last_debug_time = time.time()
+        last_lap_id = -1
+
+        print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
+        print("   Waiting for car data...\n")
 
         try:
             while self.running:
@@ -240,6 +255,17 @@ class AcTelemetryWorker(QtCore.QThread):
                 z = gfx.carCoordinates[2]
                 lap_id = gfx.completedLaps
                 speed = phys.speedKmh
+
+                # Debug print every 60 frames (~1 second at 60Hz)
+                frame_count += 1
+                if frame_count % 60 == 0:
+                    print(f"📦 Packet #{frame_count:04d} | Lap: {lap_id+1} | Speed: {speed:6.1f} km/h | "
+                          f"Gear: {phys.gear} | RPM: {phys.rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
+
+                # Debug print when lap changes
+                if lap_id != last_lap_id and last_lap_id != -1:
+                    print(f"\n🏁 LAP COMPLETED! Lap {last_lap_id+1} -> {lap_id+1}\n")
+                last_lap_id = lap_id
 
                 # Create sample dict
                 sample_data = {
@@ -289,7 +315,6 @@ class AcTelemetryWorker(QtCore.QThread):
                 self.realtime_sample.emit(sample_data)
 
                 # Emit live data every 10 frames (~6 times/sec at 60Hz)
-                frame_count += 1
                 if frame_count % 10 == 0:
                     live_data = {
                         "current_lap": lap_id + 1,
