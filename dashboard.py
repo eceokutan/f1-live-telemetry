@@ -159,44 +159,67 @@ class TrackMapCanvas(FigureCanvas):
         Plot the track as a series of line segments colored by speed.
         xs, zs, speeds: 1D numpy arrays of same length.
         """
-        self.ax.clear()
-        self.ax.set_aspect("equal", adjustable="datalim")
-        self.ax.set_title("Location Map", fontsize=10)
-        self.ax.set_xlabel("X [m]", fontsize=8)
-        self.ax.set_ylabel("Z [m]", fontsize=8)
-        self.ax.grid(True, color="#333333", alpha=0.6)
+        try:
+            # Remove old line collection if it exists
+            if self.line_collection is not None:
+                try:
+                    self.line_collection.remove()
+                except:
+                    pass
 
-        if xs.size < 2:
-            self.draw()
-            return
+            # Clear axis only if needed (for style reset)
+            if not hasattr(self, '_initialized'):
+                self.ax.clear()
+                self.ax.set_aspect("equal", adjustable="datalim")
+                self.ax.set_title("Location Map", fontsize=10)
+                self.ax.set_xlabel("X [m]", fontsize=8)
+                self.ax.set_ylabel("Z [m]", fontsize=8)
+                self.ax.grid(True, color="#333333", alpha=0.6)
+                self._initialized = True
 
-        points = np.array([xs, zs]).T.reshape(-1, 1, 2)
-        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            if xs.size < 2:
+                self.draw_idle()
+                return
 
-        norm = Normalize(vmin=np.min(speeds), vmax=np.max(speeds))
-        cmap = cm.get_cmap("Blues")
+            points = np.array([xs, zs]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
-        lc = LineCollection(
-            segments,
-            cmap=cmap,
-            norm=norm,
-            linewidth=2.5,
-        )
-        lc.set_array(speeds[:-1])
+            norm = Normalize(vmin=np.min(speeds), vmax=np.max(speeds))
+            cmap = cm.get_cmap("Blues")
 
-        self.line_collection = lc
-        self.ax.add_collection(lc)
+            lc = LineCollection(
+                segments,
+                cmap=cmap,
+                norm=norm,
+                linewidth=2.5,
+            )
+            lc.set_array(speeds[:-1])
 
-        self.ax.set_xlim(xs.min() - 10, xs.max() + 10)
-        self.ax.set_ylim(zs.min() - 10, zs.max() + 10)
+            self.line_collection = lc
+            self.ax.add_collection(lc)
 
-        if self.colorbar is not None:
-            self.colorbar.remove()
-        self.colorbar = self.fig.colorbar(
-            lc, ax=self.ax, fraction=0.046, pad=0.04, label="Speed [km/h]"
-        )
+            self.ax.set_xlim(xs.min() - 10, xs.max() + 10)
+            self.ax.set_ylim(zs.min() - 10, zs.max() + 10)
 
-        self.draw()
+            # Only create colorbar once
+            if self.colorbar is None:
+                try:
+                    self.colorbar = self.fig.colorbar(
+                        lc, ax=self.ax, fraction=0.046, pad=0.04, label="Speed [km/h]"
+                    )
+                except:
+                    pass  # Skip colorbar if it fails
+            else:
+                # Update existing colorbar
+                try:
+                    self.colorbar.update_normal(lc)
+                except:
+                    pass  # Skip if update fails
+
+            self.draw_idle()  # Use draw_idle instead of draw for better performance
+        except Exception as e:
+            # Silently fail to avoid crashing the UI
+            pass
 
 
 # ------------------ Main Dashboard Window ------------------ #
@@ -540,45 +563,63 @@ class MainWindow(QMainWindow):
         if len(self.current_lap_samples) % 50 == 0:  # Print every ~4 seconds
             print(f"🎨 UI: Updating visualizations ({len(self.current_lap_samples)} samples buffered)")
 
-        # Extract arrays from samples
-        xs = np.array([s["x"] for s in self.current_lap_samples], dtype=float)
-        zs = np.array([s["z"] for s in self.current_lap_samples], dtype=float)
-        speeds = np.array([s["speed"] for s in self.current_lap_samples], dtype=float)
-        times = np.array([s["t"] for s in self.current_lap_samples], dtype=float)
-        gears = np.array([s.get("gear", 0) for s in self.current_lap_samples], dtype=float)
-        rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
-        brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)
+        try:
+            # Extract arrays from samples
+            xs = np.array([s["x"] for s in self.current_lap_samples], dtype=float)
+            zs = np.array([s["z"] for s in self.current_lap_samples], dtype=float)
+            speeds = np.array([s["speed"] for s in self.current_lap_samples], dtype=float)
+            times = np.array([s["t"] for s in self.current_lap_samples], dtype=float)
+            gears = np.array([s.get("gear", 0) for s in self.current_lap_samples], dtype=float)
+            rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
+            brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)
 
-        # Tire data (FL, FR, RL, RR)
-        tyre_pressure_fl = np.array([s.get("tyre_pressure_fl", 0) for s in self.current_lap_samples], dtype=float)
-        tyre_pressure_fr = np.array([s.get("tyre_pressure_fr", 0) for s in self.current_lap_samples], dtype=float)
-        tyre_pressure_rl = np.array([s.get("tyre_pressure_rl", 0) for s in self.current_lap_samples], dtype=float)
-        tyre_pressure_rr = np.array([s.get("tyre_pressure_rr", 0) for s in self.current_lap_samples], dtype=float)
+            # Tire data (FL, FR, RL, RR)
+            tyre_pressure_fl = np.array([s.get("tyre_pressure_fl", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_pressure_fr = np.array([s.get("tyre_pressure_fr", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_pressure_rl = np.array([s.get("tyre_pressure_rl", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_pressure_rr = np.array([s.get("tyre_pressure_rr", 0) for s in self.current_lap_samples], dtype=float)
 
-        tyre_temp_fl = np.array([s.get("tyre_temp_fl", 0) for s in self.current_lap_samples], dtype=float)
-        tyre_temp_fr = np.array([s.get("tyre_temp_fr", 0) for s in self.current_lap_samples], dtype=float)
-        tyre_temp_rl = np.array([s.get("tyre_temp_rl", 0) for s in self.current_lap_samples], dtype=float)
-        tyre_temp_rr = np.array([s.get("tyre_temp_rr", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_temp_fl = np.array([s.get("tyre_temp_fl", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_temp_fr = np.array([s.get("tyre_temp_fr", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_temp_rl = np.array([s.get("tyre_temp_rl", 0) for s in self.current_lap_samples], dtype=float)
+            tyre_temp_rr = np.array([s.get("tyre_temp_rr", 0) for s in self.current_lap_samples], dtype=float)
 
-        # Update track map
-        self.track_canvas.plot_track(xs, zs, speeds)
+            # Normalize times to start from 0
+            times = times - times[0]
 
-        # Normalize times to start from 0
-        times = times - times[0]
+            # Update track map
+            try:
+                self.track_canvas.plot_track(xs, zs, speeds)
+            except Exception as e:
+                if len(self.current_lap_samples) % 50 == 0:
+                    print(f"⚠️  Warning: Track map update failed: {e}")
 
-        # Update time-series graphs
-        self.speed_canvas.update_data(times, speeds)
-        self.gear_canvas.update_data(times, gears)
-        self.rpm_canvas.update_data(times, rpms)
-        self.brake_canvas.update_data(times, brakes * 100)  # Scale 0-1 to 0-100%
+            # Update time-series graphs
+            try:
+                self.speed_canvas.update_data(times, speeds)
+                self.gear_canvas.update_data(times, gears)
+                self.rpm_canvas.update_data(times, rpms)
+                self.brake_canvas.update_data(times, brakes * 100)  # Scale 0-1 to 0-100%
+            except Exception as e:
+                if len(self.current_lap_samples) % 50 == 0:
+                    print(f"⚠️  Warning: Time-series graph update failed: {e}")
 
-        # Update tire graphs
-        self.tyre_pressure_canvas.update_data(times, [
-            tyre_pressure_fl, tyre_pressure_fr, tyre_pressure_rl, tyre_pressure_rr
-        ])
-        self.tyre_temp_canvas.update_data(times, [
-            tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
-        ])
+            # Update tire graphs
+            try:
+                self.tyre_pressure_canvas.update_data(times, [
+                    tyre_pressure_fl, tyre_pressure_fr, tyre_pressure_rl, tyre_pressure_rr
+                ])
+                self.tyre_temp_canvas.update_data(times, [
+                    tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
+                ])
+            except Exception as e:
+                if len(self.current_lap_samples) % 50 == 0:
+                    print(f"⚠️  Warning: Tire graph update failed: {e}")
+
+        except Exception as e:
+            print(f"❌ Error in visualization update: {e}")
+            import traceback
+            traceback.print_exc()
 
     def handle_lap_complete(self, lap_id, samples):
         """
