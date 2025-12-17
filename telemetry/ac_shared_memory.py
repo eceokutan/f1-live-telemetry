@@ -241,7 +241,8 @@ class AcTelemetryWorker(QtCore.QThread):
         last_lap_id = -1
 
         print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
-        print("   Waiting for car data...\n")
+        print("   📍 IMPORTANT: Make sure you're IN THE CAR and DRIVING!")
+        print("   📍 Car coordinates will only appear when physics is active\n")
 
         try:
             while self.running:
@@ -256,11 +257,27 @@ class AcTelemetryWorker(QtCore.QThread):
                 lap_id = gfx.completedLaps
                 speed = phys.speedKmh
 
+                # Convert AC gear to display gear
+                # AC: 0=R, 1=N, 2=1st, 3=2nd, etc.
+                # Display: -1=R, 0=N, 1=1st, 2=2nd, etc.
+                raw_gear = phys.gear
+                if raw_gear == 0:
+                    display_gear = -1  # Reverse
+                elif raw_gear == 1:
+                    display_gear = 0   # Neutral
+                else:
+                    display_gear = raw_gear - 1  # 1st, 2nd, 3rd, etc.
+
                 # Debug print every 60 frames (~1 second at 60Hz)
                 frame_count += 1
                 if frame_count % 60 == 0:
                     print(f"📦 Packet #{frame_count:04d} | Lap: {lap_id+1} | Speed: {speed:6.1f} km/h | "
-                          f"Gear: {phys.gear} | RPM: {phys.rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
+                          f"Gear: {display_gear} (raw:{raw_gear}) | RPM: {phys.rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
+
+                # Debug warning if coordinates are still zero after 5 seconds
+                if frame_count == 300 and x == 0 and z == 0:
+                    print("⚠️  WARNING: Car coordinates still (0,0) after 5 seconds!")
+                    print("   Make sure you're IN THE CAR and DRIVING (not in menus or paused)")
 
                 # Debug print when lap changes
                 if lap_id != last_lap_id and last_lap_id != -1:
@@ -274,7 +291,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     "x": x,
                     "z": z,
                     "speed": speed,
-                    "gear": phys.gear,
+                    "gear": display_gear,
                     "rpms": phys.rpms,
                     "brake": phys.brake,
                     "throttle": phys.gas,
@@ -296,7 +313,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     x=x,
                     z=z,
                     speed_kmh=speed,
-                    gear=phys.gear,
+                    gear=display_gear,
                     rpms=phys.rpms,
                     brake=phys.brake,
                     throttle=phys.gas,
@@ -319,7 +336,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     live_data = {
                         "current_lap": lap_id + 1,
                         "speed": speed,
-                        "gear": phys.gear,
+                        "gear": raw_gear,  # Use raw for live display (dashboard will convert)
                         "rpm": phys.rpms,
                         "fuel": phys.fuel,
                         "position": gfx.position,
