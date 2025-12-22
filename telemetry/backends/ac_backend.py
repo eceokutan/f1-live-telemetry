@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from PyQt5 import QtCore
 
-from .lap_buffer import LapBuffer
+from telemetry.lap_buffer import LapBuffer
 
 
 # ===================== PHYSICS SHARED MEMORY =====================

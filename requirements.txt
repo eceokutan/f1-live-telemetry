@@ -1,4 +1,51 @@
-PyQt5
-matplotlib
-numpy
-accapi
+# F1 Telemetry Dashboard - Dependencies
+# Supports Assetto Corsa, ACC, and AI Race Engineering
+
+# =============================================================================
+# UI Framework
+# =============================================================================
+PyQt5>=5.15.0
+matplotlib>=3.5.0
+numpy>=1.21.0
+
+# =============================================================================
+# Telemetry Backends
+# =============================================================================
+accapi>=0.1.0  # ACC UDP broadcasting
+
+# =============================================================================
+# AI Race Engineer (Optional - requires IBM WatsonX)
+# =============================================================================
+# Data validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# IBM Watson services
+ibm-watson>=8.0.0
+ibm-cloud-sdk-core>=3.18.0
+
+# LLM framework
+langchain>=0.1.0
+langchain-ibm>=0.1.0
+
+# Utilities
+tenacity>=8.2.0
+python-dotenv>=1.0.0
+
+# =============================================================================
+# Voice Input (Future - Optional)
+# =============================================================================
+# pyaudio>=0.2.13
+# torch>=2.0.0
+# silero-vad>=4.0.0
+
+# =============================================================================
+# Optional: WebSocket/LiveKit (Future)
+# =============================================================================
+# fastapi>=0.104.0
+# uvicorn[standard]>=0.24.0
+# websockets>=12.0
+# livekit>=0.9.0
+# livekit-api>=0.4.0
+# httpx>=0.25.0
+# pyyaml>=6.0.0

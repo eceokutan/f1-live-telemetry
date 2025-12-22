@@ -29,9 +29,20 @@ python integrated_telemetry.py
 python integrated_telemetry.py --acc
 ```
 
+### Run with AI Race Engineer (experimental)
+```bash
+python integrated_telemetry.py --ai
+```
+
+Combine with game selection:
+```bash
+python integrated_telemetry.py --acc --ai
+```
+
 **Prerequisites:**
 - For AC: Game must be running with shared memory enabled (Windows only)
 - For ACC: Game must be running with `broadcasting.json` configured and you must be on track
+- For AI: Requires IBM WatsonX credentials in `.env` file (see `.env.example`)
 
 ## Architecture
 
@@ -93,6 +104,32 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   - These fields will show zeros in the UI when using ACC backend
   - Only position (X/Y/Z), speed, gear, and lap timing are available via broadcasting API
   - For full telemetry, would need ACC's physics shared memory plugin (different API)
+
+**[telemetry/ai_race_engineer.py](telemetry/ai_race_engineer.py)** - AI Race Engineer (experimental)
+- `AIRaceEngineerWorker` - QThread that integrates Eima's AI race engineer with AC telemetry
+- Uses IBM WatsonX (Granite 3-8B-Instruct) for LLM-powered race engineering commentary
+- **Components integrated from eima_ai/**:
+  - `TelemetryAgent` - Rule-based event detection (<50ms latency)
+    - Detects fuel warnings/critical (< 5/2 laps remaining)
+    - Detects tire temperature warnings/critical (> 100°C/110°C)
+    - Detects gap changes (> 1.0s threshold)
+    - Detects lap/sector completions
+  - `RaceEngineerAgent` - LLM-powered response generation (~2000ms latency)
+    - Generates contextual proactive alerts for detected events
+    - Maintains conversation history (last 3 exchanges)
+    - Respects configurable verbosity levels (minimal, moderate, verbose)
+  - `LiveSessionContext` - In-memory session state
+    - Maintains telemetry buffer (60s rolling window)
+    - Tracks fuel consumption per lap
+    - Manages active alerts and proactive message timing
+- **Data flow**:
+  1. AC telemetry → AIRaceEngineerWorker.process_telemetry()
+  2. Convert dict to Pydantic TelemetryData model
+  3. TelemetryAgent detects events (rule-based, <50ms)
+  4. RaceEngineerAgent generates AI response (LLM call, ~2s)
+  5. Emit ai_commentary signal → UI displays in "Commentator Transcript" panel
+- **Environment variables required**: WATSONX_API_KEY, WATSONX_PROJECT_ID
+- **Optional**: Works best with AC (full telemetry), degraded with ACC (limited telemetry)
 
 ### Data Flow
 
