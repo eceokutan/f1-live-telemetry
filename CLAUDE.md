@@ -21,22 +21,22 @@ pip install -r requirements.txt
 
 ### Run with Assetto Corsa (default)
 ```bash
-python integrated_telemetry.py
+python main.py
 ```
 
 ### Run with ACC
 ```bash
-python integrated_telemetry.py --acc
+python main.py --acc
 ```
 
 ### Run with AI Race Engineer (experimental)
 ```bash
-python integrated_telemetry.py --ai
+python main.py --ai
 ```
 
 Combine with game selection:
 ```bash
-python integrated_telemetry.py --acc --ai
+python main.py --acc --ai
 ```
 
 **Prerequisites:**
@@ -50,17 +50,24 @@ The codebase follows a modular backend architecture where each sim game has its 
 
 ### Core Components
 
-**[integrated_telemetry.py](integrated_telemetry.py)** - Entry point
+**[main.py](main.py)** - Entry point
 - Initializes PyQt5 application
-- Selects backend based on command-line args (`--acc` flag)
+- Selects backend based on command-line args (`--acc`, `--ai` flags)
 - Connects backend signals to UI slots
-- Manages application lifecycle
+- Manages application lifecycle and clean shutdown
 
-**[dashboard.py](dashboard.py)** - Main UI window (game-agnostic)
-- `MainWindow` - PyQt5 main window with lap table, session info, and live data panels
-- `TrackMapCanvas` - Matplotlib track visualization colored by speed
-- `TimeSeriesCanvas` - Generic time-series graphs (speed, RPM, brake, gear)
-- Receives lap data via Qt signals and updates all visualizations
+**UI Components** - [ui/](ui/)
+- **[ui/main_window.py](ui/main_window.py)** - `MainWindow` class
+  - PyQt5 main window with lap table, session info, live data panels, and AI transcripts
+  - Handles real-time visualization updates (~12Hz) and lap completion events
+  - Displays AI commentary in "Commentator Transcript" panel
+- **[ui/canvases/track_map.py](ui/canvases/track_map.py)** - `TrackMapCanvas`
+  - Matplotlib track visualization with speed-colored path
+- **[ui/canvases/time_series.py](ui/canvases/time_series.py)** - `TimeSeriesCanvas`
+  - Generic single-line time-series graphs (speed, RPM, brake, gear)
+- **[ui/canvases/multi_line.py](ui/canvases/multi_line.py)** - `MultiLineCanvas`
+  - Multi-line time-series for tire data (FL, FR, RL, RR)
+- **[ui/styles.py](ui/styles.py)** - Centralized theme and styling constants
 
 **[telemetry/lap_buffer.py](telemetry/lap_buffer.py)** - Lap detection and buffering
 - `LapBuffer` - Collects samples until lap completes (when `completedLaps` increments)
@@ -76,7 +83,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 - `live_data_update(dict data)` - Real-time telemetry for UI panels (current speed, gear, fuel, etc.)
 - `realtime_sample(dict sample)` - Emitted every frame (~60Hz) with telemetry sample for live visualization
 
-**[telemetry/ac_shared_memory.py](telemetry/ac_shared_memory.py)** - Assetto Corsa backend
+**[telemetry/backends/ac_backend.py](telemetry/backends/ac_backend.py)** - Assetto Corsa backend
 - `AcTelemetryWorker` - Reads from AC's Windows named shared memory blocks:
   - `acpmf_static` - Static session info (track, car model, player name)
   - `acpmf_physics` - Physics data (speed, RPM, throttle, brake, gear, fuel, tire pressure, tire temperature)
@@ -86,7 +93,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 - **Full telemetry available:** RPM, throttle, brake, tire pressure (PSI), tire temperature (°C) for all 4 tires [FL, FR, RL, RR]
 - **Windows only** - Requires AC running in same user session
 
-**[telemetry/acc_backend.py](telemetry/acc_backend.py)** - ACC backend
+**[telemetry/backends/acc_backend.py](telemetry/backends/acc_backend.py)** - ACC backend
 - `AccTelemetryWorker` - Connects to ACC via UDP broadcasting protocol
 - `AccPacketParser` - Parses binary UDP packets:
   - `REGISTRATION_RESULT` - Connection handshake
@@ -105,7 +112,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   - Only position (X/Y/Z), speed, gear, and lap timing are available via broadcasting API
   - For full telemetry, would need ACC's physics shared memory plugin (different API)
 
-**[telemetry/ai_race_engineer.py](telemetry/ai_race_engineer.py)** - AI Race Engineer (experimental)
+**[ai/race_engineer.py](ai/race_engineer.py)** - AI Race Engineer (experimental)
 - `AIRaceEngineerWorker` - QThread that integrates Eima's AI race engineer with AC telemetry
 - Uses IBM WatsonX (Granite 3-8B-Instruct) for LLM-powered race engineering commentary
 - **Components integrated from eima_ai/**:

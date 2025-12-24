@@ -11,7 +11,7 @@ numpy>=1.21.0
 # =============================================================================
 # Telemetry Backends
 # =============================================================================
-accapi>=0.1.0  # ACC UDP broadcasting
+accapi>=0.0.3  # ACC UDP broadcasting
 
 # =============================================================================
 # AI Race Engineer (Optional - requires IBM WatsonX)
@@ -33,11 +33,12 @@ tenacity>=8.2.0
 python-dotenv>=1.0.0
 
 # =============================================================================
-# Voice Input (Future - Optional)
+# Voice Input (Silero VAD + Watson STT)
 # =============================================================================
-# pyaudio>=0.2.13
-# torch>=2.0.0
-# silero-vad>=4.0.0
+pyaudio>=0.2.13
+torch>=2.0.0
+torchaudio>=2.0.0
+# Note: Silero VAD is loaded via torch.hub, no separate install needed
 
 # =============================================================================
 # Optional: WebSocket/LiveKit (Future)

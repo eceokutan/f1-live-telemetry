@@ -13,7 +13,19 @@ Usage:
 """
 import sys
 import os
+import logging
 from PyQt5 import QtWidgets
+
+# Configure logging FIRST - before any other imports
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(name)s: %(message)s',
+    stream=sys.stdout
+)
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 print("="*60)
 print("🚀 F1 TELEMETRY DASHBOARD STARTING...")
@@ -34,6 +46,15 @@ try:
 except ImportError as e:
     AI_AVAILABLE = False
     print(f"⚠️  AI Race Engineer not available: {e}")
+
+# Try to import voice input worker (optional)
+try:
+    from ai.voice_input import VoiceInputWorker
+    VOICE_AVAILABLE = True
+    print("✅ Voice Input module available")
+except ImportError as e:
+    VOICE_AVAILABLE = False
+    print(f"⚠️  Voice Input not available: {e}")
 
 print("✅ All core modules imported successfully")
 
@@ -81,6 +102,7 @@ def main(game: str = "ac", enable_ai: bool = False):
 
     # Initialize AI race engineer (optional)
     ai_thread = None
+    voice_thread = None
     if enable_ai and AI_AVAILABLE:
         print("🤖 Initializing AI Race Engineer...")
 
@@ -88,6 +110,8 @@ def main(game: str = "ac", enable_ai: bool = False):
         watsonx_url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
         watsonx_project_id = os.getenv("WATSONX_PROJECT_ID", "")
         watsonx_api_key = os.getenv("WATSONX_API_KEY", "")
+        watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
+        watson_stt_url = os.getenv("WATSON_STT_URL", "")
 
         if not watsonx_api_key or not watsonx_project_id:
             print("⚠️  AI Race Engineer requires WATSONX_API_KEY and WATSONX_PROJECT_ID")
@@ -105,6 +129,7 @@ def main(game: str = "ac", enable_ai: bool = False):
 
                 # Connect AI signals
                 ai_thread.ai_commentary.connect(window.handle_ai_commentary)
+                ai_thread.driver_query_received.connect(window.handle_driver_query)
                 ai_thread.status_update.connect(lambda msg: print(f"[AI] {msg}"))
 
                 # Connect telemetry to AI worker
@@ -116,6 +141,36 @@ def main(game: str = "ac", enable_ai: bool = False):
                 # Start AI thread
                 ai_thread.start()
                 print("✅ AI Race Engineer started")
+
+                # Initialize voice input (if available and credentials present)
+                if VOICE_AVAILABLE and watson_stt_api_key and watson_stt_url:
+                    print("🎤 Initializing Voice Input...")
+                    try:
+                        voice_thread = VoiceInputWorker(
+                            watson_api_key=watson_stt_api_key,
+                            watson_url=watson_stt_url,
+                            model="en-US_BroadbandModel"
+                        )
+
+                        # Connect voice signals
+                        voice_thread.speech_detected.connect(ai_thread.process_driver_query)
+                        voice_thread.vad_state_changed.connect(window.handle_vad_state_change)
+                        voice_thread.status_update.connect(lambda msg: print(f"[Voice] {msg}"))
+                        voice_thread.error_occurred.connect(lambda err: print(f"[Voice Error] {err}"))
+
+                        # Start voice thread
+                        voice_thread.start()
+                        print("✅ Voice Input started")
+
+                    except Exception as e:
+                        print(f"⚠️  Failed to initialize Voice Input: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        voice_thread = None
+                elif VOICE_AVAILABLE:
+                    print("⚠️  Voice Input requires WATSON_STT_API_KEY and WATSON_STT_URL in .env")
+                else:
+                    print("⚠️  Voice Input module not available (missing dependencies)")
 
             except Exception as e:
                 print(f"⚠️  Failed to initialize AI Race Engineer: {e}")
@@ -134,7 +189,9 @@ def main(game: str = "ac", enable_ai: bool = False):
     window.show()
 
     print("\n" + "="*60)
-    if ai_thread:
+    if ai_thread and voice_thread:
+        print("✅ DASHBOARD READY - AI Race Engineer + Voice Input ACTIVE")
+    elif ai_thread:
         print("✅ DASHBOARD READY - AI Race Engineer ACTIVE")
     else:
         print("✅ DASHBOARD READY - Check AC for shared memory connection")
@@ -151,6 +208,10 @@ def main(game: str = "ac", enable_ai: bool = False):
     if ai_thread:
         ai_thread.stop()
         ai_thread.wait()
+
+    if voice_thread:
+        voice_thread.stop()
+        voice_thread.wait()
 
     print("👋 Goodbye!")
     sys.exit(result)

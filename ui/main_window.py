@@ -201,6 +201,13 @@ class MainWindow(QMainWindow):
         driver_layout.addWidget(self.last_lap_label)
         driver_layout.addWidget(self.best_lap_label)
 
+        driver_layout.addWidget(QLabel("─" * 30))
+
+        # Microphone status indicator
+        self.mic_status_label = QLabel("🎤 Mic: Ready")
+        self.mic_status_label.setStyleSheet("color: #888888;")  # Gray when idle
+        driver_layout.addWidget(self.mic_status_label)
+
         driver_layout.addStretch()
 
         # Communications transcript
@@ -399,25 +406,86 @@ class MainWindow(QMainWindow):
             trigger: Event that triggered the commentary
             priority: Priority level (0=CRITICAL, 1=HIGH, 2=MEDIUM, 3=LOW)
         """
-        priority_labels = {0: "🔴 CRITICAL", 1: "🟠 HIGH", 2: "🟡 MEDIUM", 3: "⚪ LOW"}
-        priority_label = priority_labels.get(priority, "⚪ INFO")
-
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        formatted_message = (
+        # Driver query responses go to Communications Transcript
+        if trigger == "driver_query" or trigger == "driver_query_error" or trigger == "driver_query_timeout":
+            formatted_response = (
+                f"<div style='margin-bottom: 8px;'>"
+                f"<span style='color: #888;'>[{timestamp}]</span> "
+                f"<span style='font-weight: bold; color: #FF6B6B;'>RACE ENGINEER:</span><br>"
+                f"<span style='color: #EEEEEE;'>{message}</span>"
+                f"</div>"
+            )
+
+            self.comms_text.append(formatted_response)
+
+            # Auto-scroll to bottom
+            cursor = self.comms_text.textCursor()
+            cursor.movePosition(cursor.End)
+            self.comms_text.setTextCursor(cursor)
+
+            print(f"💬 AI Response: {message[:80]}...")
+
+        # All other AI commentary goes to Commentator Transcript
+        else:
+            priority_labels = {0: "🔴 CRITICAL", 1: "🟠 HIGH", 2: "🟡 MEDIUM", 3: "⚪ LOW"}
+            priority_label = priority_labels.get(priority, "⚪ INFO")
+
+            formatted_message = (
+                f"<div style='margin-bottom: 8px;'>"
+                f"<span style='color: #888;'>[{timestamp}]</span> "
+                f"<span style='font-weight: bold;'>{priority_label}</span> "
+                f"<span style='color: #AAA;'>({trigger})</span><br>"
+                f"<span style='color: #EEEEEE;'>{message}</span>"
+                f"</div>"
+            )
+
+            self.comment_text.append(formatted_message)
+
+            # Auto-scroll to bottom
+            cursor = self.comment_text.textCursor()
+            cursor.movePosition(cursor.End)
+            self.comment_text.setTextCursor(cursor)
+
+            print(f"💬 AI Commentary [{trigger}]: {message[:80]}...")
+
+    def handle_driver_query(self, query: str):
+        """
+        Handle driver query (display in Communications panel).
+
+        Args:
+            query: Driver's question/command
+        """
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        formatted_query = (
             f"<div style='margin-bottom: 8px;'>"
             f"<span style='color: #888;'>[{timestamp}]</span> "
-            f"<span style='font-weight: bold;'>{priority_label}</span> "
-            f"<span style='color: #AAA;'>({trigger})</span><br>"
-            f"<span style='color: #EEEEEE;'>{message}</span>"
+            f"<span style='font-weight: bold; color: #6FA8FF;'>DRIVER:</span><br>"
+            f"<span style='color: #EEEEEE;'>{query}</span>"
             f"</div>"
         )
 
-        self.comment_text.append(formatted_message)
+        self.comms_text.append(formatted_query)
 
         # Auto-scroll to bottom
-        cursor = self.comment_text.textCursor()
+        cursor = self.comms_text.textCursor()
         cursor.movePosition(cursor.End)
-        self.comment_text.setTextCursor(cursor)
+        self.comms_text.setTextCursor(cursor)
 
-        print(f"💬 AI Commentary [{trigger}]: {message[:80]}...")
+        print(f"🎤 Driver Query: {query}")
+
+    def handle_vad_state_change(self, is_speaking: bool):
+        """
+        Handle voice activity detection state change.
+
+        Args:
+            is_speaking: True if driver is speaking, False if silent
+        """
+        if is_speaking:
+            self.mic_status_label.setText("🎤 Mic: Speaking...")
+            self.mic_status_label.setStyleSheet("color: #FF6B6B;")  # Red when speaking
+        else:
+            self.mic_status_label.setText("🎤 Mic: Ready")
+            self.mic_status_label.setStyleSheet("color: #888888;")  # Gray when idle
