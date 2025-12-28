@@ -88,6 +88,7 @@ class VoiceInputWorker(QtCore.QThread):
 
         # State
         self._running = False
+        self._paused = False  # Pause listening during TTS playback
         self._is_speaking = False
         self._speech_buffer = []
         self._silence_chunks = 0
@@ -112,6 +113,17 @@ class VoiceInputWorker(QtCore.QThread):
                 try:
                     # Read audio chunk
                     audio_data = self.stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
+
+                    # Skip processing if paused (TTS is playing)
+                    if self._paused:
+                        # Reset speech state when paused
+                        if self._is_speaking:
+                            self._is_speaking = False
+                            self._speech_buffer = []
+                            self._silence_chunks = 0
+                            self.vad_state_changed.emit(False)
+                        continue
+
                     audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
 
                     # Convert to float32 for VAD
@@ -327,6 +339,24 @@ class VoiceInputWorker(QtCore.QThread):
                 pass
 
         logger.info("Audio resources cleaned up")
+
+    def pause(self):
+        """
+        Pause voice input processing (e.g., during TTS playback).
+        Thread-safe - can be called from main thread via Qt signal.
+        """
+        if not self._paused:
+            self._paused = True
+            logger.debug("Voice input paused (TTS playing)")
+
+    def resume(self):
+        """
+        Resume voice input processing after TTS playback.
+        Thread-safe - can be called from main thread via Qt signal.
+        """
+        if self._paused:
+            self._paused = False
+            logger.debug("Voice input resumed (TTS finished)")
 
     def stop(self):
         """Stop the voice input worker."""

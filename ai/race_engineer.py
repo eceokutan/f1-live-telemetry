@@ -279,7 +279,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             while not self.query_queue.empty():
                 try:
                     stale_query = self.query_queue.get_nowait()
-                    logger.info(f"[DEBUG] Dropping stale query: {stale_query}")
+                    logger.debug(f"Dropping stale query: {stale_query}")
                     query = stale_query  # Use the newest query
                 except asyncio.QueueEmpty:
                     break
@@ -291,7 +291,6 @@ class AIRaceEngineerWorker(QtCore.QThread):
             self.status_update.emit(f"Processing: \"{query}\"")
 
             # Generate AI response using reactive mode
-            logger.info(f"[DEBUG] About to call generate_reactive_response for: {query}")
             try:
                 response = await asyncio.wait_for(
                     self.race_engineer_agent.generate_reactive_response(
@@ -300,9 +299,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     ),
                     timeout=30.0  # 30 second timeout for LLM response
                 )
-                logger.info(f"[DEBUG] LLM response received: {response[:100]}...")
+                logger.debug(f"LLM response received: {response[:100]}...")
             except asyncio.TimeoutError:
-                logger.error("[DEBUG] LLM response timed out after 30 seconds!")
+                logger.error("LLM response timed out after 30 seconds")
                 self.ai_commentary.emit(
                     "Sorry, the AI took too long to respond. Please try again.",
                     "driver_query_timeout",
@@ -310,14 +309,12 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 )
                 return
             except Exception as llm_error:
-                logger.error(f"[DEBUG] LLM error: {llm_error}", exc_info=True)
+                logger.error(f"LLM error: {llm_error}", exc_info=True)
                 raise
 
             # Emit as AI commentary with special trigger
-            logger.info(f"[DEBUG] About to emit AI commentary...")
             self.ai_commentary.emit(response, "driver_query", 2)  # MEDIUM priority
             logger.info(f"AI response to query: {response[:50]}...")
-            logger.info(f"[DEBUG] AI commentary emitted successfully")
 
         except asyncio.TimeoutError:
             # No query, that's ok

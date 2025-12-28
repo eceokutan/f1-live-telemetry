@@ -199,7 +199,12 @@ def main(game: str = "ac", enable_ai: bool = False):
                         tts_thread.error_occurred.connect(lambda err: print(f"[TTS Error] {err}"))
 
                         # Connect AI commentary to TTS playback
-                        ai_thread.ai_commentary.connect(lambda msg, trigger, priority: tts_thread.speak(msg))
+                        ai_thread.ai_commentary.connect(lambda msg, _trigger, _priority: tts_thread.speak(msg))
+
+                        # Pause voice input during TTS playback to prevent echo/feedback
+                        if voice_thread:
+                            tts_thread.playback_started.connect(voice_thread.pause)
+                            tts_thread.playback_finished.connect(voice_thread.resume)
 
                         # Start TTS thread
                         tts_thread.start()

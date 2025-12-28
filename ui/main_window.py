@@ -1,7 +1,6 @@
 """
 Main window for F1 Telemetry Dashboard.
 """
-import sys
 import numpy as np
 from datetime import datetime
 
@@ -48,9 +47,6 @@ class MainWindow(QMainWindow):
         # Create central widget and root layout
         central = QWidget()
         self.setCentralWidget(central)
-
-        # Create menu bar
-        self._create_menu_bar()
 
         # Root layout: horizontal split into left / middle / right
         root_layout = QHBoxLayout()
@@ -140,11 +136,6 @@ class MainWindow(QMainWindow):
         mid_col.addWidget(self.brake_canvas)
         mid_col.addWidget(self.tyre_pressure_canvas)
         mid_col.addWidget(self.tyre_temp_canvas)
-
-        # Add graph button (placeholder)
-        add_graph_btn = QPushButton("+ Add Graph")
-        add_graph_btn.setFixedHeight(24)
-        mid_col.addWidget(add_graph_btn)
 
         return mid_col
 
@@ -237,13 +228,6 @@ class MainWindow(QMainWindow):
         right_col.addWidget(comment_group)
 
         return right_col
-
-    def _create_menu_bar(self):
-        """Create menu bar."""
-        menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu("File")
-        settings_menu = menu_bar.addMenu("Settings")
-        view_menu = menu_bar.addMenu("View")
 
     # ==========================================================================
     # Data Update Methods
@@ -408,18 +392,16 @@ class MainWindow(QMainWindow):
             trigger: Event that triggered the commentary
             priority: Priority level (0=CRITICAL, 1=HIGH, 2=MEDIUM, 3=LOW)
         """
-        print(f"[DEBUG] handle_ai_commentary called: trigger='{trigger}', message='{message[:50]}...'")
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Driver query responses go to Communications Transcript
         if trigger == "driver_query" or trigger == "driver_query_error" or trigger == "driver_query_timeout":
-            print(f"[DEBUG] Routing to Communications Transcript (trigger={trigger})")
             formatted_response = (
-                f"<div style='margin-bottom: 8px;'>"
+                f"<div style='margin-bottom: 4px;'>"
                 f"<span style='color: #888;'>[{timestamp}]</span> "
                 f"<span style='font-weight: bold; color: #FF6B6B;'>RACE ENGINEER:</span><br>"
                 f"<span style='color: #EEEEEE;'>{message}</span>"
-                f"</div>"
+                f"</div><br>"
             )
 
             # Use insertHtml for proper HTML rendering
@@ -433,17 +415,16 @@ class MainWindow(QMainWindow):
 
         # All other AI commentary goes to Commentator Transcript
         else:
-            print(f"[DEBUG] Routing to Commentator Transcript (trigger={trigger})")
             priority_labels = {0: "🔴 CRITICAL", 1: "🟠 HIGH", 2: "🟡 MEDIUM", 3: "⚪ LOW"}
             priority_label = priority_labels.get(priority, "⚪ INFO")
 
             formatted_message = (
-                f"<div style='margin-bottom: 8px;'>"
+                f"<div style='margin-bottom: 4px;'>"
                 f"<span style='color: #888;'>[{timestamp}]</span> "
                 f"<span style='font-weight: bold;'>{priority_label}</span> "
                 f"<span style='color: #AAA;'>({trigger})</span><br>"
                 f"<span style='color: #EEEEEE;'>{message}</span>"
-                f"</div>"
+                f"</div><br>"
             )
 
             # Use insertHtml for proper HTML rendering
@@ -465,11 +446,11 @@ class MainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         formatted_query = (
-            f"<div style='margin-bottom: 8px;'>"
+            f"<div style='margin-bottom: 4px;'>"
             f"<span style='color: #888;'>[{timestamp}]</span> "
             f"<span style='font-weight: bold; color: #6FA8FF;'>DRIVER:</span><br>"
             f"<span style='color: #EEEEEE;'>{query}</span>"
-            f"</div>"
+            f"</div><br>"
         )
 
         # Use insertHtml for proper HTML rendering
