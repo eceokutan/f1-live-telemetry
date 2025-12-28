@@ -138,6 +138,47 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 - **Environment variables required**: WATSONX_API_KEY, WATSONX_PROJECT_ID
 - **Optional**: Works best with AC (full telemetry), degraded with ACC (limited telemetry)
 
+**[ai/voice_input.py](ai/voice_input.py)** - Voice Input (experimental)
+- `VoiceInputWorker` - QThread for hands-free voice queries
+- Uses Silero VAD (local neural network) for voice activity detection
+- Uses IBM Watson Speech-to-Text for transcription
+- Automatically pauses during TTS playback to prevent echo/feedback
+- **Environment variables required**: WATSON_STT_API_KEY, WATSON_STT_URL
+
+**[ai/tts_output.py](ai/tts_output.py)** - Text-to-Speech Output (experimental)
+- `TTSOutputWorker` - QThread for audio output of AI responses
+- Uses IBM Watson Text-to-Speech with British male voice (en-GB_JamesV3Voice)
+- Plays audio through default output device using PyAudio
+- Signals voice input to pause during playback to prevent feedback
+- **Environment variables required**: WATSON_TTS_API_KEY, WATSON_TTS_URL
+
+**[data/session_recorder.py](data/session_recorder.py)** - Session Recording
+- `SessionRecorder` - QThread that records all telemetry to SQLite database
+- **Automatically enabled** - Runs by default, no flags required
+- **Database schema**:
+  - `sessions` - Session metadata (track, car, player, lap count, best lap)
+  - `laps` - Lap times, fuel usage, speed statistics
+  - `telemetry` - High-frequency telemetry samples (~60Hz): position, speed, gear, RPM, throttle, brake, fuel, tire pressure/temperature
+  - `ai_commentary` - AI race engineer messages with timestamps
+  - `voice_queries` - Driver queries and AI responses
+- **Batch inserts** - Buffers 60 telemetry samples before writing for performance
+- **Data persistence** - All data saved to `data/telemetry_sessions.db`
+- **Post-race analysis** - Database can be queried for session replay and analysis
+- **Signal connections**:
+  - Listens to `realtime_sample` for telemetry recording
+  - Listens to `lap_completed` for lap statistics
+  - Listens to `ai_commentary` for AI messages (if AI enabled)
+  - Listens to `driver_query_received` for voice queries (if voice enabled)
+
+**[data/session_viewer.py](data/session_viewer.py)** - Session Viewer CLI
+- Command-line utility to query and export recorded sessions
+- **Usage**:
+  - `python -m data.session_viewer list` - List all sessions
+  - `python -m data.session_viewer info <session_id>` - View session details
+  - `python -m data.session_viewer laps <session_id>` - View lap times
+  - `python -m data.session_viewer export <session_id>` - Export to CSV files
+- **Export format**: CSV files for telemetry, laps, AI commentary
+
 ### Data Flow
 
 **Real-time Visualization (every frame ~60Hz):**
@@ -167,6 +208,43 @@ MainWindow.handle_lap_complete(lap_id, samples)
     ↓
 Update lap table with lap time
 (visualization already showing next lap in real-time)
+```
+
+**Session Recording (continuous):**
+```
+Telemetry Worker
+    ↓ (emits realtime_sample ~60Hz)
+SessionRecorder.record_telemetry_sample()
+    ↓
+Buffer 60 samples (1 second)
+    ↓
+Batch insert to SQLite telemetry table
+
+Telemetry Worker
+    ↓ (emits lap_completed)
+SessionRecorder.record_lap()
+    ↓
+Calculate lap statistics (avg/max speed, fuel used)
+    ↓
+Insert to SQLite laps table
+
+AI Race Engineer
+    ↓ (emits ai_commentary)
+SessionRecorder.record_ai_commentary()
+    ↓
+Insert to SQLite ai_commentary table
+
+Voice Input
+    ↓ (emits speech_detected)
+SessionRecorder.record_voice_query()
+    ↓
+Insert to SQLite voice_queries table
+
+On shutdown:
+    ↓
+Flush remaining buffered samples
+    ↓
+Update session end_time and statistics
 ```
 
 ## Key Implementation Details

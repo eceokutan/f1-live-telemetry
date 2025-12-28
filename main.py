@@ -65,6 +65,15 @@ except ImportError as e:
     TTS_AVAILABLE = False
     print(f"⚠️  TTS Output not available: {e}")
 
+# Try to import session recorder (optional)
+try:
+    from data.session_recorder import SessionRecorder
+    RECORDER_AVAILABLE = True
+    print("✅ Session Recorder module available")
+except ImportError as e:
+    RECORDER_AVAILABLE = False
+    print(f"⚠️  Session Recorder not available: {e}")
+
 print("✅ All core modules imported successfully")
 
 
@@ -228,6 +237,129 @@ def main(game: str = "ac", enable_ai: bool = False):
     elif enable_ai:
         print("⚠️  AI requested but AIRaceEngineerWorker module not available")
 
+    # Initialize session recorder (optional)
+    recorder_thread = None
+    current_lap_number = [0]  # Track current lap in list (mutable for lambda)
+    session_info = {"track": "", "car": "", "player": ""}  # Store session metadata
+
+    if RECORDER_AVAILABLE:
+        print("💾 Initializing Session Recorder...")
+        try:
+            recorder_thread = SessionRecorder(db_path="data/telemetry_sessions.db")
+
+            # Connect recorder signals
+            recorder_thread.status_update.connect(lambda msg: print(f"[Recorder] {msg}"))
+            recorder_thread.error_occurred.connect(lambda err: print(f"[Recorder Error] {err}"))
+
+            # Start recorder thread
+            recorder_thread.start()
+
+            # Helper to start session when we get session info
+            def on_session_info(info: dict):
+                """Start recording session when we get track/car info."""
+                session_info["track"] = info.get("track", "")
+                session_info["car"] = info.get("car", "")
+                session_info["player"] = info.get("player", "")
+
+                # Start recording session
+                if recorder_thread and not recorder_thread.session_id:
+                    recorder_thread.start_session(
+                        game=game,
+                        track_name=session_info["track"],
+                        car_model=session_info["car"],
+                        player_name=session_info["player"],
+                        ai_enabled=enable_ai
+                    )
+
+            # Connect to session info update
+            if hasattr(telemetry_thread, 'session_info_update'):
+                telemetry_thread.session_info_update.connect(on_session_info)
+
+            # Record telemetry samples
+            if hasattr(telemetry_thread, 'realtime_sample'):
+                telemetry_thread.realtime_sample.connect(
+                    lambda sample: recorder_thread.record_telemetry_sample(sample)
+                )
+
+            # Record completed laps
+            def on_lap_complete(lap_id: int, samples: list):
+                """Record lap completion with statistics."""
+                if not samples:
+                    return
+
+                current_lap_number[0] = lap_id
+
+                # Calculate lap statistics
+                lap_time = samples[-1].get("t", 0.0) if samples else 0.0
+                speeds = [s.get("speed", 0.0) for s in samples]
+                avg_speed = sum(speeds) / len(speeds) if speeds else 0.0
+                max_speed = max(speeds) if speeds else 0.0
+                min_speed = min(speeds) if speeds else 0.0
+
+                fuel_start = samples[0].get("fuel", 0.0) if samples else 0.0
+                fuel_end = samples[-1].get("fuel", 0.0) if samples else 0.0
+
+                # Record lap
+                if recorder_thread:
+                    recorder_thread.record_lap(
+                        lap_number=lap_id,
+                        lap_time=lap_time,
+                        fuel_start=fuel_start,
+                        fuel_end=fuel_end,
+                        avg_speed=avg_speed,
+                        max_speed=max_speed,
+                        min_speed=min_speed,
+                        valid=True
+                    )
+
+            telemetry_thread.lap_completed.connect(on_lap_complete)
+
+            # Record AI commentary (if AI enabled)
+            if ai_thread:
+                def on_ai_commentary(message: str, trigger: str, priority: str):
+                    """Record AI commentary."""
+                    if recorder_thread:
+                        recorder_thread.record_ai_commentary(
+                            message=message,
+                            trigger=trigger,
+                            priority=priority,
+                            lap_number=current_lap_number[0]
+                        )
+
+                ai_thread.ai_commentary.connect(on_ai_commentary)
+
+            # Record voice queries (if voice enabled)
+            if voice_thread and ai_thread:
+                # Track query/response pairs
+                last_query = [""]  # Mutable for lambda
+
+                def on_driver_query(query: str):
+                    """Store driver query for later pairing with response."""
+                    last_query[0] = query
+
+                def on_query_response(message: str, trigger: str, priority: str):
+                    """Record voice query/response pair."""
+                    if recorder_thread and last_query[0] and trigger == "driver_query":
+                        recorder_thread.record_voice_query(
+                            query_text=last_query[0],
+                            response_text=message,
+                            lap_number=current_lap_number[0]
+                        )
+                        last_query[0] = ""  # Clear after recording
+
+                ai_thread.driver_query_received.connect(on_driver_query)
+                ai_thread.ai_commentary.connect(on_query_response)
+
+            print("✅ Session Recorder started")
+
+        except Exception as e:
+            print(f"⚠️  Failed to initialize Session Recorder: {e}")
+            import traceback
+            traceback.print_exc()
+            recorder_thread = None
+    else:
+        print("⚠️  Session Recorder module not available")
+
     # Start telemetry thread
     print("🚀 Starting telemetry worker thread...")
     telemetry_thread.start()
@@ -247,6 +379,10 @@ def main(game: str = "ac", enable_ai: bool = False):
         print("✅ DASHBOARD READY - AI Race Engineer ACTIVE")
     else:
         print("✅ DASHBOARD READY - Check AC for shared memory connection")
+
+    if recorder_thread:
+        print("💾 Session Recording ENABLED - All data will be saved to database")
+
     print("="*60 + "\n")
 
     # Run Qt event loop
@@ -268,6 +404,10 @@ def main(game: str = "ac", enable_ai: bool = False):
     if tts_thread:
         tts_thread.stop()
         tts_thread.wait()
+
+    if recorder_thread:
+        recorder_thread.stop()
+        recorder_thread.wait()
 
     print("👋 Goodbye!")
     sys.exit(result)
