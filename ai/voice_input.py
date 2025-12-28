@@ -201,6 +201,9 @@ class VoiceInputWorker(QtCore.QThread):
             self.stt_client = SpeechToTextV1(authenticator=authenticator)
             self.stt_client.set_service_url(self.watson_url)
 
+            # Set SSL verify to use certifi bundle explicitly
+            self.stt_client.set_http_config({'verify': certifi.where()})
+
             # Test connection
             self.stt_client.list_models()
 

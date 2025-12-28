@@ -33,11 +33,12 @@ tenacity>=8.2.0
 python-dotenv>=1.0.0
 
 # =============================================================================
-# Voice Input (Silero VAD + Watson STT)
+# Voice Input/Output (Silero VAD + Watson STT/TTS)
 # =============================================================================
 pyaudio>=0.2.13
 torch>=2.0.0
 torchaudio>=2.0.0
+aiohttp>=3.9.0
 # Note: Silero VAD is loaded via torch.hub, no separate install needed
 
 # =============================================================================

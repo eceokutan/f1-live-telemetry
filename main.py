@@ -56,6 +56,15 @@ except ImportError as e:
     VOICE_AVAILABLE = False
     print(f"⚠️  Voice Input not available: {e}")
 
+# Try to import TTS output worker (optional)
+try:
+    from ai.tts_output import TTSOutputWorker
+    TTS_AVAILABLE = True
+    print("✅ TTS Output module available")
+except ImportError as e:
+    TTS_AVAILABLE = False
+    print(f"⚠️  TTS Output not available: {e}")
+
 print("✅ All core modules imported successfully")
 
 
@@ -103,6 +112,7 @@ def main(game: str = "ac", enable_ai: bool = False):
     # Initialize AI race engineer (optional)
     ai_thread = None
     voice_thread = None
+    tts_thread = None
     if enable_ai and AI_AVAILABLE:
         print("🤖 Initializing AI Race Engineer...")
 
@@ -112,6 +122,8 @@ def main(game: str = "ac", enable_ai: bool = False):
         watsonx_api_key = os.getenv("WATSONX_API_KEY", "")
         watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
         watson_stt_url = os.getenv("WATSON_STT_URL", "")
+        watson_tts_api_key = os.getenv("WATSON_TTS_API_KEY", "")
+        watson_tts_url = os.getenv("WATSON_TTS_URL", "")
 
         if not watsonx_api_key or not watsonx_project_id:
             print("⚠️  AI Race Engineer requires WATSONX_API_KEY and WATSONX_PROJECT_ID")
@@ -172,6 +184,37 @@ def main(game: str = "ac", enable_ai: bool = False):
                 else:
                     print("⚠️  Voice Input module not available (missing dependencies)")
 
+                # Initialize TTS output (if available and credentials present)
+                if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
+                    print("🔊 Initializing TTS Output...")
+                    try:
+                        tts_thread = TTSOutputWorker(
+                            watson_api_key=watson_tts_api_key,
+                            watson_url=watson_tts_url,
+                            voice="en-GB_JamesV3Voice"  # British male race engineer
+                        )
+
+                        # Connect TTS signals
+                        tts_thread.status_update.connect(lambda msg: print(f"[TTS] {msg}"))
+                        tts_thread.error_occurred.connect(lambda err: print(f"[TTS Error] {err}"))
+
+                        # Connect AI commentary to TTS playback
+                        ai_thread.ai_commentary.connect(lambda msg, trigger, priority: tts_thread.speak(msg))
+
+                        # Start TTS thread
+                        tts_thread.start()
+                        print("✅ TTS Output started")
+
+                    except Exception as e:
+                        print(f"⚠️  Failed to initialize TTS Output: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        tts_thread = None
+                elif TTS_AVAILABLE:
+                    print("⚠️  TTS Output requires WATSON_TTS_API_KEY and WATSON_TTS_URL in .env")
+                else:
+                    print("⚠️  TTS Output module not available (missing dependencies)")
+
             except Exception as e:
                 print(f"⚠️  Failed to initialize AI Race Engineer: {e}")
                 import traceback
@@ -189,8 +232,12 @@ def main(game: str = "ac", enable_ai: bool = False):
     window.show()
 
     print("\n" + "="*60)
-    if ai_thread and voice_thread:
+    if ai_thread and voice_thread and tts_thread:
+        print("✅ DASHBOARD READY - AI Race Engineer + Voice I/O ACTIVE")
+    elif ai_thread and voice_thread:
         print("✅ DASHBOARD READY - AI Race Engineer + Voice Input ACTIVE")
+    elif ai_thread and tts_thread:
+        print("✅ DASHBOARD READY - AI Race Engineer + TTS Output ACTIVE")
     elif ai_thread:
         print("✅ DASHBOARD READY - AI Race Engineer ACTIVE")
     else:
@@ -212,6 +259,10 @@ def main(game: str = "ac", enable_ai: bool = False):
     if voice_thread:
         voice_thread.stop()
         voice_thread.wait()
+
+    if tts_thread:
+        tts_thread.stop()
+        tts_thread.wait()
 
     print("👋 Goodbye!")
     sys.exit(result)

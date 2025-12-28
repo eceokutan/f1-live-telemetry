@@ -217,6 +217,7 @@ class MainWindow(QMainWindow):
 
         self.comms_text = QTextEdit()
         self.comms_text.setReadOnly(True)
+        self.comms_text.setAcceptRichText(True)
         self.comms_text.setPlaceholderText("Radio messages will appear here...")
         comms_layout.addWidget(self.comms_text)
 
@@ -227,6 +228,7 @@ class MainWindow(QMainWindow):
 
         self.comment_text = QTextEdit()
         self.comment_text.setReadOnly(True)
+        self.comment_text.setAcceptRichText(True)
         self.comment_text.setPlaceholderText("Commentary will appear here...")
         comment_layout.addWidget(self.comment_text)
 
@@ -406,10 +408,12 @@ class MainWindow(QMainWindow):
             trigger: Event that triggered the commentary
             priority: Priority level (0=CRITICAL, 1=HIGH, 2=MEDIUM, 3=LOW)
         """
+        print(f"[DEBUG] handle_ai_commentary called: trigger='{trigger}', message='{message[:50]}...'")
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Driver query responses go to Communications Transcript
         if trigger == "driver_query" or trigger == "driver_query_error" or trigger == "driver_query_timeout":
+            print(f"[DEBUG] Routing to Communications Transcript (trigger={trigger})")
             formatted_response = (
                 f"<div style='margin-bottom: 8px;'>"
                 f"<span style='color: #888;'>[{timestamp}]</span> "
@@ -418,17 +422,18 @@ class MainWindow(QMainWindow):
                 f"</div>"
             )
 
-            self.comms_text.append(formatted_response)
-
-            # Auto-scroll to bottom
+            # Use insertHtml for proper HTML rendering
             cursor = self.comms_text.textCursor()
             cursor.movePosition(cursor.End)
+            cursor.insertHtml(formatted_response)
             self.comms_text.setTextCursor(cursor)
+            self.comms_text.ensureCursorVisible()
 
             print(f"💬 AI Response: {message[:80]}...")
 
         # All other AI commentary goes to Commentator Transcript
         else:
+            print(f"[DEBUG] Routing to Commentator Transcript (trigger={trigger})")
             priority_labels = {0: "🔴 CRITICAL", 1: "🟠 HIGH", 2: "🟡 MEDIUM", 3: "⚪ LOW"}
             priority_label = priority_labels.get(priority, "⚪ INFO")
 
@@ -441,12 +446,12 @@ class MainWindow(QMainWindow):
                 f"</div>"
             )
 
-            self.comment_text.append(formatted_message)
-
-            # Auto-scroll to bottom
+            # Use insertHtml for proper HTML rendering
             cursor = self.comment_text.textCursor()
             cursor.movePosition(cursor.End)
+            cursor.insertHtml(formatted_message)
             self.comment_text.setTextCursor(cursor)
+            self.comment_text.ensureCursorVisible()
 
             print(f"💬 AI Commentary [{trigger}]: {message[:80]}...")
 
@@ -467,12 +472,12 @@ class MainWindow(QMainWindow):
             f"</div>"
         )
 
-        self.comms_text.append(formatted_query)
-
-        # Auto-scroll to bottom
+        # Use insertHtml for proper HTML rendering
         cursor = self.comms_text.textCursor()
         cursor.movePosition(cursor.End)
+        cursor.insertHtml(formatted_query)
         self.comms_text.setTextCursor(cursor)
+        self.comms_text.ensureCursorVisible()
 
         print(f"🎤 Driver Query: {query}")
 
