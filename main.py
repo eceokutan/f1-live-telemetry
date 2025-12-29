@@ -37,6 +37,7 @@ from ui.main_window import MainWindow
 # Import telemetry backends
 from telemetry.backends.ac_backend import AcTelemetryWorker
 from telemetry.backends.acc_backend import AccTelemetryWorker
+from telemetry.backends.torcs_backend import TorcsTelemetryWorker
 
 # Try to import AI worker (optional)
 try:
@@ -68,13 +69,14 @@ except ImportError as e:
 print("✅ All core modules imported successfully")
 
 
-def main(game: str = "ac", enable_ai: bool = False):
+def main(game: str = "ac", enable_ai: bool = False, use_torcs_ai: bool = False):
     """
     Entry point for the telemetry dashboard.
 
     Args:
-        game: "ac" for Assetto Corsa, "acc" for Assetto Corsa Competizione
+        game: "ac" for Assetto Corsa, "acc" for Assetto Corsa Competizione, "torcs" for TORCS
         enable_ai: Enable AI race engineer (requires IBM WatsonX credentials)
+        use_torcs_ai: Enable AI racebot driver in TORCS (only used when game="torcs")
     """
     print(f"\n📋 Starting dashboard for: {game.upper()}")
     print("🔧 Creating Qt application...")
@@ -89,8 +91,10 @@ def main(game: str = "ac", enable_ai: bool = False):
         telemetry_thread = AcTelemetryWorker()
     elif game == "acc":
         telemetry_thread = AccTelemetryWorker(host="127.0.0.1", port=9232, password="")
+    elif game == "torcs":
+        telemetry_thread = TorcsTelemetryWorker(use_ai_driver=use_torcs_ai)
     else:
-        raise ValueError(f"Unknown game '{game}'. Use 'ac' or 'acc'.")
+        raise ValueError(f"Unknown game '{game}'. Use 'ac', 'acc', or 'torcs'.")
 
     print("✅ Backend initialized")
 
@@ -277,18 +281,23 @@ if __name__ == "__main__":
     # Parse command line arguments
     game = "ac"
     enable_ai = False
+    use_torcs_ai = False
 
     if "--acc" in sys.argv:
         game = "acc"
+    if "--torcs" in sys.argv:
+        game = "torcs"
     if "--ai" in sys.argv:
         enable_ai = True
+    if "--ai-racebot" in sys.argv:
+        use_torcs_ai = True
 
     print(f"🎯 Command line args: {sys.argv}")
     print(f"🎮 Selected game: {game}")
     print(f"🤖 AI enabled: {enable_ai}\n")
 
     try:
-        main(game, enable_ai)
+        main(game, enable_ai, use_torcs_ai)
     except Exception as e:
         print("\n" + "="*60)
         print("❌ FATAL ERROR:")
