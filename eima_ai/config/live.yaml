@@ -1,0 +1,75 @@
+# Jarvis-Granite Live Telemetry Configuration
+# Version 2.1 | December 2025
+
+# Custom Orchestrator Settings
+orchestrator:
+  priority_queue_max_size: 100
+  interrupt_on_critical: true
+  sentence_completion_timeout_ms: 2000
+
+# LiveKit Configuration
+livekit:
+  url: ${LIVEKIT_URL}
+  api_key: ${LIVEKIT_API_KEY}
+  api_secret: ${LIVEKIT_API_SECRET}
+  room_prefix: "jarvis_live_"
+  audio_codec: "opus"
+  sample_rate: 48000
+
+# LangChain Callbacks
+langchain:
+  enable_langsmith: false
+  langsmith_project: "jarvis-granite-live"
+  callbacks:
+    - type: "langsmith"
+      enabled: false
+    - type: "console"
+      enabled: false
+
+# Tenacity Retry Configuration
+retry:
+  watson_tts:
+    max_attempts: 3
+    multiplier: 1
+    min_wait: 0.5
+    max_wait: 4
+  watson_stt:
+    max_attempts: 3
+    multiplier: 1
+    min_wait: 0.5
+    max_wait: 4
+  granite_llm:
+    max_attempts: 2
+    multiplier: 1
+    min_wait: 1
+    max_wait: 5
+
+# Verbosity Settings
+verbosity:
+  level: "moderate"
+  announce_lap_times: true
+  announce_gap_changes: true
+  announce_tire_status: true
+  announce_fuel_status: true
+  proactive_coaching: false
+
+# Thresholds
+thresholds:
+  tire_temp_warning: 100.0
+  tire_temp_critical: 110.0
+  tire_wear_warning: 70.0
+  tire_wear_critical: 85.0
+  fuel_warning_laps: 5
+  fuel_critical_laps: 2
+  gap_change_threshold: 1.0
+
+# Voice Settings
+voice:
+  tts_voice: "en-GB_JamesV3Voice"
+  stt_model: "en-GB_BroadbandModel"
+  enable_voice: true
+
+# Buffer Settings
+telemetry_buffer_seconds: 60
+conversation_history_length: 3
+min_proactive_interval_seconds: 10.0
