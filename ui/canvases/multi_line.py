@@ -72,10 +72,19 @@ class MultiLineCanvas(FigureCanvas):
         if t.size == 0:
             return
 
-        for line, y in zip(self.lines, y_data):
-            if y.size > 0:
-                line.set_data(t, y)
+        try:
+            for line, y in zip(self.lines, y_data):
+                if y.size > 0:
+                    # Ensure array sizes match
+                    if t.size != y.size:
+                        print(f"⚠️  Warning: Array size mismatch in {self.title}: t={t.size}, y={y.size}")
+                        continue
+                    line.set_data(t, y)
 
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.draw()
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.draw_idle()  # Use draw_idle for better performance
+        except Exception:
+            # Matplotlib can throw errors during rendering in multithreaded environments
+            # Just skip this update and wait for the next one
+            pass

@@ -173,6 +173,10 @@ class TelemetryAgent:
         """
         events = []
 
+        # AC doesn't provide tire wear data - skip if not available
+        if telemetry.tire_wear is None:
+            return events
+
         tire_wear = {
             "fl": telemetry.tire_wear.fl,
             "fr": telemetry.tire_wear.fr,
@@ -239,7 +243,10 @@ class TelemetryAgent:
         """
         events = []
 
-        if telemetry.lap_number > context.current_lap:
+        # Check for lap completion (skip if lap_number not available in AC)
+        if (telemetry.lap_number is not None and
+            context.current_lap is not None and
+            telemetry.lap_number > context.current_lap):
             events.append(create_lap_complete_event(
                 lap_number=telemetry.lap_number,
                 lap_time=context.last_lap or 0.0,
@@ -261,8 +268,8 @@ class TelemetryAgent:
         """
         events = []
 
-        # Sector changed
-        if telemetry.sector != context.current_sector:
+        # Sector changed (skip if sector data not available in AC)
+        if telemetry.sector is not None and telemetry.sector != context.current_sector:
             # The completed sector is the previous sector
             completed_sector = context.current_sector
 
@@ -310,16 +317,17 @@ class TelemetryAgent:
             events.append(create_pit_window_event(reason="fuel"))
             return events  # Return early, one pit window reason is enough
 
-        # Check tire wear for pit window
-        tire_wear = {
-            "fl": telemetry.tire_wear.fl,
-            "fr": telemetry.tire_wear.fr,
-            "rl": telemetry.tire_wear.rl,
-            "rr": telemetry.tire_wear.rr,
-        }
+        # Check tire wear for pit window (skip if not available in AC)
+        if telemetry.tire_wear is not None:
+            tire_wear = {
+                "fl": telemetry.tire_wear.fl,
+                "fr": telemetry.tire_wear.fr,
+                "rl": telemetry.tire_wear.rl,
+                "rr": telemetry.tire_wear.rr,
+            }
 
-        max_wear = max(tire_wear.values())
-        if max_wear >= self.thresholds.tire_wear_warning:
-            events.append(create_pit_window_event(reason="tires"))
+            max_wear = max(tire_wear.values())
+            if max_wear >= self.thresholds.tire_wear_warning:
+                events.append(create_pit_window_event(reason="tires"))
 
         return events

@@ -157,7 +157,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
             asyncio.set_event_loop(self._event_loop)
 
             # Create queues (must be done AFTER event loop is set)
-            self.telemetry_queue = asyncio.Queue()
+            # Limit queue size to prevent infinite backlog
+            # Keep only last 5 telemetry samples (at 60Hz = ~80ms buffer)
+            self.telemetry_queue = asyncio.Queue(maxsize=5)
             self.query_queue = asyncio.Queue()
 
             # Initialize agents
@@ -342,6 +344,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Returns:
             TelemetryData object
         """
+        # DEBUG: Log incoming data keys
+        logger.debug(f"Converting telemetry dict with keys: {list(data.keys())}")
+        logger.debug(f"speed={data.get('speed')}, rpms={data.get('rpms')}, rpm={data.get('rpm')}")
+
         # Extract tire data
         tire_temps = TireTemps(
             fl=data.get("tyre_temp_fl", 80.0),
@@ -363,10 +369,11 @@ class AIRaceEngineerWorker(QtCore.QThread):
             longitudinal=0.0
         )
 
-        # Create TelemetryData
+        # Create TelemetryData - AC sends 'rpm' not 'rpms'
+        lap_id = data.get("lap_id", 0)
         return TelemetryData(
             speed=data.get("speed", 0.0),
-            rpms=data.get("rpms", 0),  # AC sends "rpms" (with s)
+            rpms=data.get("rpm", 0),  # AC sends "rpm" (without s)
             gear=data.get("gear", 0),
             throttle=data.get("throttle", 0.0),
             brake=data.get("brake", 0.0),
@@ -375,7 +382,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
             tire_pressure=tire_pressure,
             x=data.get("x", 0.0),
             z=data.get("z", 0.0),
-            lap_id=data.get("lap_id", 0),
+            lap_id=lap_id,
+            lap_number=lap_id,  # AI uses lap_number, AC provides lap_id
             t=data.get("t", 0.0)
         )
 
@@ -407,10 +415,13 @@ class AIRaceEngineerWorker(QtCore.QThread):
         """
         if self._event_loop and self._running:
             # Thread-safe: put telemetry in queue
-            asyncio.run_coroutine_threadsafe(
-                self.telemetry_queue.put(telemetry_dict),
-                self._event_loop
-            )
+            # If queue is full, drop oldest sample (non-blocking)
+            try:
+                self.telemetry_queue.put_nowait(telemetry_dict)
+            except asyncio.QueueFull:
+                # Queue full - drop this sample to prevent backlog
+                # This is acceptable for real-time telemetry
+                pass
 
     def process_driver_query(self, query: str):
         """

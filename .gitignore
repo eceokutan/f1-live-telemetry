@@ -2,6 +2,7 @@
 venv/
 env/
 ENV/
+venv_old/
 
 # Python
 __pycache__/
@@ -20,6 +21,7 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
@@ -42,3 +44,22 @@ logs/
 # Model checkpoints
 *.pt
 *.pth
+
+# Test files and utilities
+test_*.py
+list_audio_devices.py
+
+# Installers
+*.exe
+
+# Batch/PowerShell scripts (if local-only)
+run.bat
+run.ps1
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary Python files
+nul

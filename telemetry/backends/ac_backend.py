@@ -239,6 +239,7 @@ class AcTelemetryWorker(QtCore.QThread):
         frame_count = 0
         last_debug_time = time.time()
         last_lap_id = -1
+        baseline_lap = None  # Track starting lap for normalization
 
         print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
         print("   📍 IMPORTANT: Make sure you're IN THE CAR and DRIVING!")
@@ -252,9 +253,19 @@ class AcTelemetryWorker(QtCore.QThread):
                 now = time.time()
                 elapsed = now - t0
 
+                # Use graphics carCoordinates for position
+                # Note: This may be (0,0) in some AC versions/configs, but it's the only position data available
                 x = gfx.carCoordinates[0]
                 z = gfx.carCoordinates[2]
-                lap_id = gfx.completedLaps
+                raw_lap_id = gfx.completedLaps
+
+                # Initialize baseline on first read to handle mid-race starts
+                if baseline_lap is None:
+                    baseline_lap = raw_lap_id
+                    print(f"[INFO] Baseline lap set to {baseline_lap} (normalizing to lap 0)")
+
+                # Normalize lap number so it always starts from 0
+                lap_id = raw_lap_id - baseline_lap
                 speed = phys.speedKmh
 
                 # Convert AC gear to display gear

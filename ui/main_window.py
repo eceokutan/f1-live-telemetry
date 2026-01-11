@@ -307,8 +307,9 @@ class MainWindow(QMainWindow):
 
         self.current_lap_samples.append(sample)
 
-        # Throttled updates (every 5 samples ~12Hz at 60Hz telemetry)
-        if len(self.current_lap_samples) % 5 == 0:
+        # Throttled updates (every 20 samples ~3Hz at 60Hz telemetry)
+        # Reduced from 5 to prevent UI overload
+        if len(self.current_lap_samples) % 20 == 0:
             self._update_realtime_visualizations()
 
     def _update_realtime_visualizations(self):
@@ -322,6 +323,22 @@ class MainWindow(QMainWindow):
             zs = np.array([s["z"] for s in self.current_lap_samples], dtype=float)
             speeds = np.array([s["speed"] for s in self.current_lap_samples], dtype=float)
             times = np.array([s["t"] for s in self.current_lap_samples], dtype=float)
+
+            # Note: Position (x,z) may be (0,0) in some AC configurations
+            # We still plot the graphs (speed, RPM, etc.) even if position is unavailable
+            # Track map will just show origin, but telemetry data is still valid
+
+            # Check for monotonically increasing times (no backwards jumps)
+            if len(times) > 1 and not np.all(np.diff(times) >= 0):
+                # Times went backwards - lap was reset, clear buffer
+                print("⚠️  Warning: Time went backwards, clearing buffer")
+                self.current_lap_samples = []
+                return
+
+            # Debug: Print when actually updating graphs
+            if len(self.current_lap_samples) % 60 == 0:  # Print every second
+                print(f"📊 Updating graphs: {len(self.current_lap_samples)} samples, pos=({xs[-1]:.1f}, {zs[-1]:.1f})")
+
             gears = np.array([s.get("gear", 0) for s in self.current_lap_samples], dtype=float)
             rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
             brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)

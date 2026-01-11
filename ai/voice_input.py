@@ -52,7 +52,7 @@ class VoiceInputWorker(QtCore.QThread):
     FORMAT = pyaudio.paInt16  # 16-bit PCM
 
     # VAD configuration
-    VAD_THRESHOLD = 0.5  # Speech probability threshold
+    VAD_THRESHOLD = 0.3  # Speech probability threshold (lowered from 0.5 for better detection)
     SPEECH_PAD_MS = 300  # Padding before/after speech (ms)
     MIN_SPEECH_DURATION_MS = 500  # Minimum speech duration to process
 
@@ -106,7 +106,7 @@ class VoiceInputWorker(QtCore.QThread):
             self._initialize_watson_stt()
             self._initialize_audio()
 
-            self.status_update.emit("🎤 Voice input ready - speak naturally!")
+            self.status_update.emit("[Voice] Voice input ready - speak naturally!")
 
             # Main audio processing loop
             while self._running:
@@ -132,6 +132,16 @@ class VoiceInputWorker(QtCore.QThread):
                     # Detect speech
                     speech_prob = self._detect_speech(audio_float32)
 
+                    # Debug: Print speech probability periodically
+                    if hasattr(self, '_vad_debug_counter'):
+                        self._vad_debug_counter += 1
+                    else:
+                        self._vad_debug_counter = 0
+
+                    # Print VAD probability every 2 seconds (~125 chunks at 16kHz)
+                    if self._vad_debug_counter % 125 == 0:
+                        logger.info(f"[VAD] Speech probability: {speech_prob:.3f} (threshold: {self.VAD_THRESHOLD})")
+
                     # Process based on VAD state
                     if speech_prob > self.VAD_THRESHOLD:
                         # Speech detected
@@ -139,7 +149,8 @@ class VoiceInputWorker(QtCore.QThread):
                             self._is_speaking = True
                             self._speech_buffer = []
                             self.vad_state_changed.emit(True)
-                            logger.debug("Speech started")
+                            logger.info("[VAD] Speech started - recording...")
+                            self.status_update.emit("[Voice] Listening...")
 
                         self._speech_buffer.append(audio_int16)
                         self._silence_chunks = 0
@@ -156,14 +167,17 @@ class VoiceInputWorker(QtCore.QThread):
                                 # End of speech - transcribe
                                 self._is_speaking = False
                                 self.vad_state_changed.emit(False)
-                                logger.debug("Speech ended")
+                                logger.info("[VAD] Speech ended")
 
                                 # Check minimum duration
                                 duration_ms = len(self._speech_buffer) * (self.CHUNK_SIZE / self.SAMPLE_RATE) * 1000
+                                logger.info(f"[VAD] Recorded {duration_ms:.0f}ms of speech (min: {self.MIN_SPEECH_DURATION_MS}ms)")
                                 if duration_ms >= self.MIN_SPEECH_DURATION_MS:
+                                    self.status_update.emit("[Voice] Transcribing speech...")
                                     self._transcribe_speech()
                                 else:
-                                    logger.debug(f"Speech too short ({duration_ms:.0f}ms), ignoring")
+                                    logger.info(f"[VAD] Speech too short ({duration_ms:.0f}ms), ignoring")
+                                    self.status_update.emit(f"[Voice] Speech too short ({duration_ms:.0f}ms)")
 
                                 self._speech_buffer = []
                                 self._silence_chunks = 0
@@ -234,20 +248,50 @@ class VoiceInputWorker(QtCore.QThread):
 
             # Find default input device
             device_info = self.audio.get_default_input_device_info()
-            logger.info(f"Using microphone: {device_info['name']}")
+            device_name = device_info['name']
+            device_rate = int(device_info['defaultSampleRate'])
 
-            self.stream = self.audio.open(
-                format=self.FORMAT,
-                channels=self.CHANNELS,
-                rate=self.SAMPLE_RATE,
-                input=True,
-                frames_per_buffer=self.CHUNK_SIZE
-            )
+            logger.info(f"Using microphone: {device_name}")
+            logger.info(f"Device default sample rate: {device_rate} Hz")
+            logger.info(f"Requested sample rate: {self.SAMPLE_RATE} Hz")
 
-            logger.info("Audio stream opened successfully")
+            self.status_update.emit(f"Using microphone: {device_name}")
+
+            # Open audio stream with error handling for sample rate
+            try:
+                self.stream = self.audio.open(
+                    format=self.FORMAT,
+                    channels=self.CHANNELS,
+                    rate=self.SAMPLE_RATE,
+                    input=True,
+                    frames_per_buffer=self.CHUNK_SIZE,
+                    input_device_index=device_info['index']
+                )
+                logger.info(f"Audio stream opened successfully at {self.SAMPLE_RATE} Hz")
+                self.status_update.emit("Microphone ready - speak naturally!")
+
+            except Exception as stream_error:
+                # Try with device's native sample rate if 16kHz fails
+                logger.warning(f"Failed at {self.SAMPLE_RATE} Hz: {stream_error}")
+                logger.info(f"Retrying with device native rate: {device_rate} Hz")
+
+                # Update sample rate to match device
+                self.SAMPLE_RATE = device_rate
+
+                self.stream = self.audio.open(
+                    format=self.FORMAT,
+                    channels=self.CHANNELS,
+                    rate=self.SAMPLE_RATE,
+                    input=True,
+                    frames_per_buffer=self.CHUNK_SIZE,
+                    input_device_index=device_info['index']
+                )
+                logger.info(f"Audio stream opened at native rate: {self.SAMPLE_RATE} Hz")
+                self.status_update.emit(f"Microphone ready ({self.SAMPLE_RATE} Hz) - speak naturally!")
 
         except Exception as e:
             logger.error(f"Failed to open audio stream: {e}", exc_info=True)
+            self.error_occurred.emit(f"Microphone initialization failed: {e}")
             raise RuntimeError(f"Microphone initialization failed: {e}")
 
     def _detect_speech(self, audio_chunk: np.ndarray) -> float:
@@ -299,13 +343,17 @@ class VoiceInputWorker(QtCore.QThread):
                 transcript = response['results'][0]['alternatives'][0]['transcript'].strip()
 
                 if transcript:
-                    logger.info(f"Transcribed: {transcript}")
+                    logger.info(f"[STT] Transcribed: {transcript}")
+                    logger.info(f"[STT] Emitting speech_detected signal with transcript: {transcript}")
                     self.speech_detected.emit(transcript)
-                    self.status_update.emit(f"Heard: \"{transcript}\"")
+                    logger.info(f"[STT] Signal emitted successfully")
+                    self.status_update.emit(f"[Voice] Heard: \"{transcript}\"")
                 else:
-                    logger.debug("Empty transcript")
+                    logger.info("[STT] Empty transcript received")
+                    self.status_update.emit("[Voice] No speech detected")
             else:
-                logger.debug("No speech recognized")
+                logger.info("[STT] No speech recognized in audio")
+                self.status_update.emit("[Voice] No speech detected")
 
         except Exception as e:
             logger.error(f"Transcription error: {e}", exc_info=True)
