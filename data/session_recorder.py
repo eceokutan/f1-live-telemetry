@@ -332,7 +332,7 @@ class SessionRecorder(QtCore.QThread):
                 "pos_z": sample.get("z", 0.0),
                 "speed": sample.get("speed", 0.0),
                 "gear": sample.get("gear", 0),
-                "rpm": sample.get("rpm", 0),
+                "rpm": sample.get("rpms", 0),  # AC sends "rpms" (with s)
                 "throttle": sample.get("throttle", 0.0),
                 "brake": sample.get("brake", 0.0),
                 "fuel": sample.get("fuel", 0.0),

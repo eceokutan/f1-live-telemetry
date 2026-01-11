@@ -258,8 +258,8 @@ def main(game: str = "ac", enable_ai: bool = False):
             def on_session_info(info: dict):
                 """Start recording session when we get track/car info."""
                 session_info["track"] = info.get("track", "")
-                session_info["car"] = info.get("car", "")
-                session_info["player"] = info.get("player", "")
+                session_info["car"] = info.get("car_model", "")  # AC sends "car_model"
+                session_info["player"] = info.get("player_name", "")  # AC sends "player_name"
 
                 # Start recording session
                 if recorder_thread and not recorder_thread.session_id:
