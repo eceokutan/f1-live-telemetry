@@ -179,6 +179,37 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   - `python -m data.session_viewer export <session_id>` - Export to CSV files
 - **Export format**: CSV files for telemetry, laps, AI commentary
 
+### eima_ai Integration Components
+
+The `eima_ai/` folder contains the AI race engineer system that's integrated into our telemetry dashboard. Only the essential modules are kept - all demo files, tests, and unused utilities have been removed for clarity.
+
+**Structure:**
+```
+eima_ai/
+├── config/
+│   ├── config.py - Configuration models (ThresholdsConfig, VerbosityConfig, etc.)
+├── jarvis_granite/
+│   ├── agents/
+│   │   ├── telemetry_agent.py - Event detection (fuel warnings, tire issues, etc.)
+│   │   └── race_engineer_agent.py - LLM-powered response generation
+│   ├── live/
+│   │   └── context.py - LiveSessionContext for maintaining session state
+│   ├── llm/
+│   │   └── llm_client.py - IBM WatsonX LLM client wrapper
+│   ├── prompts/
+│   │   └── live_prompts.py - Prompt templates for proactive/reactive responses
+│   └── schemas/
+│       ├── events.py - Event data models
+│       ├── messages.py - Message data models
+│       └── telemetry.py - TelemetryData, TireTemps, TirePressure models
+```
+
+**How it integrates:**
+- `ai/race_engineer.py` imports these modules using dynamic file loading (to avoid import conflicts)
+- AC telemetry data is converted to eima_ai's Pydantic models
+- TelemetryAgent detects events, RaceEngineerAgent generates AI responses
+- Responses are emitted back to main UI via Qt signals
+
 ### Data Flow
 
 **Real-time Visualization (every frame ~60Hz):**
