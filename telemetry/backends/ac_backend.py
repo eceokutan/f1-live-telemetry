@@ -295,6 +295,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     "rpms": phys.rpms,
                     "brake": phys.brake,
                     "throttle": phys.gas,
+                    "fuel": phys.fuel,
                     # Tire data (4 values: FL, FR, RL, RR)
                     "tyre_pressure_fl": phys.wheelsPressure[0],
                     "tyre_pressure_fr": phys.wheelsPressure[1],
@@ -317,6 +318,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     rpms=phys.rpms,
                     brake=phys.brake,
                     throttle=phys.gas,
+                    fuel=phys.fuel,
                     # Tire data
                     tyre_pressure_fl=phys.wheelsPressure[0],
                     tyre_pressure_fr=phys.wheelsPressure[1],

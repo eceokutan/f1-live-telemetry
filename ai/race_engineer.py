@@ -366,7 +366,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         # Create TelemetryData
         return TelemetryData(
             speed=data.get("speed", 0.0),
-            rpms=data.get("rpm", 0),
+            rpms=data.get("rpms", 0),  # AC sends "rpms" (with s)
             gear=data.get("gear", 0),
             throttle=data.get("throttle", 0.0),
             brake=data.get("brake", 0.0),
