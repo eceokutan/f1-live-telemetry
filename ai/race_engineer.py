@@ -312,6 +312,11 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 logger.error(f"LLM error: {llm_error}", exc_info=True)
                 raise
 
+            # Check for empty response and provide fallback
+            if not response or not response.strip():
+                logger.warning("LLM returned empty response, using fallback")
+                response = "I heard your question but I'm having trouble generating a response right now. Could you please rephrase your question about your race situation?"
+
             # Emit as AI commentary with special trigger
             self.ai_commentary.emit(response, "driver_query", 2)  # MEDIUM priority
             logger.info(f"AI response to query: {response[:50]}...")
