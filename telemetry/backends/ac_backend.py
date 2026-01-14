@@ -241,6 +241,11 @@ class AcTelemetryWorker(QtCore.QThread):
         last_lap_id = -1
         baseline_lap = None  # Track starting lap for normalization
 
+        # Position integration (since carCoordinates is often zero in AC)
+        integrated_x = 0.0
+        integrated_z = 0.0
+        last_time = t0
+
         print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
         print("   📍 IMPORTANT: Make sure you're IN THE CAR and DRIVING!")
         print("   📍 Car coordinates will only appear when physics is active\n")
@@ -252,11 +257,21 @@ class AcTelemetryWorker(QtCore.QThread):
 
                 now = time.time()
                 elapsed = now - t0
+                dt = now - last_time
+                last_time = now
 
-                # Use graphics carCoordinates for position
-                # Note: This may be (0,0) in some AC versions/configs, but it's the only position data available
+                # Check if carCoordinates has data (non-zero)
                 x = gfx.carCoordinates[0]
                 z = gfx.carCoordinates[2]
+
+                # If carCoordinates is zero, integrate velocity to estimate position
+                if x == 0.0 and z == 0.0 and dt > 0:
+                    # Integrate velocity: position += velocity * dt
+                    integrated_x += phys.velocity[0] * dt
+                    integrated_z += phys.velocity[2] * dt
+                    x = integrated_x
+                    z = integrated_z
+
                 raw_lap_id = gfx.completedLaps
 
                 # Initialize baseline on first read to handle mid-race starts
@@ -293,6 +308,9 @@ class AcTelemetryWorker(QtCore.QThread):
                 # Debug print when lap changes
                 if lap_id != last_lap_id and last_lap_id != -1:
                     print(f"\n🏁 LAP COMPLETED! Lap {last_lap_id+1} -> {lap_id+1}\n")
+                    # Reset integrated position at lap change
+                    integrated_x = 0.0
+                    integrated_z = 0.0
                 last_lap_id = lap_id
 
                 # Create sample dict
