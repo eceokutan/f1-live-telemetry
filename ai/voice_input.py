@@ -61,8 +61,8 @@ class VoiceInputWorker(QtCore.QThread):
 
     # VAD configuration
     VAD_THRESHOLD = 0.3  # Speech probability threshold (lowered from 0.5 for better detection)
-    SPEECH_PAD_MS = 300  # Padding before/after speech (ms)
-    MIN_SPEECH_DURATION_MS = 500  # Minimum speech duration to process
+    SPEECH_PAD_MS = 150  # Padding before/after speech (ms)
+    MIN_SPEECH_DURATION_MS = 300  # Minimum speech duration to process
 
     def __init__(
         self,
