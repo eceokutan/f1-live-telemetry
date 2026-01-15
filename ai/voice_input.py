@@ -6,9 +6,14 @@ Provides hands-free voice input using:
 - Silero VAD for voice activity detection (local, neural network)
 - IBM Watson Speech-to-Text for transcription (cloud API)
 
+Supports two modes:
+- Batch mode (default): Buffers speech, sends after silence detected
+- Streaming mode: Real-time WebSocket streaming for lower latency (~500-1000ms faster)
+
 No button press required - automatically detects when driver is speaking.
 """
 
+import asyncio
 import os
 import io
 import time
@@ -22,6 +27,9 @@ from PyQt5 import QtCore
 # IBM Watson STT
 from ibm_watson import SpeechToTextV1
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
+
+# Streaming STT client
+from ai.streaming_stt import StreamingSTTClient
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +68,8 @@ class VoiceInputWorker(QtCore.QThread):
         self,
         watson_api_key: str,
         watson_url: str,
-        model: str = "en-US_BroadbandModel"
+        model: str = "en-US_BroadbandModel",
+        use_streaming: bool = False
     ):
         """
         Initialize voice input worker.
@@ -69,12 +78,14 @@ class VoiceInputWorker(QtCore.QThread):
             watson_api_key: IBM Watson STT API key
             watson_url: Watson STT service URL
             model: Watson STT model to use
+            use_streaming: Use WebSocket streaming for lower latency (default: False)
         """
         super().__init__()
 
         self.watson_api_key = watson_api_key
         self.watson_url = watson_url
         self.model = model
+        self.use_streaming = use_streaming
 
         # Audio stream
         self.audio = None
@@ -83,8 +94,12 @@ class VoiceInputWorker(QtCore.QThread):
         # Silero VAD model
         self.vad_model = None
 
-        # Watson STT client
+        # Watson STT client (batch mode)
         self.stt_client = None
+
+        # Streaming STT client (streaming mode)
+        self._streaming_client: Optional[StreamingSTTClient] = None
+        self._streaming_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
         # State
         self._running = False
@@ -93,7 +108,7 @@ class VoiceInputWorker(QtCore.QThread):
         self._speech_buffer = []
         self._silence_chunks = 0
 
-        logger.info("VoiceInputWorker initialized")
+        logger.info(f"VoiceInputWorker initialized (streaming={use_streaming})")
 
     def run(self):
         """Main thread execution loop."""
@@ -103,10 +118,19 @@ class VoiceInputWorker(QtCore.QThread):
         try:
             # Initialize components
             self._initialize_vad()
-            self._initialize_watson_stt()
+
+            # Initialize STT based on mode
+            if self.use_streaming:
+                self._init_streaming_client()
+                # Create event loop for streaming
+                self._streaming_event_loop = asyncio.new_event_loop()
+            else:
+                self._initialize_watson_stt()
+
             self._initialize_audio()
 
-            self.status_update.emit("[Voice] Voice input ready - speak naturally!")
+            mode_str = "streaming" if self.use_streaming else "batch"
+            self.status_update.emit(f"[Voice] Voice input ready ({mode_str}) - speak naturally!")
 
             # Main audio processing loop
             while self._running:
@@ -152,7 +176,16 @@ class VoiceInputWorker(QtCore.QThread):
                             logger.info("[VAD] Speech started - recording...")
                             self.status_update.emit("[Voice] Listening...")
 
-                        self._speech_buffer.append(audio_int16)
+                            # Start streaming session if in streaming mode
+                            if self.use_streaming:
+                                self._start_streaming_session()
+
+                        # In streaming mode, send audio immediately
+                        if self.use_streaming:
+                            self._send_audio_streaming(audio_int16)
+                        else:
+                            self._speech_buffer.append(audio_int16)
+
                         self._silence_chunks = 0
 
                     else:
@@ -160,24 +193,32 @@ class VoiceInputWorker(QtCore.QThread):
                         if self._is_speaking:
                             self._silence_chunks += 1
 
-                            # Continue buffering for a bit (padding)
+                            # Continue buffering/streaming for a bit (padding)
                             if self._silence_chunks < self._chunks_for_ms(self.SPEECH_PAD_MS):
-                                self._speech_buffer.append(audio_int16)
+                                if self.use_streaming:
+                                    self._send_audio_streaming(audio_int16)
+                                else:
+                                    self._speech_buffer.append(audio_int16)
                             else:
-                                # End of speech - transcribe
+                                # End of speech
                                 self._is_speaking = False
                                 self.vad_state_changed.emit(False)
                                 logger.info("[VAD] Speech ended")
 
-                                # Check minimum duration
-                                duration_ms = len(self._speech_buffer) * (self.CHUNK_SIZE / self.SAMPLE_RATE) * 1000
-                                logger.info(f"[VAD] Recorded {duration_ms:.0f}ms of speech (min: {self.MIN_SPEECH_DURATION_MS}ms)")
-                                if duration_ms >= self.MIN_SPEECH_DURATION_MS:
-                                    self.status_update.emit("[Voice] Transcribing speech...")
-                                    self._transcribe_speech()
+                                if self.use_streaming:
+                                    # Stop streaming session - transcript comes via callback
+                                    self._stop_streaming_session()
+                                    self.status_update.emit("[Voice] Processing...")
                                 else:
-                                    logger.info(f"[VAD] Speech too short ({duration_ms:.0f}ms), ignoring")
-                                    self.status_update.emit(f"[Voice] Speech too short ({duration_ms:.0f}ms)")
+                                    # Batch mode - check minimum duration and transcribe
+                                    duration_ms = len(self._speech_buffer) * (self.CHUNK_SIZE / self.SAMPLE_RATE) * 1000
+                                    logger.info(f"[VAD] Recorded {duration_ms:.0f}ms of speech (min: {self.MIN_SPEECH_DURATION_MS}ms)")
+                                    if duration_ms >= self.MIN_SPEECH_DURATION_MS:
+                                        self.status_update.emit("[Voice] Transcribing speech...")
+                                        self._transcribe_speech()
+                                    else:
+                                        logger.info(f"[VAD] Speech too short ({duration_ms:.0f}ms), ignoring")
+                                        self.status_update.emit(f"[Voice] Speech too short ({duration_ms:.0f}ms)")
 
                                 self._speech_buffer = []
                                 self._silence_chunks = 0
@@ -410,3 +451,118 @@ class VoiceInputWorker(QtCore.QThread):
         """Stop the voice input worker."""
         logger.info("Stopping voice input...")
         self._running = False
+
+        # Stop streaming session if active
+        if self.use_streaming and self._streaming_client:
+            self._stop_streaming_session()
+
+    # =========================================================================
+    # STREAMING MODE METHODS
+    # =========================================================================
+
+    def _init_streaming_client(self):
+        """Initialize the streaming STT client."""
+        if self._streaming_client is not None:
+            return
+
+        self._streaming_client = StreamingSTTClient(
+            api_key=self.watson_api_key,
+            service_url=self.watson_url,
+            model=self.model,
+            sample_rate=self.SAMPLE_RATE
+        )
+
+        # Register callbacks
+        self._streaming_client.on_transcript(self._on_streaming_transcript)
+        self._streaming_client.on_partial(self._on_streaming_partial)
+        self._streaming_client.on_error(self._on_streaming_error)
+
+        logger.info("Streaming STT client initialized")
+
+    def _start_streaming_session(self):
+        """Start a streaming STT session."""
+        if not self.use_streaming:
+            return
+
+        self._init_streaming_client()
+
+        # Create event loop for async operations if needed
+        if self._streaming_event_loop is None:
+            self._streaming_event_loop = asyncio.new_event_loop()
+
+        # Start streaming in the event loop
+        try:
+            self._streaming_event_loop.run_until_complete(
+                self._streaming_client.start_streaming()
+            )
+            logger.info("Streaming STT session started")
+            self.status_update.emit("[Voice] Streaming mode active")
+        except Exception as e:
+            logger.error(f"Failed to start streaming session: {e}")
+            self.error_occurred.emit(f"Streaming start failed: {e}")
+
+    def _stop_streaming_session(self):
+        """Stop the streaming STT session."""
+        if not self._streaming_client:
+            return
+
+        try:
+            if self._streaming_event_loop:
+                self._streaming_event_loop.run_until_complete(
+                    self._streaming_client.stop_streaming()
+                )
+            logger.info("Streaming STT session stopped")
+        except Exception as e:
+            logger.error(f"Error stopping streaming session: {e}")
+
+    def _send_audio_streaming(self, audio_data: np.ndarray):
+        """
+        Send audio chunk to streaming STT.
+
+        Args:
+            audio_data: Audio data as numpy int16 array
+        """
+        if not self._streaming_client or not self._streaming_client.is_streaming:
+            return
+
+        try:
+            if self._streaming_event_loop:
+                self._streaming_event_loop.run_until_complete(
+                    self._streaming_client.send_audio(audio_data)
+                )
+        except Exception as e:
+            logger.error(f"Error sending audio to streaming STT: {e}")
+
+    def _on_streaming_transcript(self, transcript: str):
+        """
+        Handle final transcript from streaming STT.
+
+        Args:
+            transcript: Final transcribed text
+        """
+        if transcript:
+            logger.info(f"[STT Streaming] Final transcript: {transcript}")
+            self.speech_detected.emit(transcript)
+            self.status_update.emit(f"[Voice] Heard: \"{transcript}\"")
+
+    def _on_streaming_partial(self, transcript: str):
+        """
+        Handle partial (interim) transcript from streaming STT.
+
+        Args:
+            transcript: Partial transcribed text
+        """
+        if transcript:
+            logger.debug(f"[STT Streaming] Partial: {transcript}")
+            # Optionally emit status update for partial results
+            # self.status_update.emit(f"[Voice] Hearing: \"{transcript}...\"")
+
+    def _on_streaming_error(self, error: str):
+        """
+        Handle error from streaming STT.
+
+        Args:
+            error: Error message
+        """
+        logger.error(f"[STT Streaming] Error: {error}")
+        self.error_occurred.emit(f"STT streaming error: {error}")
