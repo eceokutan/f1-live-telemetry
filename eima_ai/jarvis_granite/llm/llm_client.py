@@ -55,7 +55,7 @@ class LLMClient:
         watsonx_project_id: str,
         watsonx_api_key: str,
         model_id: str = "ibm/granite-3-8b-instruct",
-        max_tokens: int = 150,
+        max_tokens: int = 75,  # Reduced from 150 for faster responses (~200-400ms savings)
         temperature: float = 0.7,
         max_retries: int = 3,
         min_retry_wait: float = 1.0,
@@ -69,7 +69,7 @@ class LLMClient:
             watsonx_project_id: WatsonX project ID
             watsonx_api_key: WatsonX API key
             model_id: Model identifier (default: ibm/granite-3-8b-instruct)
-            max_tokens: Maximum response tokens (default: 150)
+            max_tokens: Maximum response tokens (default: 75, reduced for racing brevity)
             temperature: Response temperature (default: 0.7)
             max_retries: Max retry attempts (default: 3)
             min_retry_wait: Minimum wait between retries in seconds (default: 1.0)

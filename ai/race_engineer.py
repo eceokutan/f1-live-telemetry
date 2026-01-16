@@ -106,7 +106,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         watsonx_api_key: str,
         track_name: str = "Unknown Track",
         session_id: str = "ac_session_001",
-        verbosity: str = "moderate"
+        verbosity: str = "minimal"
     ):
         """
         Initialize AI Race Engineer.
@@ -188,11 +188,14 @@ class AIRaceEngineerWorker(QtCore.QThread):
     def _initialize_agents(self):
         """Initialize TelemetryAgent and RaceEngineerAgent."""
         # Create LLM client
+        # max_tokens=75 for faster responses (~200-400ms savings over 150 tokens)
+        # Racing comms should be brief anyway
         llm_client = LLMClient(
             watsonx_url=self.watsonx_url,
             watsonx_project_id=self.watsonx_project_id,
             watsonx_api_key=self.watsonx_api_key,
             model_id="ibm/granite-3-8b-instruct",  # granite-4-h-small not available in this environment
+            max_tokens=75,  # Latency optimization: shorter responses
             max_retries=2
         )
 
