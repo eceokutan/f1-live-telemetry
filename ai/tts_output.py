@@ -5,9 +5,10 @@ Provides audio output for AI race engineer responses using:
 - IBM Watson Text-to-Speech for synthesis (cloud API)
 - PyAudio for audio playback (local)
 
-Supports two modes:
+Supports three modes:
 - Batch mode (default): Full synthesis before playback
 - Streaming mode: Start playback while still receiving audio (~300-500ms faster)
+- Sentence pipelining mode: Speak sentence-by-sentence (~500-1000ms faster for multi-sentence)
 
 Synthesizes AI responses and plays them through the default audio output device.
 """
@@ -23,6 +24,9 @@ import aiohttp
 
 # Streaming TTS client
 from ai.streaming_tts import StreamingTTSClient, StreamingAudioPlayer
+
+# Sentence pipelining
+from ai.sentence_pipelining import SentencePipelinedTTS
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +98,8 @@ class TTSOutputWorker(QtCore.QThread):
         watson_api_key: str,
         watson_url: str,
         voice: str = "en-GB_JamesV3Voice",
-        use_streaming: bool = False
+        use_streaming: bool = False,
+        use_sentence_pipelining: bool = False
     ):
         """
         Initialize TTS output worker.
@@ -104,6 +109,8 @@ class TTSOutputWorker(QtCore.QThread):
             watson_url: Watson TTS service URL
             voice: Watson TTS voice to use (default: British male race engineer)
             use_streaming: Use streaming playback for lower latency (default: False)
+            use_sentence_pipelining: Speak sentence-by-sentence for multi-sentence
+                                     responses (~500-1000ms faster). Default: False.
         """
         super().__init__()
 
@@ -111,6 +118,7 @@ class TTSOutputWorker(QtCore.QThread):
         self.watson_url = watson_url
         self.voice = voice
         self.use_streaming = use_streaming
+        self.use_sentence_pipelining = use_sentence_pipelining
 
         # Watson TTS client (batch mode)
         self.tts_client = None
@@ -118,6 +126,9 @@ class TTSOutputWorker(QtCore.QThread):
         # Streaming TTS client and player (streaming mode)
         self._streaming_tts_client: Optional[StreamingTTSClient] = None
         self._streaming_player: Optional[StreamingAudioPlayer] = None
+
+        # Sentence pipelining (pipelining mode)
+        self._pipelined_tts: Optional[SentencePipelinedTTS] = None
 
         # Audio playback
         self.audio = None
@@ -129,7 +140,8 @@ class TTSOutputWorker(QtCore.QThread):
         # Message queue (initialized in run() after event loop is created)
         self.message_queue: Optional[asyncio.Queue] = None
 
-        logger.info(f"TTSOutputWorker initialized with voice={voice}, streaming={use_streaming}")
+        mode_str = "pipelined" if use_sentence_pipelining else ("streaming" if use_streaming else "batch")
+        logger.info(f"TTSOutputWorker initialized with voice={voice}, mode={mode_str}")
 
     def run(self):
         """Main thread execution loop."""
@@ -145,13 +157,16 @@ class TTSOutputWorker(QtCore.QThread):
             self.message_queue = asyncio.Queue()
 
             # Initialize components based on mode
-            if self.use_streaming:
+            if self.use_sentence_pipelining:
+                self._initialize_tts_client()  # Need batch client for sentence TTS
+                self._initialize_pipelined_tts()
+            elif self.use_streaming:
                 self._initialize_streaming_client()
             else:
                 self._initialize_tts_client()
             self._initialize_audio()
 
-            mode_str = "streaming" if self.use_streaming else "batch"
+            mode_str = "pipelined" if self.use_sentence_pipelining else ("streaming" if self.use_streaming else "batch")
             self.status_update.emit(f"TTS output ready ({mode_str})")
 
             # Run async processing loop
@@ -208,8 +223,10 @@ class TTSOutputWorker(QtCore.QThread):
 
                 logger.info(f"Synthesizing TTS for: {message[:50]}...")
 
-                # Use streaming or batch mode
-                if self.use_streaming:
+                # Use pipelined, streaming, or batch mode
+                if self.use_sentence_pipelining:
+                    await self._synthesize_and_play_pipelined(message)
+                elif self.use_streaming:
                     await self._synthesize_and_play_streaming(message)
                 else:
                     await self._synthesize_and_play(message)
@@ -431,3 +448,83 @@ class TTSOutputWorker(QtCore.QThread):
         """
         logger.error(f"[TTS Streaming] Error: {error}")
         self.error_occurred.emit(f"Streaming TTS error: {error}")
+
+    # =========================================================================
+    # SENTENCE PIPELINING MODE METHODS
+    # =========================================================================
+
+    def _initialize_pipelined_tts(self):
+        """Initialize the sentence-pipelined TTS handler."""
+        try:
+            self.status_update.emit("Initializing sentence-pipelined TTS...")
+
+            # Create pipelined TTS with our sentence speak callback
+            self._pipelined_tts = SentencePipelinedTTS(
+                speak_callback=self._speak_single_sentence
+            )
+
+            # Set up callbacks
+            self._pipelined_tts.on_sentence_started(self._on_sentence_started)
+            self._pipelined_tts.on_sentence_completed(self._on_sentence_completed)
+            self._pipelined_tts.on_all_completed(self._on_all_sentences_completed)
+
+            logger.info("Sentence-pipelined TTS initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize pipelined TTS: {e}", exc_info=True)
+            raise RuntimeError(f"Pipelined TTS initialization failed: {e}")
+
+    async def _synthesize_and_play_pipelined(self, text: str):
+        """
+        Synthesize and play using sentence pipelining.
+
+        Splits text into sentences and speaks them one by one,
+        reducing perceived latency for multi-sentence responses.
+
+        Args:
+            text: Text to synthesize and play
+        """
+        try:
+            self.status_update.emit("Pipelined synthesis...")
+            self.playback_started.emit()
+
+            # Use pipelined TTS to speak sentence by sentence
+            await self._pipelined_tts.speak(text)
+
+        except Exception as e:
+            logger.error(f"Pipelined TTS error: {e}", exc_info=True)
+            self.error_occurred.emit(f"Pipelined TTS error: {e}")
+
+    async def _speak_single_sentence(self, sentence: str):
+        """
+        Speak a single sentence (callback for SentencePipelinedTTS).
+
+        Args:
+            sentence: Single sentence to synthesize and play
+        """
+        try:
+            # Synthesize using Watson TTS
+            audio_bytes = await self.tts_client.synthesize(sentence)
+
+            logger.debug(f"Synthesized sentence ({len(audio_bytes)} bytes): {sentence[:30]}...")
+
+            # Play audio
+            await self._play_audio_async(audio_bytes)
+
+        except Exception as e:
+            logger.error(f"Error speaking sentence: {e}", exc_info=True)
+            raise
+
+    def _on_sentence_started(self, sentence: str):
+        """Callback when a sentence starts speaking."""
+        logger.debug(f"[TTS Pipelined] Sentence started: {sentence[:30]}...")
+        self.status_update.emit(f"Speaking: {sentence[:25]}...")
+
+    def _on_sentence_completed(self, sentence: str):
+        """Callback when a sentence finishes speaking."""
+        logger.debug(f"[TTS Pipelined] Sentence completed: {sentence[:30]}...")
+
+    def _on_all_sentences_completed(self):
+        """Callback when all sentences are done."""
+        logger.info("[TTS Pipelined] All sentences complete")
+        self.playback_finished.emit()
