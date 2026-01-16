@@ -181,12 +181,13 @@ def main(game: str = "ac", enable_ai: bool = False):
 
                 # Initialize voice input (if available and credentials present)
                 if VOICE_AVAILABLE and watson_stt_api_key and watson_stt_url:
-                    print("[INFO] Initializing Voice Input...")
+                    print("[INFO] Initializing Voice Input (streaming mode)...")
                     try:
                         voice_thread = VoiceInputWorker(
                             watson_api_key=watson_stt_api_key,
                             watson_url=watson_stt_url,
-                            model="en-US_BroadbandModel"
+                            model="en-US_BroadbandModel",
+                            use_streaming=True  # Latency optimization: ~500-1000ms savings
                         )
 
                         # Connect voice signals
@@ -211,12 +212,13 @@ def main(game: str = "ac", enable_ai: bool = False):
 
                 # Initialize TTS output (if available and credentials present)
                 if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
-                    print("[INFO] Initializing TTS Output...")
+                    print("[INFO] Initializing TTS Output (sentence pipelining mode)...")
                     try:
                         tts_thread = TTSOutputWorker(
                             watson_api_key=watson_tts_api_key,
                             watson_url=watson_tts_url,
-                            voice="en-GB_JamesV3Voice"  # British male race engineer
+                            voice="en-GB_JamesV3Voice",  # British male race engineer
+                            use_sentence_pipelining=True  # Latency optimization: ~500-1000ms savings
                         )
 
                         # Connect TTS signals
