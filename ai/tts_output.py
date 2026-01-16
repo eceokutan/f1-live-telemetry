@@ -284,12 +284,18 @@ class TTSOutputWorker(QtCore.QThread):
         Args:
             text: Text to speak
         """
+        logger.info(f"[TTS] speak() called with: {text[:50]}...")
+        logger.info(f"[TTS] _event_loop={self._event_loop}, _running={self._running}, text.strip()={bool(text.strip())}")
+
         if self._event_loop and self._running and text.strip():
+            logger.info(f"[TTS] Queueing message for TTS: {text}")
             # Thread-safe: put message in queue
             asyncio.run_coroutine_threadsafe(
                 self.message_queue.put(text),
                 self._event_loop
             )
+        else:
+            logger.warning(f"[TTS] Message NOT queued - conditions not met")
 
     def _cleanup(self):
         """Clean up audio resources."""

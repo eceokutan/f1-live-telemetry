@@ -102,30 +102,36 @@ class LiveSessionContext:
             telemetry: TelemetryData snapshot from the platform
         """
         # Vehicle state
-        self.speed_kmh = telemetry.speed_kmh
-        self.rpm = telemetry.rpm
+        self.speed_kmh = telemetry.speed  # AC uses 'speed' not 'speed_kmh'
+        self.rpm = telemetry.rpms  # AC uses 'rpms' not 'rpm'
         self.gear = telemetry.gear
         self.throttle = telemetry.throttle
         self.brake = telemetry.brake
 
         # Resources
-        self.fuel_remaining = telemetry.fuel_remaining
+        self.fuel_remaining = telemetry.fuel if telemetry.fuel is not None else 0.0  # AC uses 'fuel' not 'fuel_remaining'
         self.tire_temps = {
             "fl": telemetry.tire_temps.fl,
             "fr": telemetry.tire_temps.fr,
             "rl": telemetry.tire_temps.rl,
             "rr": telemetry.tire_temps.rr,
         }
-        self.tire_wear = {
-            "fl": telemetry.tire_wear.fl,
-            "fr": telemetry.tire_wear.fr,
-            "rl": telemetry.tire_wear.rl,
-            "rr": telemetry.tire_wear.rr,
-        }
+        # Tire wear may not be available in AC
+        if telemetry.tire_wear is not None:
+            self.tire_wear = {
+                "fl": telemetry.tire_wear.fl,
+                "fr": telemetry.tire_wear.fr,
+                "rl": telemetry.tire_wear.rl,
+                "rr": telemetry.tire_wear.rr,
+            }
+        else:
+            self.tire_wear = {"fl": 100.0, "fr": 100.0, "rl": 100.0, "rr": 100.0}
 
-        # Lap and sector
-        self.current_lap = telemetry.lap_number
-        self.current_sector = telemetry.sector
+        # Lap and sector (keep current values if None in AC)
+        if telemetry.lap_number is not None:
+            self.current_lap = telemetry.lap_number
+        if telemetry.sector is not None:
+            self.current_sector = telemetry.sector
 
         # Race position (may be None)
         if telemetry.position is not None:

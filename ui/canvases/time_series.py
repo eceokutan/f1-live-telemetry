@@ -66,7 +66,18 @@ class TimeSeriesCanvas(FigureCanvas):
         """
         if t.size == 0 or y.size == 0:
             return
-        self.line.set_data(t, y)
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.draw()
+
+        # Ensure arrays are same size
+        if t.size != y.size:
+            print(f"⚠️  Warning: Array size mismatch in {self.title}: t={t.size}, y={y.size}")
+            return
+
+        try:
+            self.line.set_data(t, y)
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.draw_idle()  # Use draw_idle for better performance
+        except Exception:
+            # Matplotlib can throw errors during rendering in multithreaded environments
+            # Just skip this update and wait for the next one
+            pass

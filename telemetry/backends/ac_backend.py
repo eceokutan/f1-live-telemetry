@@ -239,6 +239,12 @@ class AcTelemetryWorker(QtCore.QThread):
         frame_count = 0
         last_debug_time = time.time()
         last_lap_id = -1
+        baseline_lap = None  # Track starting lap for normalization
+
+        # Position integration (since carCoordinates is often zero in AC)
+        integrated_x = 0.0
+        integrated_z = 0.0
+        last_time = t0
 
         print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
         print("   📍 IMPORTANT: Make sure you're IN THE CAR and DRIVING!")
@@ -251,10 +257,30 @@ class AcTelemetryWorker(QtCore.QThread):
 
                 now = time.time()
                 elapsed = now - t0
+                dt = now - last_time
+                last_time = now
 
+                # Check if carCoordinates has data (non-zero)
                 x = gfx.carCoordinates[0]
                 z = gfx.carCoordinates[2]
-                lap_id = gfx.completedLaps
+
+                # If carCoordinates is zero, integrate velocity to estimate position
+                if x == 0.0 and z == 0.0 and dt > 0:
+                    # Integrate velocity: position += velocity * dt
+                    integrated_x += phys.velocity[0] * dt
+                    integrated_z += phys.velocity[2] * dt
+                    x = integrated_x
+                    z = integrated_z
+
+                raw_lap_id = gfx.completedLaps
+
+                # Initialize baseline on first read to handle mid-race starts
+                if baseline_lap is None:
+                    baseline_lap = raw_lap_id
+                    print(f"[INFO] Baseline lap set to {baseline_lap} (normalizing to lap 0)")
+
+                # Normalize lap number so it always starts from 0
+                lap_id = raw_lap_id - baseline_lap
                 speed = phys.speedKmh
 
                 # Convert AC gear to display gear
@@ -282,6 +308,9 @@ class AcTelemetryWorker(QtCore.QThread):
                 # Debug print when lap changes
                 if lap_id != last_lap_id and last_lap_id != -1:
                     print(f"\n🏁 LAP COMPLETED! Lap {last_lap_id+1} -> {lap_id+1}\n")
+                    # Reset integrated position at lap change
+                    integrated_x = 0.0
+                    integrated_z = 0.0
                 last_lap_id = lap_id
 
                 # Create sample dict
