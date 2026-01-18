@@ -1,5 +1,5 @@
 # telemetry/lap_buffer.py
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 
 
 class LapBuffer:
@@ -14,7 +14,7 @@ class LapBuffer:
 
     def __init__(self, on_lap_complete: Callable[[int, List[Dict[str, Any]]], None]):
         self.on_lap_complete = on_lap_complete
-        self.current_lap_id: int | None = None
+        self.current_lap_id: Optional[int] = None  # Python 3.9 compatible
         self.samples: List[Dict[str, Any]] = []
 
     def add_sample(
