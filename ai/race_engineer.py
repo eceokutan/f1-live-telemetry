@@ -219,28 +219,26 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     async def _process_loop(self):
         """Async processing loop - processes telemetry, queries, and generates AI responses."""
+        # Run telemetry and query processors as separate concurrent tasks
+        # This ensures query processing (which can take 5-30s for LLM) is never cancelled
+        telemetry_task = asyncio.create_task(self._telemetry_processor())
+        query_task = asyncio.create_task(self._query_processor())
+
+        try:
+            # Wait for both tasks (they run until self._running is False)
+            await asyncio.gather(telemetry_task, query_task)
+        except Exception as e:
+            logger.error(f"Error in process loop: {e}", exc_info=True)
+
+    async def _telemetry_processor(self):
+        """Continuously process telemetry samples."""
         while self._running:
-            # Create tasks for both telemetry and query processing
-            tasks = [
-                asyncio.create_task(self._process_telemetry_queue()),
-                asyncio.create_task(self._process_query_queue())
-            ]
+            await self._process_telemetry_queue()
 
-            # Wait for either task with timeout
-            try:
-                done, pending = await asyncio.wait(
-                    tasks,
-                    timeout=1.0,
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-
-                # Cancel pending tasks
-                for task in pending:
-                    task.cancel()
-
-            except Exception as e:
-                logger.error(f"Error in process loop: {e}", exc_info=True)
-                continue
+    async def _query_processor(self):
+        """Continuously process driver queries."""
+        while self._running:
+            await self._process_query_queue()
 
     async def _process_telemetry_queue(self):
         """Process telemetry from queue."""

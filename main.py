@@ -187,7 +187,8 @@ def main(game: str = "ac", enable_ai: bool = False):
                             watson_api_key=watson_stt_api_key,
                             watson_url=watson_stt_url,
                             model="en-US_BroadbandModel",
-                            use_streaming=True  # Latency optimization: ~500-1000ms savings
+                            # use_streaming=True  # Latency optimization: ~500-1000ms savings
+                            use_streaming=False  # Disabled due to WebSocket compatibility issues with Python 3.10
                         )
 
                         # Connect voice signals
