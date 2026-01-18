@@ -60,7 +60,7 @@ Context: {session_context}
 Recent conversation:
 {conversation_history}
 
-Respond in under 15 words. Be direct and urgent if needed."""
+Respond in under 15 words. Be direct and urgent if needed. No notes or meta-commentary."""
 )
 
 PROACTIVE_PROMPT_MODERATE = PromptTemplate(
@@ -78,7 +78,8 @@ Recent conversation:
 {conversation_history}
 
 Provide a clear, actionable radio message (1-2 sentences). Be direct but informative.
-Focus on what the driver needs to know and any recommended action."""
+Focus on what the driver needs to know and any recommended action.
+Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-commentary."""
 )
 
 PROACTIVE_PROMPT_VERBOSE = PromptTemplate(
@@ -99,7 +100,8 @@ Provide a detailed radio message explaining:
 1. What happened
 2. The implications
 3. Recommended action
-Keep it under 4 sentences for clarity during racing."""
+Keep it under 4 sentences for clarity during racing.
+Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-commentary."""
 )
 
 
@@ -115,7 +117,7 @@ Context: {session_context}
 Recent conversation:
 {conversation_history}
 
-Answer in under 15 words."""
+Answer in under 15 words. Reply ONLY as the engineer speaking to the driver. No notes, explanations, or meta-commentary."""
 )
 
 REACTIVE_PROMPT_MODERATE = PromptTemplate(
@@ -131,7 +133,8 @@ Recent conversation:
 {conversation_history}
 
 Provide a clear, helpful response (1-2 sentences). Be direct and informative.
-Focus on answering the question with relevant data from the context."""
+Focus on answering the question with relevant data from the context.
+Reply ONLY as the engineer speaking directly to the driver. Do NOT include any notes, asterisks, explanations, or meta-commentary about your response."""
 )
 
 REACTIVE_PROMPT_VERBOSE = PromptTemplate(
@@ -150,7 +153,8 @@ Provide a comprehensive response that:
 1. Directly answers the question
 2. Includes relevant supporting data
 3. Offers any strategic insights if applicable
-Keep it under 4 sentences for clarity during racing."""
+Keep it under 4 sentences for clarity during racing.
+Reply ONLY as the engineer speaking directly to the driver. Do NOT include any notes, asterisks, explanations, or meta-commentary about your response."""
 )
 
 
