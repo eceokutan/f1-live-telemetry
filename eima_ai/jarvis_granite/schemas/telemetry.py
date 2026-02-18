@@ -120,12 +120,14 @@ class TelemetryData(BaseModel):
     z: Optional[float] = Field(default=0.0, description="World position Z coordinate")
 
     # Lap data (AC format)
-    lap_id: int = Field(default=0, ge=0, description="Current lap number")
+    # Note: lap_id can be negative before session starts (AC sends invalid values)
+    lap_id: int = Field(default=0, description="Current lap number (negative = pre-session)")
     t: float = Field(default=0.0, ge=0, description="Time since lap start in seconds")
 
     # Track position (optional)
     track_position: Optional[float] = Field(default=None, ge=0, le=1, description="Position on track (0-1)")
-    lap_number: Optional[int] = Field(default=None, ge=0, description="Current lap number")
+    # Note: lap_number can be negative before session starts
+    lap_number: Optional[int] = Field(default=None, description="Current lap number (negative = pre-session)")
     lap_time_current: Optional[float] = Field(default=None, ge=0, description="Current lap time in seconds")
     sector: Optional[int] = Field(default=None, ge=1, le=3, description="Current sector (1-3)")
 

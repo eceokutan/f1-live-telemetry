@@ -303,7 +303,25 @@ class MainWindow(QMainWindow):
         if self.current_lap_id is None or lap_id != self.current_lap_id:
             self.current_lap_samples = []
             self.current_lap_id = lap_id
+            # Reset track map initialization flag so it redraws properly
+            if hasattr(self.track_canvas, '_initialized'):
+                del self.track_canvas._initialized
             print(f"🏁 UI: New lap {lap_id} started")
+
+        # Detect large position jumps (hotlap teleport or lap reset)
+        if len(self.current_lap_samples) > 0:
+            last_x = self.current_lap_samples[-1].get("x", 0)
+            last_z = self.current_lap_samples[-1].get("z", 0)
+            curr_x = sample.get("x", 0)
+            curr_z = sample.get("z", 0)
+            distance = ((curr_x - last_x) ** 2 + (curr_z - last_z) ** 2) ** 0.5
+
+            # If position jumped more than 100m, clear the buffer (hotlap reset)
+            if distance > 100:
+                print(f"⚠️ UI: Large position jump detected ({distance:.0f}m), clearing buffer")
+                self.current_lap_samples = []
+                if hasattr(self.track_canvas, '_initialized'):
+                    del self.track_canvas._initialized
 
         self.current_lap_samples.append(sample)
 
@@ -335,10 +353,6 @@ class MainWindow(QMainWindow):
                 self.current_lap_samples = []
                 return
 
-            # Debug: Print when actually updating graphs
-            if len(self.current_lap_samples) % 60 == 0:  # Print every second
-                print(f"📊 Updating graphs: {len(self.current_lap_samples)} samples, pos=({xs[-1]:.1f}, {zs[-1]:.1f})")
-
             gears = np.array([s.get("gear", 0) for s in self.current_lap_samples], dtype=float)
             rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
             brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)
@@ -353,6 +367,13 @@ class MainWindow(QMainWindow):
             tyre_temp_fr = np.array([s.get("tyre_temp_fr", 0) for s in self.current_lap_samples], dtype=float)
             tyre_temp_rl = np.array([s.get("tyre_temp_rl", 0) for s in self.current_lap_samples], dtype=float)
             tyre_temp_rr = np.array([s.get("tyre_temp_rr", 0) for s in self.current_lap_samples], dtype=float)
+
+            # Debug: Print when actually updating graphs
+            if len(self.current_lap_samples) % 60 == 0:  # Print every second
+                print(f"📊 Updating graphs: {len(self.current_lap_samples)} samples, pos=({xs[-1]:.1f}, {zs[-1]:.1f})")
+                # Debug tire data to verify pressure vs temp are different
+                print(f"   Pressure FL:{tyre_pressure_fl[-1]:.1f} FR:{tyre_pressure_fr[-1]:.1f} RL:{tyre_pressure_rl[-1]:.1f} RR:{tyre_pressure_rr[-1]:.1f}")
+                print(f"   Temp FL:{tyre_temp_fl[-1]:.1f} FR:{tyre_temp_fr[-1]:.1f} RL:{tyre_temp_rl[-1]:.1f} RR:{tyre_temp_rr[-1]:.1f}")
 
             # Normalize times to start from 0
             times = times - times[0]

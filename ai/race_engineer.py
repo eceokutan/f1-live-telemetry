@@ -232,13 +232,17 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     async def _telemetry_processor(self):
         """Continuously process telemetry samples."""
+        logger.info("Telemetry processor started")
         while self._running:
             await self._process_telemetry_queue()
+        logger.info("Telemetry processor stopped")
 
     async def _query_processor(self):
         """Continuously process driver queries."""
+        logger.info("Query processor started")
         while self._running:
             await self._process_query_queue()
+        logger.info("Query processor stopped")
 
     async def _process_telemetry_queue(self):
         """Process telemetry from queue."""
