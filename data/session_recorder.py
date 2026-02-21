@@ -64,6 +64,7 @@ class SessionRecorder(QtCore.QThread):
 
         # Telemetry batch buffer
         self.telemetry_buffer: List[Dict[str, Any]] = []
+        self._last_valid_lap_number: int = 0
 
         # State
         self._running = False
@@ -323,10 +324,17 @@ class SessionRecorder(QtCore.QThread):
             return
 
         try:
+            # Sanitize lap_number — reject negative values from garbage shared memory reads
+            lap_number = sample.get("lap_id", 0)
+            if lap_number < 0:
+                lap_number = self._last_valid_lap_number
+            else:
+                self._last_valid_lap_number = lap_number
+
             # Add to buffer
             self.telemetry_buffer.append({
                 "session_id": self.session_id,
-                "lap_number": sample.get("lap_id", 0),
+                "lap_number": lap_number,
                 "elapsed_time": sample.get("t", 0.0),
                 "pos_x": sample.get("x", 0.0),
                 "pos_z": sample.get("z", 0.0),

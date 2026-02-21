@@ -240,6 +240,7 @@ class AcTelemetryWorker(QtCore.QThread):
         last_debug_time = time.time()
         last_lap_id = -1
         baseline_lap = None  # Track starting lap for normalization
+        last_valid_raw_lap = None  # Track last known good raw value for garbage detection
 
         # Position integration (since carCoordinates is often zero in AC)
         integrated_x = 0.0
@@ -274,13 +275,22 @@ class AcTelemetryWorker(QtCore.QThread):
 
                 raw_lap_id = gfx.completedLaps
 
+                # Validate raw_lap_id from shared memory — reject garbage values
+                # that occur during loading, replay, or pit states
+                if last_valid_raw_lap is not None:
+                    if raw_lap_id < 0 or abs(raw_lap_id - last_valid_raw_lap) > 1:
+                        raw_lap_id = last_valid_raw_lap
+                elif raw_lap_id < 0:
+                    raw_lap_id = 0
+                last_valid_raw_lap = raw_lap_id
+
                 # Initialize baseline on first read to handle mid-race starts
                 if baseline_lap is None:
                     baseline_lap = raw_lap_id
                     print(f"[INFO] Baseline lap set to {baseline_lap} (normalizing to lap 0)")
 
                 # Normalize lap number so it always starts from 0
-                lap_id = raw_lap_id - baseline_lap
+                lap_id = max(0, raw_lap_id - baseline_lap)
                 speed = phys.speedKmh
 
                 # Convert AC gear to display gear
@@ -298,7 +308,7 @@ class AcTelemetryWorker(QtCore.QThread):
                 frame_count += 1
                 if frame_count % 60 == 0:
                     print(f"📦 Packet #{frame_count:04d} | Lap: {lap_id+1} | Speed: {speed:6.1f} km/h | "
-                          f"Gear: {display_gear} (raw:{raw_gear}) | RPM: {phys.rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
+                          f"Gear: {display_gear} (raw:{raw_gear}) | RPM: {clamped_rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
 
                 # Debug warning if coordinates are still zero after 5 seconds
                 if frame_count == 300 and x == 0 and z == 0:
@@ -313,6 +323,9 @@ class AcTelemetryWorker(QtCore.QThread):
                     integrated_z = 0.0
                 last_lap_id = lap_id
 
+                # Clamp RPM to non-negative (shared memory can return -39 when stationary)
+                clamped_rpms = max(0, phys.rpms)
+
                 # Create sample dict
                 sample_data = {
                     "lap_id": lap_id,
@@ -321,7 +334,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     "z": z,
                     "speed": speed,
                     "gear": display_gear,
-                    "rpms": phys.rpms,
+                    "rpms": clamped_rpms,
                     "brake": phys.brake,
                     "throttle": phys.gas,
                     "fuel": phys.fuel,
@@ -344,7 +357,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     z=z,
                     speed_kmh=speed,
                     gear=display_gear,
-                    rpms=phys.rpms,
+                    rpms=clamped_rpms,
                     brake=phys.brake,
                     throttle=phys.gas,
                     fuel=phys.fuel,
