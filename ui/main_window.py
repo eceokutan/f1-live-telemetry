@@ -1,8 +1,11 @@
 """
 Main window for F1 Telemetry Dashboard.
 """
+import logging
 import numpy as np
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWidgets import (
@@ -317,7 +320,7 @@ class MainWindow(QMainWindow):
             # Reset track map initialization flag so it redraws properly
             if hasattr(self.track_canvas, '_initialized'):
                 del self.track_canvas._initialized
-            print(f"🏁 UI: New lap {lap_id} started")
+            logger.info("UI: New lap %d started", lap_id)
 
         # Detect large position jumps (hotlap teleport or lap reset)
         if len(self.current_lap_samples) > 0:
@@ -329,7 +332,7 @@ class MainWindow(QMainWindow):
 
             # If position jumped more than 100m, clear the buffer (hotlap reset)
             if distance > 100:
-                print(f"⚠️ UI: Large position jump detected ({distance:.0f}m), clearing buffer")
+                logger.warning("Large position jump detected (%.0fm), clearing buffer", distance)
                 self.current_lap_samples = []
                 if hasattr(self.track_canvas, '_initialized'):
                     del self.track_canvas._initialized
@@ -360,7 +363,7 @@ class MainWindow(QMainWindow):
             # Check for monotonically increasing times (no backwards jumps)
             if len(times) > 1 and not np.all(np.diff(times) >= 0):
                 # Times went backwards - lap was reset, clear buffer
-                print("⚠️  Warning: Time went backwards, clearing buffer")
+                logger.warning("Time went backwards, clearing buffer")
                 self.current_lap_samples = []
                 return
 
@@ -380,11 +383,9 @@ class MainWindow(QMainWindow):
             tyre_temp_rr = np.array([s.get("tyre_temp_rr", 0) for s in self.current_lap_samples], dtype=float)
 
             # Debug: Print when actually updating graphs
-            if len(self.current_lap_samples) % 60 == 0:  # Print every second
-                print(f"📊 Updating graphs: {len(self.current_lap_samples)} samples, pos=({xs[-1]:.1f}, {zs[-1]:.1f})")
-                # Debug tire data to verify pressure vs temp are different
-                print(f"   Pressure FL:{tyre_pressure_fl[-1]:.1f} FR:{tyre_pressure_fr[-1]:.1f} RL:{tyre_pressure_rl[-1]:.1f} RR:{tyre_pressure_rr[-1]:.1f}")
-                print(f"   Temp FL:{tyre_temp_fl[-1]:.1f} FR:{tyre_temp_fr[-1]:.1f} RL:{tyre_temp_rl[-1]:.1f} RR:{tyre_temp_rr[-1]:.1f}")
+            if len(self.current_lap_samples) % 60 == 0:
+                logger.debug("Updating graphs: %d samples, pos=(%.1f, %.1f)",
+                             len(self.current_lap_samples), xs[-1], zs[-1])
 
             # Normalize times to start from 0
             times = times - times[0]
@@ -404,7 +405,7 @@ class MainWindow(QMainWindow):
             ])
 
         except Exception as e:
-            print(f"❌ Error in visualization update: {e}")
+            logger.error("Visualization update error: %s", e)
 
     def handle_lap_complete(self, lap_id, samples):
         """
@@ -417,7 +418,7 @@ class MainWindow(QMainWindow):
         if not samples:
             return
 
-        print(f"🏁 UI: Lap {lap_id} completed with {len(samples)} samples")
+        logger.info("Lap %d completed with %d samples", lap_id, len(samples))
 
         times = np.array([s["t"] for s in samples], dtype=float)
         times = times - times[0]  # Normalize to start from 0
@@ -460,7 +461,7 @@ class MainWindow(QMainWindow):
             self.comms_text.setTextCursor(cursor)
             self.comms_text.ensureCursorVisible()
 
-            print(f"💬 AI Response: {message[:80]}...")
+            logger.info("AI Response: %s...", message[:80])
 
         # All other AI commentary goes to Commentator Transcript
         else:
@@ -483,7 +484,7 @@ class MainWindow(QMainWindow):
             self.comment_text.setTextCursor(cursor)
             self.comment_text.ensureCursorVisible()
 
-            print(f"💬 AI Commentary [{trigger}]: {message[:80]}...")
+            logger.info("AI Commentary [%s]: %s...", trigger, message[:80])
 
     def handle_driver_query(self, query: str):
         """
@@ -509,7 +510,7 @@ class MainWindow(QMainWindow):
         self.comms_text.setTextCursor(cursor)
         self.comms_text.ensureCursorVisible()
 
-        print(f"🎤 Driver Query: {query}")
+        logger.info("Driver Query: %s", query)
 
     def handle_vad_state_change(self, is_speaking: bool):
         """

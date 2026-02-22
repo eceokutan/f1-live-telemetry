@@ -22,14 +22,14 @@ logging.basicConfig(
     format='[%(levelname)s] %(name)s: %(message)s',
     stream=sys.stdout
 )
+logger = logging.getLogger(__name__)
+logging.getLogger("matplotlib").setLevel(logging.ERROR)
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
 
-print("="*60)
-print("F1 TELEMETRY DASHBOARD STARTING...")
-print("="*60)
+logger.info("F1 Telemetry Dashboard starting")
 
 # Import UI
 from ui.main_window import MainWindow
@@ -42,39 +42,39 @@ from telemetry.backends.acc_backend import AccTelemetryWorker
 try:
     from ai.race_engineer import AIRaceEngineerWorker
     AI_AVAILABLE = True
-    print("[OK] AI Race Engineer module available")
+    logger.info("AI Race Engineer module available")
 except ImportError as e:
     AI_AVAILABLE = False
-    print(f"[WARN] AI Race Engineer not available: {e}")
+    logger.warning("AI Race Engineer not available: %s", e)
 
 # Try to import voice input worker (optional)
 try:
     from ai.voice_input import VoiceInputWorker
     VOICE_AVAILABLE = True
-    print("[OK] Voice Input module available")
+    logger.info("Voice Input module available")
 except ImportError as e:
     VOICE_AVAILABLE = False
-    print(f"[WARN] Voice Input not available: {e}")
+    logger.warning("Voice Input not available: %s", e)
 
 # Try to import TTS output worker (optional)
 try:
     from ai.tts_output import TTSOutputWorker
     TTS_AVAILABLE = True
-    print("[OK] TTS Output module available")
+    logger.info("TTS Output module available")
 except ImportError as e:
     TTS_AVAILABLE = False
-    print(f"[WARN] TTS Output not available: {e}")
+    logger.warning("TTS Output not available: %s", e)
 
 # Try to import session recorder (optional)
 try:
     from data.session_recorder import SessionRecorder
     RECORDER_AVAILABLE = True
-    print("[OK] Session Recorder module available")
+    logger.info("Session Recorder module available")
 except ImportError as e:
     RECORDER_AVAILABLE = False
-    print(f"[WARN] Session Recorder not available: {e}")
+    logger.warning("Session Recorder not available: %s", e)
 
-print("[OK] All core modules imported successfully")
+logger.info("All core modules imported")
 
 
 def main(game: str = "ac", enable_ai: bool = False):
@@ -85,15 +85,13 @@ def main(game: str = "ac", enable_ai: bool = False):
         game: "ac" for Assetto Corsa, "acc" for Assetto Corsa Competizione
         enable_ai: Enable AI race engineer (requires IBM WatsonX credentials)
     """
-    print(f"\n[INFO] Starting dashboard for: {game.upper()}")
-    print("[INFO] Creating Qt application...")
+    logger.info("Starting dashboard for: %s", game.upper())
     app = QtWidgets.QApplication(sys.argv)
 
-    print("[INFO] Creating main window...")
     window = MainWindow()
 
     # Choose backend
-    print(f"[INFO] Initializing {game.upper()} telemetry backend...")
+    logger.info("Initializing %s telemetry backend", game.upper())
     if game == "ac":
         telemetry_thread = AcTelemetryWorker()
     elif game == "acc":
@@ -101,12 +99,9 @@ def main(game: str = "ac", enable_ai: bool = False):
     else:
         raise ValueError(f"Unknown game '{game}'. Use 'ac' or 'acc'.")
 
-    print("[OK] Backend initialized")
-
     # Connect signals
-    print("[INFO] Connecting Qt signals...")
     telemetry_thread.lap_completed.connect(window.handle_lap_complete)
-    telemetry_thread.status_update.connect(lambda msg: print(f"[Status] {msg}"))
+    telemetry_thread.status_update.connect(lambda msg: logger.info("Status: %s", msg))
 
     # Connect telemetry signals to UI (real-time, critical path)
     # IMPORTANT: UI visualization must receive ALL samples at full 60Hz rate
@@ -118,14 +113,14 @@ def main(game: str = "ac", enable_ai: bool = False):
     if hasattr(telemetry_thread, 'realtime_sample'):
         telemetry_thread.realtime_sample.connect(window.handle_realtime_sample)
 
-    print("[OK] Signals connected")
+    logger.info("Signals connected")
 
     # Initialize AI race engineer (optional)
     ai_thread = None
     voice_thread = None
     tts_thread = None
     if enable_ai and AI_AVAILABLE:
-        print("[INFO] Initializing AI Race Engineer...")
+        logger.info("Initializing AI Race Engineer")
 
         # Load credentials from environment
         watsonx_url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
@@ -137,8 +132,7 @@ def main(game: str = "ac", enable_ai: bool = False):
         watson_tts_url = os.getenv("WATSON_TTS_URL", "")
 
         if not watsonx_api_key or not watsonx_project_id:
-            print("[WARN] AI Race Engineer requires WATSONX_API_KEY and WATSONX_PROJECT_ID")
-            print("[WARN] Skipping AI initialization. Set these in .env file to enable AI.")
+            logger.warning("AI Race Engineer requires WATSONX_API_KEY and WATSONX_PROJECT_ID in .env")
         else:
             try:
                 ai_thread = AIRaceEngineerWorker(
@@ -153,7 +147,7 @@ def main(game: str = "ac", enable_ai: bool = False):
                 # Connect AI signals
                 ai_thread.ai_commentary.connect(window.handle_ai_commentary)
                 ai_thread.driver_query_received.connect(window.handle_driver_query)
-                ai_thread.status_update.connect(lambda msg: print(f"[AI] {msg}"))
+                ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
 
                 # Connect telemetry to AI worker with throttling
                 # AI doesn't need 60Hz telemetry - throttle to ~5Hz to avoid delays
@@ -177,11 +171,11 @@ def main(game: str = "ac", enable_ai: bool = False):
 
                 # Start AI thread
                 ai_thread.start()
-                print("[OK] AI Race Engineer started")
+                logger.info("AI Race Engineer started")
 
                 # Initialize voice input (if available and credentials present)
                 if VOICE_AVAILABLE and watson_stt_api_key and watson_stt_url:
-                    print("[INFO] Initializing Voice Input (streaming mode)...")
+                    logger.info("Initializing Voice Input (streaming mode)")
                     try:
                         voice_thread = VoiceInputWorker(
                             watson_api_key=watson_stt_api_key,
@@ -194,26 +188,24 @@ def main(game: str = "ac", enable_ai: bool = False):
                         # Connect voice signals
                         voice_thread.speech_detected.connect(ai_thread.process_driver_query)
                         voice_thread.vad_state_changed.connect(window.handle_vad_state_change)
-                        voice_thread.status_update.connect(lambda msg: print(f"[Voice] {msg}"))
-                        voice_thread.error_occurred.connect(lambda err: print(f"[Voice Error] {err}"))
+                        voice_thread.status_update.connect(lambda msg: logger.info("Voice: %s", msg))
+                        voice_thread.error_occurred.connect(lambda err: logger.error("Voice: %s", err))
 
                         # Start voice thread
                         voice_thread.start()
-                        print("[OK] Voice Input started")
+                        logger.info("Voice Input started")
 
                     except Exception as e:
-                        print(f"[ERROR] Failed to initialize Voice Input: {e}")
-                        import traceback
-                        traceback.print_exc()
+                        logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
                         voice_thread = None
                 elif VOICE_AVAILABLE:
-                    print("[WARN] Voice Input requires WATSON_STT_API_KEY and WATSON_STT_URL in .env")
+                    logger.warning("Voice Input requires WATSON_STT_API_KEY and WATSON_STT_URL in .env")
                 else:
-                    print("[WARN] Voice Input module not available (missing dependencies)")
+                    logger.warning("Voice Input module not available (missing dependencies)")
 
                 # Initialize TTS output (if available and credentials present)
                 if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
-                    print("[INFO] Initializing TTS Output (sentence pipelining mode)...")
+                    logger.info("Initializing TTS Output (sentence pipelining mode)")
                     try:
                         tts_thread = TTSOutputWorker(
                             watson_api_key=watson_tts_api_key,
@@ -223,12 +215,12 @@ def main(game: str = "ac", enable_ai: bool = False):
                         )
 
                         # Connect TTS signals
-                        tts_thread.status_update.connect(lambda msg: print(f"[TTS] {msg}"))
-                        tts_thread.error_occurred.connect(lambda err: print(f"[TTS Error] {err}"))
+                        tts_thread.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
+                        tts_thread.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
 
                         # Connect AI commentary to TTS playback
                         def on_ai_commentary_for_tts(msg, trigger, priority):
-                            print(f"[DEBUG] AI commentary signal received: msg={msg[:50]}, trigger={trigger}, priority={priority}")
+                            logger.debug("AI commentary for TTS: %s...", msg[:50])
                             tts_thread.speak(msg)
 
                         ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
@@ -240,25 +232,21 @@ def main(game: str = "ac", enable_ai: bool = False):
 
                         # Start TTS thread
                         tts_thread.start()
-                        print("[OK] TTS Output started")
+                        logger.info("TTS Output started")
 
                     except Exception as e:
-                        print(f"[ERROR] Failed to initialize TTS Output: {e}")
-                        import traceback
-                        traceback.print_exc()
+                        logger.error("Failed to initialize TTS Output: %s", e, exc_info=True)
                         tts_thread = None
                 elif TTS_AVAILABLE:
-                    print("[WARN] TTS Output requires WATSON_TTS_API_KEY and WATSON_TTS_URL in .env")
+                    logger.warning("TTS Output requires WATSON_TTS_API_KEY and WATSON_TTS_URL in .env")
                 else:
-                    print("[WARN] TTS Output module not available (missing dependencies)")
+                    logger.warning("TTS Output module not available (missing dependencies)")
 
             except Exception as e:
-                print(f"[ERROR] Failed to initialize AI Race Engineer: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error("Failed to initialize AI Race Engineer: %s", e, exc_info=True)
                 ai_thread = None
     elif enable_ai:
-        print("[WARN] AI requested but AIRaceEngineerWorker module not available")
+        logger.warning("AI requested but AIRaceEngineerWorker module not available")
 
     # Initialize session recorder (optional)
     recorder_thread = None
@@ -266,13 +254,13 @@ def main(game: str = "ac", enable_ai: bool = False):
     session_info = {"track": "", "car": "", "player": ""}  # Store session metadata
 
     if RECORDER_AVAILABLE:
-        print("[INFO] Initializing Session Recorder...")
+        logger.info("Initializing Session Recorder")
         try:
             recorder_thread = SessionRecorder(db_path="data/telemetry_sessions.db")
 
             # Connect recorder signals
-            recorder_thread.status_update.connect(lambda msg: print(f"[Recorder] {msg}"))
-            recorder_thread.error_occurred.connect(lambda err: print(f"[Recorder Error] {err}"))
+            recorder_thread.status_update.connect(lambda msg: logger.info("Recorder: %s", msg))
+            recorder_thread.error_occurred.connect(lambda err: logger.error("Recorder: %s", err))
 
             # Start recorder thread
             recorder_thread.start()
@@ -373,82 +361,76 @@ def main(game: str = "ac", enable_ai: bool = False):
                 ai_thread.driver_query_received.connect(on_driver_query)
                 ai_thread.ai_commentary.connect(on_query_response)
 
-            print("[OK] Session Recorder started")
+            logger.info("Session Recorder started")
 
         except Exception as e:
-            print(f"[ERROR] Failed to initialize Session Recorder: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Failed to initialize Session Recorder: %s", e, exc_info=True)
             recorder_thread = None
     else:
-        print("[WARN] Session Recorder module not available")
+        logger.warning("Session Recorder module not available")
 
     # Start telemetry thread
-    print("[INFO] Starting telemetry worker thread...")
+    logger.info("Starting telemetry worker thread")
     telemetry_thread.start()
 
     # Show window
-    print("[INFO] Showing UI window...")
     window.show()
 
-    print("\n" + "="*60)
     if ai_thread and voice_thread and tts_thread:
-        print("[OK] DASHBOARD READY - AI Race Engineer + Voice I/O ACTIVE")
+        logger.info("Dashboard ready — AI Race Engineer + Voice I/O active")
     elif ai_thread and voice_thread:
-        print("[OK] DASHBOARD READY - AI Race Engineer + Voice Input ACTIVE")
+        logger.info("Dashboard ready — AI Race Engineer + Voice Input active")
     elif ai_thread and tts_thread:
-        print("[OK] DASHBOARD READY - AI Race Engineer + TTS Output ACTIVE")
+        logger.info("Dashboard ready — AI Race Engineer + TTS Output active")
     elif ai_thread:
-        print("[OK] DASHBOARD READY - AI Race Engineer ACTIVE")
+        logger.info("Dashboard ready — AI Race Engineer active")
     else:
-        print("[OK] DASHBOARD READY - Check AC for shared memory connection")
+        logger.info("Dashboard ready — telemetry only")
 
     if recorder_thread:
-        print("[INFO] Session Recording ENABLED - All data will be saved to database")
-
-    print("="*60 + "\n")
+        logger.info("Session Recording enabled — all data saved to database")
 
     # Run Qt event loop
     result = app.exec_()
 
     # Clean shutdown
-    print("\n[INFO] Shutting down...")
+    logger.info("Shutting down...")
 
     try:
         telemetry_thread.stop()
         telemetry_thread.wait(2000)  # 2 second timeout
     except Exception as e:
-        print(f"[WARN] Error stopping telemetry thread: {e}")
+        logger.warning("Error stopping telemetry thread: %s", e)
 
     if ai_thread:
         try:
             ai_thread.stop()
             ai_thread.wait(2000)
         except Exception as e:
-            print(f"[WARN] Error stopping AI thread: {e}")
+            logger.warning("Error stopping AI thread: %s", e)
 
     if voice_thread:
         try:
             voice_thread.stop()
             voice_thread.wait(2000)
         except Exception as e:
-            print(f"[WARN] Error stopping voice thread: {e}")
+            logger.warning("Error stopping voice thread: %s", e)
 
     if tts_thread:
         try:
             tts_thread.stop()
             tts_thread.wait(2000)
         except Exception as e:
-            print(f"[WARN] Error stopping TTS thread: {e}")
+            logger.warning("Error stopping TTS thread: %s", e)
 
     if recorder_thread:
         try:
             recorder_thread.stop()
             recorder_thread.wait(2000)
         except Exception as e:
-            print(f"[WARN] Error stopping recorder thread: {e}")
+            logger.warning("Error stopping recorder thread: %s", e)
 
-    print("Goodbye!")
+    logger.info("Goodbye!")
     sys.exit(result)
 
 
@@ -462,20 +444,10 @@ if __name__ == "__main__":
     if "--ai" in sys.argv:
         enable_ai = True
 
-    print(f"[INFO] Command line args: {sys.argv}")
-    print(f"[INFO] Selected game: {game}")
-    print(f"[INFO] AI enabled: {enable_ai}\n")
+    logger.info("Game: %s | AI: %s", game, enable_ai)
 
     try:
         main(game, enable_ai)
     except Exception as e:
-        print("\n" + "="*60)
-        print("[FATAL ERROR]")
-        print("="*60)
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {e}")
-        import traceback
-        print("\nFull traceback:")
-        traceback.print_exc()
-        print("="*60)
+        logger.critical("Fatal error: %s", e, exc_info=True)
         sys.exit(1)

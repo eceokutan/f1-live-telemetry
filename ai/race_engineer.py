@@ -9,6 +9,7 @@ Receives telemetry samples, detects events, generates AI commentary.
 
 import asyncio
 import logging
+import re
 import sys
 from typing import Optional, Dict, Any
 from PyQt5 import QtCore
@@ -70,6 +71,7 @@ race_engineer_module = import_from_file(
 # Extract classes
 TelemetryData = telemetry_module.TelemetryData
 TireTemps = telemetry_module.TireTemps
+TireWear = telemetry_module.TireWear
 TirePressure = telemetry_module.TirePressure
 GForces = telemetry_module.GForces
 Event = events_module.Event
@@ -319,6 +321,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 logger.error(f"LLM error: {llm_error}", exc_info=True)
                 raise
 
+            # Clean LLM response (strip meta-commentary, references, prompt leakage)
+            response = self._clean_llm_response(response)
+
             # Check for empty response and provide fallback
             if not response or not response.strip():
                 logger.warning("LLM returned empty response, using fallback")
@@ -374,17 +379,39 @@ class AIRaceEngineerWorker(QtCore.QThread):
             longitudinal=0.0
         )
 
-        # Create TelemetryData - AC sends 'rpm' not 'rpms'
+        # Tire wear (AC provides tyreWear as 0.0 = fresh)
+        tire_wear = None
+        if "tyre_wear_fl" in data:
+            tire_wear = TireWear(
+                fl=min(100.0, data.get("tyre_wear_fl", 0.0)),
+                fr=min(100.0, data.get("tyre_wear_fr", 0.0)),
+                rl=min(100.0, data.get("tyre_wear_rl", 0.0)),
+                rr=min(100.0, data.get("tyre_wear_rr", 0.0))
+            )
+
+        # Car damage (AC: 5 zones, values 0.0 = no damage)
+        car_damage = None
+        if "car_damage_front" in data:
+            car_damage = {
+                "front": data.get("car_damage_front", 0.0),
+                "rear": data.get("car_damage_rear", 0.0),
+                "left": data.get("car_damage_left", 0.0),
+                "right": data.get("car_damage_right", 0.0),
+                "centre": data.get("car_damage_centre", 0.0),
+            }
+
         lap_id = data.get("lap_id", 0)
         return TelemetryData(
             speed=data.get("speed", 0.0),
-            rpms=data.get("rpm", 0),  # AC sends "rpm" (without s)
+            rpms=data.get("rpms", 0),
             gear=data.get("gear", 0),
             throttle=data.get("throttle", 0.0),
             brake=data.get("brake", 0.0),
             fuel=data.get("fuel", None),
             tire_temps=tire_temps,
             tire_pressure=tire_pressure,
+            tire_wear=tire_wear,
+            car_damage=car_damage,
             x=data.get("x", 0.0),
             z=data.get("z", 0.0),
             lap_id=lap_id,
@@ -404,6 +431,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
             response = await self.race_engineer_agent.handle_event(event, self.context)
 
             if response:
+                # Clean LLM response (strip meta-commentary, references, prompt leakage)
+                response = self._clean_llm_response(response)
+
                 # Emit AI commentary signal
                 self.ai_commentary.emit(response, event.type, event.priority.value)
                 logger.info(f"AI commentary generated for {event.type}: {response[:50]}...")
@@ -441,6 +471,38 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 self.query_queue.put(query),
                 self._event_loop
             )
+
+    @staticmethod
+    def _clean_llm_response(response: str) -> str:
+        """
+        Post-process LLM output to strip meta-commentary, references,
+        and prompt template leakage that the model sometimes outputs.
+
+        Args:
+            response: Raw LLM response text
+
+        Returns:
+            Cleaned response suitable for TTS/display
+        """
+        # Remove "Driver's Question: ..." echo (prompt leakage)
+        response = re.sub(r"Driver'?s?\s*Question\s*:\s*\"?[^\"]*\"?\s*", "", response, flags=re.IGNORECASE)
+
+        # Remove "References:" or "Sources:" sections and everything after
+        response = re.sub(r"\n?\s*(References|Sources|Notes?|Context)\s*:.*", "", response, flags=re.IGNORECASE | re.DOTALL)
+
+        # Remove numbered data lists like "1. Tire Wear Data: 100%"
+        response = re.sub(r"\n\s*\d+\.\s+\w[\w\s]*?:\s*[\d.]+[%°CLs]*\s*", "", response)
+
+        # Remove lines that are purely meta-commentary markers
+        response = re.sub(r"\n\s*---+\s*\n?", "", response)
+
+        # Remove asterisks used for emphasis (LLM habit)
+        response = response.replace("*", "")
+
+        # Remove leading/trailing whitespace and collapse multiple newlines
+        response = re.sub(r"\n{2,}", "\n", response).strip()
+
+        return response
 
     def stop(self):
         """Stop the worker thread."""

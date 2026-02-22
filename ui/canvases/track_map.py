@@ -48,7 +48,7 @@ class TrackMapCanvas(FigureCanvas):
         self.ax.title.set_color("#FFFFFF")
 
         # Configure plot
-        self.ax.set_aspect("equal", adjustable="datalim")
+        self.ax.set_aspect("equal", adjustable="box")
         self.ax.set_title("Location Map", fontsize=10)
         self.ax.set_xlabel("X [m]", fontsize=8)
         self.ax.set_ylabel("Z [m]", fontsize=8)
@@ -79,7 +79,7 @@ class TrackMapCanvas(FigureCanvas):
             # Clear axis only if needed (for style reset)
             if not hasattr(self, '_initialized'):
                 self.ax.clear()
-                self.ax.set_aspect("equal", adjustable="datalim")
+                self.ax.set_aspect("equal", adjustable="box")
                 self.ax.set_title("Location Map", fontsize=10)
                 self.ax.set_xlabel("X [m]", fontsize=8)
                 self.ax.set_ylabel("Z [m]", fontsize=8)
