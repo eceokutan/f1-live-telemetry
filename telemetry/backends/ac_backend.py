@@ -55,14 +55,16 @@ class SPageFilePhysics(ct.Structure):
 # ===================== GRAPHICS SHARED MEMORY =====================
 
 class SPageFileGraphics(ct.Structure):
+    # AC uses wchar_t (2 bytes on Windows) for all string fields.
+    # Using c_wchar ensures correct field offsets for completedLaps, carCoordinates, etc.
     _fields_ = [
         ("packetId", ct.c_int),
         ("status", ct.c_int),
         ("session", ct.c_int),
-        ("currentTime", ct.c_char * 15),
-        ("lastTime", ct.c_char * 15),
-        ("bestTime", ct.c_char * 15),
-        ("splitTime", ct.c_char * 15),
+        ("currentTime", ct.c_wchar * 15),
+        ("lastTime", ct.c_wchar * 15),
+        ("bestTime", ct.c_wchar * 15),
+        ("splitTime", ct.c_wchar * 15),
         ("completedLaps", ct.c_int),
         ("position", ct.c_int),
         ("currentTimeMs", ct.c_int),
@@ -74,7 +76,7 @@ class SPageFileGraphics(ct.Structure):
         ("currentSectorIndex", ct.c_int),
         ("lastSectorTime", ct.c_int),
         ("numberOfLaps", ct.c_int),
-        ("tyreCompound", ct.c_char * 33),
+        ("tyreCompound", ct.c_wchar * 33),
         ("replayTimeMultiplier", ct.c_float),
         ("normalizedCarPosition", ct.c_float),
         ("carCoordinates", ct.c_float * 3),
@@ -84,16 +86,17 @@ class SPageFileGraphics(ct.Structure):
 # ===================== STATIC INFO SHARED MEMORY =====================
 
 class SPageFileStatic(ct.Structure):
+    # AC uses wchar_t (2 bytes on Windows) for all string fields.
     _fields_ = [
-        ("_smVersion", ct.c_char * 15),
-        ("_acVersion", ct.c_char * 15),
+        ("_smVersion", ct.c_wchar * 15),
+        ("_acVersion", ct.c_wchar * 15),
         ("numberOfSessions", ct.c_int),
         ("numCars", ct.c_int),
-        ("carModel", ct.c_char * 33),
-        ("track", ct.c_char * 33),
-        ("playerName", ct.c_char * 33),
-        ("playerSurname", ct.c_char * 33),
-        ("playerNick", ct.c_char * 33),
+        ("carModel", ct.c_wchar * 33),
+        ("track", ct.c_wchar * 33),
+        ("playerName", ct.c_wchar * 33),
+        ("playerSurname", ct.c_wchar * 33),
+        ("playerNick", ct.c_wchar * 33),
         ("sectorCount", ct.c_int),
         ("maxTorque", ct.c_float),
         ("maxPower", ct.c_float),
@@ -119,17 +122,17 @@ class SPageFileStatic(ct.Structure):
         ("engineBrakeSettingsCount", ct.c_int),
         ("ersPowerControllerCount", ct.c_int),
         ("trackSPlineLength", ct.c_float),
-        ("trackConfiguration", ct.c_char * 33),
+        ("trackConfiguration", ct.c_wchar * 33),
         ("ersMaxJ", ct.c_float),
         ("isTimedRace", ct.c_int),
         ("hasExtraLap", ct.c_int),
-        ("carSkin", ct.c_char * 33),
+        ("carSkin", ct.c_wchar * 33),
         ("reversedGridPositions", ct.c_int),
         ("pitWindowStart", ct.c_int),
         ("pitWindowEnd", ct.c_int),
         ("isOnline", ct.c_int),
-        ("dryTyresName", ct.c_char * 33),
-        ("wetTyresName", ct.c_char * 33),
+        ("dryTyresName", ct.c_wchar * 33),
+        ("wetTyresName", ct.c_wchar * 33),
     ]
 
 
@@ -212,12 +215,12 @@ class AcTelemetryWorker(QtCore.QThread):
             try:
                 static_data = read_static(mm_static)
                 session_data = {
-                    "track": static_data.track.decode('utf-8', errors='ignore'),
-                    "track_config": static_data.trackConfiguration.decode('utf-8', errors='ignore'),
-                    "car_model": static_data.carModel.decode('utf-8', errors='ignore'),
-                    "player_name": static_data.playerName.decode('utf-8', errors='ignore'),
-                    "player_surname": static_data.playerSurname.decode('utf-8', errors='ignore'),
-                    "player_nick": static_data.playerNick.decode('utf-8', errors='ignore'),
+                    "track": static_data.track,
+                    "track_config": static_data.trackConfiguration,
+                    "car_model": static_data.carModel,
+                    "player_name": static_data.playerName,
+                    "player_surname": static_data.playerSurname,
+                    "player_nick": static_data.playerNick,
                     "max_rpm": static_data.maxRpm,
                     "max_fuel": static_data.maxFuel,
                 }
@@ -304,6 +307,9 @@ class AcTelemetryWorker(QtCore.QThread):
                 else:
                     display_gear = raw_gear - 1  # 1st, 2nd, 3rd, etc.
 
+                # Clamp RPM to non-negative (shared memory can return -39 when stationary)
+                clamped_rpms = max(0, phys.rpms)
+
                 # Debug print every 60 frames (~1 second at 60Hz)
                 frame_count += 1
                 if frame_count % 60 == 0:
@@ -322,9 +328,6 @@ class AcTelemetryWorker(QtCore.QThread):
                     integrated_x = 0.0
                     integrated_z = 0.0
                 last_lap_id = lap_id
-
-                # Clamp RPM to non-negative (shared memory can return -39 when stationary)
-                clamped_rpms = max(0, phys.rpms)
 
                 # Create sample dict
                 sample_data = {
@@ -385,9 +388,9 @@ class AcTelemetryWorker(QtCore.QThread):
                         "fuel": phys.fuel,
                         "position": gfx.position,
                         "is_in_pit": gfx.isInPit,
-                        "current_time": gfx.currentTime.decode('utf-8', errors='ignore'),
-                        "last_time": gfx.lastTime.decode('utf-8', errors='ignore'),
-                        "best_time": gfx.bestTime.decode('utf-8', errors='ignore'),
+                        "current_time": gfx.currentTime,
+                        "last_time": gfx.lastTime,
+                        "best_time": gfx.bestTime,
                     }
                     self.live_data_update.emit(live_data)
 
