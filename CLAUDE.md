@@ -21,17 +21,28 @@ pip install -r requirements.txt
 
 ### Run with Assetto Corsa (default)
 ```bash
-python integrated_telemetry.py
+python main.py
 ```
 
 ### Run with ACC
 ```bash
-python integrated_telemetry.py --acc
+python main.py --acc
+```
+
+### Run with AI Race Engineer (experimental)
+```bash
+python main.py --ai
+```
+
+Combine with game selection:
+```bash
+python main.py --acc --ai
 ```
 
 **Prerequisites:**
 - For AC: Game must be running with shared memory enabled (Windows only)
 - For ACC: Game must be running with `broadcasting.json` configured and you must be on track
+- For AI: Requires IBM WatsonX credentials in `.env` file (see `.env.example`)
 
 ## Architecture
 
@@ -39,17 +50,24 @@ The codebase follows a modular backend architecture where each sim game has its 
 
 ### Core Components
 
-**[integrated_telemetry.py](integrated_telemetry.py)** - Entry point
+**[main.py](main.py)** - Entry point
 - Initializes PyQt5 application
-- Selects backend based on command-line args (`--acc` flag)
+- Selects backend based on command-line args (`--acc`, `--ai` flags)
 - Connects backend signals to UI slots
-- Manages application lifecycle
+- Manages application lifecycle and clean shutdown
 
-**[dashboard.py](dashboard.py)** - Main UI window (game-agnostic)
-- `MainWindow` - PyQt5 main window with lap table, session info, and live data panels
-- `TrackMapCanvas` - Matplotlib track visualization colored by speed
-- `TimeSeriesCanvas` - Generic time-series graphs (speed, RPM, brake, gear)
-- Receives lap data via Qt signals and updates all visualizations
+**UI Components** - [ui/](ui/)
+- **[ui/main_window.py](ui/main_window.py)** - `MainWindow` class
+  - PyQt5 main window with lap table, session info, live data panels, and AI transcripts
+  - Handles real-time visualization updates (~12Hz) and lap completion events
+  - Displays AI commentary in "Commentator Transcript" panel
+- **[ui/canvases/track_map.py](ui/canvases/track_map.py)** - `TrackMapCanvas`
+  - Matplotlib track visualization with speed-colored path
+- **[ui/canvases/time_series.py](ui/canvases/time_series.py)** - `TimeSeriesCanvas`
+  - Generic single-line time-series graphs (speed, RPM, brake, gear)
+- **[ui/canvases/multi_line.py](ui/canvases/multi_line.py)** - `MultiLineCanvas`
+  - Multi-line time-series for tire data (FL, FR, RL, RR)
+- **[ui/styles.py](ui/styles.py)** - Centralized theme and styling constants
 
 **[telemetry/lap_buffer.py](telemetry/lap_buffer.py)** - Lap detection and buffering
 - `LapBuffer` - Collects samples until lap completes (when `completedLaps` increments)
@@ -65,7 +83,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 - `live_data_update(dict data)` - Real-time telemetry for UI panels (current speed, gear, fuel, etc.)
 - `realtime_sample(dict sample)` - Emitted every frame (~60Hz) with telemetry sample for live visualization
 
-**[telemetry/ac_shared_memory.py](telemetry/ac_shared_memory.py)** - Assetto Corsa backend
+**[telemetry/backends/ac_backend.py](telemetry/backends/ac_backend.py)** - Assetto Corsa backend
 - `AcTelemetryWorker` - Reads from AC's Windows named shared memory blocks:
   - `acpmf_static` - Static session info (track, car model, player name)
   - `acpmf_physics` - Physics data (speed, RPM, throttle, brake, gear, fuel, tire pressure, tire temperature)
@@ -75,7 +93,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 - **Full telemetry available:** RPM, throttle, brake, tire pressure (PSI), tire temperature (°C) for all 4 tires [FL, FR, RL, RR]
 - **Windows only** - Requires AC running in same user session
 
-**[telemetry/acc_backend.py](telemetry/acc_backend.py)** - ACC backend
+**[telemetry/backends/acc_backend.py](telemetry/backends/acc_backend.py)** - ACC backend
 - `AccTelemetryWorker` - Connects to ACC via UDP broadcasting protocol
 - `AccPacketParser` - Parses binary UDP packets:
   - `REGISTRATION_RESULT` - Connection handshake
@@ -93,6 +111,104 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   - These fields will show zeros in the UI when using ACC backend
   - Only position (X/Y/Z), speed, gear, and lap timing are available via broadcasting API
   - For full telemetry, would need ACC's physics shared memory plugin (different API)
+
+**[ai/race_engineer.py](ai/race_engineer.py)** - AI Race Engineer (experimental)
+- `AIRaceEngineerWorker` - QThread that integrates Eima's AI race engineer with AC telemetry
+- Uses IBM WatsonX (Granite 3-8B-Instruct) for LLM-powered race engineering commentary
+- **Components integrated from eima_ai/**:
+  - `TelemetryAgent` - Rule-based event detection (<50ms latency)
+    - Detects fuel warnings/critical (< 5/2 laps remaining)
+    - Detects tire temperature warnings/critical (> 100°C/110°C)
+    - Detects gap changes (> 1.0s threshold)
+    - Detects lap/sector completions
+  - `RaceEngineerAgent` - LLM-powered response generation (~2000ms latency)
+    - Generates contextual proactive alerts for detected events
+    - Maintains conversation history (last 3 exchanges)
+    - Respects configurable verbosity levels (minimal, moderate, verbose)
+  - `LiveSessionContext` - In-memory session state
+    - Maintains telemetry buffer (60s rolling window)
+    - Tracks fuel consumption per lap
+    - Manages active alerts and proactive message timing
+- **Data flow**:
+  1. AC telemetry → AIRaceEngineerWorker.process_telemetry()
+  2. Convert dict to Pydantic TelemetryData model
+  3. TelemetryAgent detects events (rule-based, <50ms)
+  4. RaceEngineerAgent generates AI response (LLM call, ~2s)
+  5. Emit ai_commentary signal → UI displays in "Commentator Transcript" panel
+- **Environment variables required**: WATSONX_API_KEY, WATSONX_PROJECT_ID
+- **Optional**: Works best with AC (full telemetry), degraded with ACC (limited telemetry)
+
+**[ai/voice_input.py](ai/voice_input.py)** - Voice Input (experimental)
+- `VoiceInputWorker` - QThread for hands-free voice queries
+- Uses Silero VAD (local neural network) for voice activity detection
+- Uses IBM Watson Speech-to-Text for transcription
+- Automatically pauses during TTS playback to prevent echo/feedback
+- **Environment variables required**: WATSON_STT_API_KEY, WATSON_STT_URL
+
+**[ai/tts_output.py](ai/tts_output.py)** - Text-to-Speech Output (experimental)
+- `TTSOutputWorker` - QThread for audio output of AI responses
+- Uses IBM Watson Text-to-Speech with British male voice (en-GB_JamesV3Voice)
+- Plays audio through default output device using PyAudio
+- Signals voice input to pause during playback to prevent feedback
+- **Environment variables required**: WATSON_TTS_API_KEY, WATSON_TTS_URL
+
+**[data/session_recorder.py](data/session_recorder.py)** - Session Recording
+- `SessionRecorder` - QThread that records all telemetry to SQLite database
+- **Automatically enabled** - Runs by default, no flags required
+- **Database schema**:
+  - `sessions` - Session metadata (track, car, player, lap count, best lap)
+  - `laps` - Lap times, fuel usage, speed statistics
+  - `telemetry` - High-frequency telemetry samples (~60Hz): position, speed, gear, RPM, throttle, brake, fuel, tire pressure/temperature
+  - `ai_commentary` - AI race engineer messages with timestamps
+  - `voice_queries` - Driver queries and AI responses
+- **Batch inserts** - Buffers 60 telemetry samples before writing for performance
+- **Data persistence** - All data saved to `data/telemetry_sessions.db`
+- **Post-race analysis** - Database can be queried for session replay and analysis
+- **Signal connections**:
+  - Listens to `realtime_sample` for telemetry recording
+  - Listens to `lap_completed` for lap statistics
+  - Listens to `ai_commentary` for AI messages (if AI enabled)
+  - Listens to `driver_query_received` for voice queries (if voice enabled)
+
+**[data/session_viewer.py](data/session_viewer.py)** - Session Viewer CLI
+- Command-line utility to query and export recorded sessions
+- **Usage**:
+  - `python -m data.session_viewer list` - List all sessions
+  - `python -m data.session_viewer info <session_id>` - View session details
+  - `python -m data.session_viewer laps <session_id>` - View lap times
+  - `python -m data.session_viewer export <session_id>` - Export to CSV files
+- **Export format**: CSV files for telemetry, laps, AI commentary
+
+### eima_ai Integration Components
+
+The `eima_ai/` folder contains the AI race engineer system that's integrated into our telemetry dashboard. Only the essential modules are kept - all demo files, tests, and unused utilities have been removed for clarity.
+
+**Structure:**
+```
+eima_ai/
+├── config/
+│   ├── config.py - Configuration models (ThresholdsConfig, VerbosityConfig, etc.)
+├── jarvis_granite/
+│   ├── agents/
+│   │   ├── telemetry_agent.py - Event detection (fuel warnings, tire issues, etc.)
+│   │   └── race_engineer_agent.py - LLM-powered response generation
+│   ├── live/
+│   │   └── context.py - LiveSessionContext for maintaining session state
+│   ├── llm/
+│   │   └── llm_client.py - IBM WatsonX LLM client wrapper
+│   ├── prompts/
+│   │   └── live_prompts.py - Prompt templates for proactive/reactive responses
+│   └── schemas/
+│       ├── events.py - Event data models
+│       ├── messages.py - Message data models
+│       └── telemetry.py - TelemetryData, TireTemps, TirePressure models
+```
+
+**How it integrates:**
+- `ai/race_engineer.py` imports these modules using dynamic file loading (to avoid import conflicts)
+- AC telemetry data is converted to eima_ai's Pydantic models
+- TelemetryAgent detects events, RaceEngineerAgent generates AI responses
+- Responses are emitted back to main UI via Qt signals
 
 ### Data Flow
 
@@ -123,6 +239,43 @@ MainWindow.handle_lap_complete(lap_id, samples)
     ↓
 Update lap table with lap time
 (visualization already showing next lap in real-time)
+```
+
+**Session Recording (continuous):**
+```
+Telemetry Worker
+    ↓ (emits realtime_sample ~60Hz)
+SessionRecorder.record_telemetry_sample()
+    ↓
+Buffer 60 samples (1 second)
+    ↓
+Batch insert to SQLite telemetry table
+
+Telemetry Worker
+    ↓ (emits lap_completed)
+SessionRecorder.record_lap()
+    ↓
+Calculate lap statistics (avg/max speed, fuel used)
+    ↓
+Insert to SQLite laps table
+
+AI Race Engineer
+    ↓ (emits ai_commentary)
+SessionRecorder.record_ai_commentary()
+    ↓
+Insert to SQLite ai_commentary table
+
+Voice Input
+    ↓ (emits speech_detected)
+SessionRecorder.record_voice_query()
+    ↓
+Insert to SQLite voice_queries table
+
+On shutdown:
+    ↓
+Flush remaining buffered samples
+    ↓
+Update session end_time and statistics
 ```
 
 ## Key Implementation Details

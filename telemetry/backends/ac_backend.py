@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from PyQt5 import QtCore
 
-from .lap_buffer import LapBuffer
+from telemetry.lap_buffer import LapBuffer
 
 
 # ===================== PHYSICS SHARED MEMORY =====================
@@ -55,14 +55,16 @@ class SPageFilePhysics(ct.Structure):
 # ===================== GRAPHICS SHARED MEMORY =====================
 
 class SPageFileGraphics(ct.Structure):
+    # AC uses wchar_t (2 bytes on Windows) for all string fields.
+    # Using c_wchar ensures correct field offsets for completedLaps, carCoordinates, etc.
     _fields_ = [
         ("packetId", ct.c_int),
         ("status", ct.c_int),
         ("session", ct.c_int),
-        ("currentTime", ct.c_char * 15),
-        ("lastTime", ct.c_char * 15),
-        ("bestTime", ct.c_char * 15),
-        ("splitTime", ct.c_char * 15),
+        ("currentTime", ct.c_wchar * 15),
+        ("lastTime", ct.c_wchar * 15),
+        ("bestTime", ct.c_wchar * 15),
+        ("splitTime", ct.c_wchar * 15),
         ("completedLaps", ct.c_int),
         ("position", ct.c_int),
         ("currentTimeMs", ct.c_int),
@@ -74,7 +76,7 @@ class SPageFileGraphics(ct.Structure):
         ("currentSectorIndex", ct.c_int),
         ("lastSectorTime", ct.c_int),
         ("numberOfLaps", ct.c_int),
-        ("tyreCompound", ct.c_char * 33),
+        ("tyreCompound", ct.c_wchar * 33),
         ("replayTimeMultiplier", ct.c_float),
         ("normalizedCarPosition", ct.c_float),
         ("carCoordinates", ct.c_float * 3),
@@ -84,16 +86,17 @@ class SPageFileGraphics(ct.Structure):
 # ===================== STATIC INFO SHARED MEMORY =====================
 
 class SPageFileStatic(ct.Structure):
+    # AC uses wchar_t (2 bytes on Windows) for all string fields.
     _fields_ = [
-        ("_smVersion", ct.c_char * 15),
-        ("_acVersion", ct.c_char * 15),
+        ("_smVersion", ct.c_wchar * 15),
+        ("_acVersion", ct.c_wchar * 15),
         ("numberOfSessions", ct.c_int),
         ("numCars", ct.c_int),
-        ("carModel", ct.c_char * 33),
-        ("track", ct.c_char * 33),
-        ("playerName", ct.c_char * 33),
-        ("playerSurname", ct.c_char * 33),
-        ("playerNick", ct.c_char * 33),
+        ("carModel", ct.c_wchar * 33),
+        ("track", ct.c_wchar * 33),
+        ("playerName", ct.c_wchar * 33),
+        ("playerSurname", ct.c_wchar * 33),
+        ("playerNick", ct.c_wchar * 33),
         ("sectorCount", ct.c_int),
         ("maxTorque", ct.c_float),
         ("maxPower", ct.c_float),
@@ -119,17 +122,17 @@ class SPageFileStatic(ct.Structure):
         ("engineBrakeSettingsCount", ct.c_int),
         ("ersPowerControllerCount", ct.c_int),
         ("trackSPlineLength", ct.c_float),
-        ("trackConfiguration", ct.c_char * 33),
+        ("trackConfiguration", ct.c_wchar * 33),
         ("ersMaxJ", ct.c_float),
         ("isTimedRace", ct.c_int),
         ("hasExtraLap", ct.c_int),
-        ("carSkin", ct.c_char * 33),
+        ("carSkin", ct.c_wchar * 33),
         ("reversedGridPositions", ct.c_int),
         ("pitWindowStart", ct.c_int),
         ("pitWindowEnd", ct.c_int),
         ("isOnline", ct.c_int),
-        ("dryTyresName", ct.c_char * 33),
-        ("wetTyresName", ct.c_char * 33),
+        ("dryTyresName", ct.c_wchar * 33),
+        ("wetTyresName", ct.c_wchar * 33),
     ]
 
 
@@ -212,12 +215,12 @@ class AcTelemetryWorker(QtCore.QThread):
             try:
                 static_data = read_static(mm_static)
                 session_data = {
-                    "track": static_data.track.decode('utf-8', errors='ignore'),
-                    "track_config": static_data.trackConfiguration.decode('utf-8', errors='ignore'),
-                    "car_model": static_data.carModel.decode('utf-8', errors='ignore'),
-                    "player_name": static_data.playerName.decode('utf-8', errors='ignore'),
-                    "player_surname": static_data.playerSurname.decode('utf-8', errors='ignore'),
-                    "player_nick": static_data.playerNick.decode('utf-8', errors='ignore'),
+                    "track": static_data.track,
+                    "track_config": static_data.trackConfiguration,
+                    "car_model": static_data.carModel,
+                    "player_name": static_data.playerName,
+                    "player_surname": static_data.playerSurname,
+                    "player_nick": static_data.playerNick,
                     "max_rpm": static_data.maxRpm,
                     "max_fuel": static_data.maxFuel,
                 }
@@ -239,6 +242,13 @@ class AcTelemetryWorker(QtCore.QThread):
         frame_count = 0
         last_debug_time = time.time()
         last_lap_id = -1
+        baseline_lap = None  # Track starting lap for normalization
+        last_valid_raw_lap = None  # Track last known good raw value for garbage detection
+
+        # Position integration (since carCoordinates is often zero in AC)
+        integrated_x = 0.0
+        integrated_z = 0.0
+        last_time = t0
 
         print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
         print("   📍 IMPORTANT: Make sure you're IN THE CAR and DRIVING!")
@@ -251,10 +261,39 @@ class AcTelemetryWorker(QtCore.QThread):
 
                 now = time.time()
                 elapsed = now - t0
+                dt = now - last_time
+                last_time = now
 
+                # Check if carCoordinates has data (non-zero)
                 x = gfx.carCoordinates[0]
                 z = gfx.carCoordinates[2]
-                lap_id = gfx.completedLaps
+
+                # If carCoordinates is zero, integrate velocity to estimate position
+                if x == 0.0 and z == 0.0 and dt > 0:
+                    # Integrate velocity: position += velocity * dt
+                    integrated_x += phys.velocity[0] * dt
+                    integrated_z += phys.velocity[2] * dt
+                    x = integrated_x
+                    z = integrated_z
+
+                raw_lap_id = gfx.completedLaps
+
+                # Validate raw_lap_id from shared memory — reject garbage values
+                # that occur during loading, replay, or pit states
+                if last_valid_raw_lap is not None:
+                    if raw_lap_id < 0 or abs(raw_lap_id - last_valid_raw_lap) > 1:
+                        raw_lap_id = last_valid_raw_lap
+                elif raw_lap_id < 0:
+                    raw_lap_id = 0
+                last_valid_raw_lap = raw_lap_id
+
+                # Initialize baseline on first read to handle mid-race starts
+                if baseline_lap is None:
+                    baseline_lap = raw_lap_id
+                    print(f"[INFO] Baseline lap set to {baseline_lap} (normalizing to lap 0)")
+
+                # Normalize lap number so it always starts from 0
+                lap_id = max(0, raw_lap_id - baseline_lap)
                 speed = phys.speedKmh
 
                 # Convert AC gear to display gear
@@ -268,11 +307,14 @@ class AcTelemetryWorker(QtCore.QThread):
                 else:
                     display_gear = raw_gear - 1  # 1st, 2nd, 3rd, etc.
 
+                # Clamp RPM to non-negative (shared memory can return -39 when stationary)
+                clamped_rpms = max(0, phys.rpms)
+
                 # Debug print every 60 frames (~1 second at 60Hz)
                 frame_count += 1
                 if frame_count % 60 == 0:
                     print(f"📦 Packet #{frame_count:04d} | Lap: {lap_id+1} | Speed: {speed:6.1f} km/h | "
-                          f"Gear: {display_gear} (raw:{raw_gear}) | RPM: {phys.rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
+                          f"Gear: {display_gear} (raw:{raw_gear}) | RPM: {clamped_rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
 
                 # Debug warning if coordinates are still zero after 5 seconds
                 if frame_count == 300 and x == 0 and z == 0:
@@ -282,6 +324,9 @@ class AcTelemetryWorker(QtCore.QThread):
                 # Debug print when lap changes
                 if lap_id != last_lap_id and last_lap_id != -1:
                     print(f"\n🏁 LAP COMPLETED! Lap {last_lap_id+1} -> {lap_id+1}\n")
+                    # Reset integrated position at lap change
+                    integrated_x = 0.0
+                    integrated_z = 0.0
                 last_lap_id = lap_id
 
                 # Create sample dict
@@ -292,9 +337,10 @@ class AcTelemetryWorker(QtCore.QThread):
                     "z": z,
                     "speed": speed,
                     "gear": display_gear,
-                    "rpms": phys.rpms,
+                    "rpms": clamped_rpms,
                     "brake": phys.brake,
                     "throttle": phys.gas,
+                    "fuel": phys.fuel,
                     # Tire data (4 values: FL, FR, RL, RR)
                     "tyre_pressure_fl": phys.wheelsPressure[0],
                     "tyre_pressure_fr": phys.wheelsPressure[1],
@@ -314,9 +360,10 @@ class AcTelemetryWorker(QtCore.QThread):
                     z=z,
                     speed_kmh=speed,
                     gear=display_gear,
-                    rpms=phys.rpms,
+                    rpms=clamped_rpms,
                     brake=phys.brake,
                     throttle=phys.gas,
+                    fuel=phys.fuel,
                     # Tire data
                     tyre_pressure_fl=phys.wheelsPressure[0],
                     tyre_pressure_fr=phys.wheelsPressure[1],
@@ -341,9 +388,10 @@ class AcTelemetryWorker(QtCore.QThread):
                         "fuel": phys.fuel,
                         "position": gfx.position,
                         "is_in_pit": gfx.isInPit,
-                        "current_time": gfx.currentTime.decode('utf-8', errors='ignore'),
-                        "last_time": gfx.lastTime.decode('utf-8', errors='ignore'),
-                        "best_time": gfx.bestTime.decode('utf-8', errors='ignore'),
+                        "ac_status": gfx.status,  # 0=OFF, 1=REPLAY, 2=LIVE, 3=PAUSE
+                        "current_time": gfx.currentTime,
+                        "last_time": gfx.lastTime,
+                        "best_time": gfx.bestTime,
                     }
                     self.live_data_update.emit(live_data)
 

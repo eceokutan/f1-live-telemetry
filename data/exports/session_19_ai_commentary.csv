@@ -1,0 +1,2 @@
+timestamp,message,trigger,priority,lap_number
+1768414610.667827,"Sorry, the AI took too long to respond. Please try again.",driver_query_timeout,1,0
