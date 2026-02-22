@@ -388,6 +388,7 @@ class AcTelemetryWorker(QtCore.QThread):
                         "fuel": phys.fuel,
                         "position": gfx.position,
                         "is_in_pit": gfx.isInPit,
+                        "ac_status": gfx.status,  # 0=OFF, 1=REPLAY, 2=LIVE, 3=PAUSE
                         "current_time": gfx.currentTime,
                         "last_time": gfx.lastTime,
                         "best_time": gfx.bestTime,

@@ -267,10 +267,21 @@ class MainWindow(QMainWindow):
         fuel = live_data.get("fuel", 0)
         position = live_data.get("position", 0)
         is_in_pit = live_data.get("is_in_pit", 0)
+        ac_status = live_data.get("ac_status", 2)  # default to LIVE
         best_time = live_data.get("best_time", "")
         last_time = live_data.get("last_time", "")
 
-        pit_status = "🏁 IN PIT" if is_in_pit else "🏎️ ON TRACK"
+        # AC status: 0=OFF, 1=REPLAY, 2=LIVE, 3=PAUSE
+        if ac_status == 0:
+            pit_status = "⏸️ OFF / IN MENU"
+        elif ac_status == 1:
+            pit_status = "🎬 REPLAY"
+        elif ac_status == 3:
+            pit_status = "⏸️ PAUSED"
+        elif is_in_pit:
+            pit_status = "🏁 IN PIT"
+        else:
+            pit_status = "🏎️ ON TRACK"
 
         # Format gear display
         if gear == 0:
