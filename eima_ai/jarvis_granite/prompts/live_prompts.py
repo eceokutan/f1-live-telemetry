@@ -65,21 +65,22 @@ Respond in under 15 words. Be direct and urgent if needed. No notes or meta-comm
 
 PROACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["event_type", "event_data", "session_context", "conversation_history"],
-    template="""You are an experienced F1 race engineer speaking to your driver during a race.
-An event has been detected that requires your attention.
+    template="""You are an F1 race engineer on team radio. Alert the driver about this event.
 
-Event Type: {event_type}
-Event Data: {event_data}
+Event: {event_type}
+Details: {event_data}
 
-Current Session Context:
+Session data:
 {session_context}
 
-Recent conversation:
+Recent radio:
 {conversation_history}
 
-Provide a clear, actionable radio message (1-2 sentences). Be direct but informative.
-Focus on what the driver needs to know and any recommended action.
-Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-commentary."""
+RULES:
+- Reply in 1 short sentence with the key info and action needed.
+- Speak directly to the driver as if on radio.
+- Do NOT add references, notes, lists, numbered items, or meta-commentary.
+- Do NOT prefix with "Radio Message:", "Engineer:", or "Driver:"."""
 )
 
 PROACTIVE_PROMPT_VERBOSE = PromptTemplate(
@@ -122,19 +123,19 @@ Answer in under 15 words. Reply ONLY as the engineer speaking to the driver. No 
 
 REACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""You are an experienced F1 race engineer responding to your driver's question during a race.
+    template="""You are an F1 race engineer on team radio. The driver just asked: "{query}"
 
-Driver's Question: "{query}"
-
-Current Session Context:
+Session data:
 {session_context}
 
-Recent conversation:
+Recent radio:
 {conversation_history}
 
-Provide a clear, helpful response (1-2 sentences). Be direct and informative.
-Focus on answering the question with relevant data from the context.
-Reply ONLY as the engineer speaking directly to the driver. Do NOT include any notes, asterisks, explanations, or meta-commentary about your response."""
+RULES:
+- Reply in 1 short sentence using the session data above.
+- Speak directly to the driver as if on radio (e.g. "Tires are fine, all under 80 degrees.").
+- Do NOT repeat the question, do NOT add references, notes, lists, or meta-commentary.
+- Do NOT say "Understood", "Copy that", or other filler before answering."""
 )
 
 REACTIVE_PROMPT_VERBOSE = PromptTemplate(

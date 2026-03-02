@@ -169,6 +169,12 @@ def main(game: str = "ac", enable_ai: bool = False):
                 if hasattr(telemetry_thread, 'realtime_sample'):
                     telemetry_thread.realtime_sample.connect(throttled_ai_telemetry)
 
+                # Keep AI informed of AC status (on track / in menu / paused)
+                if hasattr(telemetry_thread, 'live_data_update'):
+                    telemetry_thread.live_data_update.connect(
+                        lambda data: ai_thread.update_ac_status(data.get("ac_status", 0))
+                    )
+
                 # Start AI thread
                 ai_thread.start()
                 logger.info("AI Race Engineer started")

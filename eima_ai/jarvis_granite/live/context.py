@@ -130,7 +130,7 @@ class LiveSessionContext:
                 "rr": telemetry.tire_wear.rr,
             }
         else:
-            self.tire_wear = {"fl": 100.0, "fr": 100.0, "rl": 100.0, "rr": 100.0}
+            self.tire_wear = {"fl": 0.0, "fr": 0.0, "rl": 0.0, "rr": 0.0}
 
         # Car damage
         if telemetry.car_damage is not None:
