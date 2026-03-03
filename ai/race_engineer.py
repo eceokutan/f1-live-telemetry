@@ -498,35 +498,62 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Returns:
             Cleaned response suitable for TTS/display
         """
+        # Split into lines for line-level filtering
+        lines = response.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip instruction leakage lines (model echoing its own rules)
+            if stripped.startswith("- Do NOT") or stripped.startswith("Do NOT"):
+                continue
+            if stripped.startswith("- Do not") or stripped.startswith("Do not"):
+                continue
+            if re.match(r"^-\s+(Keep|Reply|Answer|Speak|Focus|Provide|Use)\b", stripped, re.IGNORECASE):
+                continue
+            # Skip lines that look like rule headers
+            if re.match(r"^(RULES|CONSTRAINTS|INSTRUCTIONS|GUIDELINES)\s*:", stripped, re.IGNORECASE):
+                continue
+            # Skip lines that are just bullet points with instructions
+            if re.match(r"^[-•]\s+(You are|The driver|Responses?|Lead with|Match)\b", stripped, re.IGNORECASE):
+                continue
+            cleaned_lines.append(line)
+        response = "\n".join(cleaned_lines)
+
         # Remove "Driver's Question: ..." echo (prompt leakage)
         response = re.sub(r"Driver'?s?\s*Question\s*:\s*\"?[^\"]*\"?\s*", "", response, flags=re.IGNORECASE)
 
         # Remove "Driver: [Event: ...] Engineer:" pattern (prompt leakage)
         response = re.sub(r"Driver:\s*\[Event:\s*[^\]]*\]\s*Engineer:\s*", "", response, flags=re.IGNORECASE)
 
-        # Remove "Radio Message:" prefix
-        response = re.sub(r"^(Radio\s*Message|Engineer|Response)\s*:\s*", "", response, flags=re.IGNORECASE)
+        # Remove "Radio Message:" / "Engineer:" / "Alert:" prefix
+        response = re.sub(r"^(Radio\s*Message|Engineer|Response|Alert|Answer)\s*:\s*", "", response, flags=re.IGNORECASE)
 
-        # Remove "References:", "Sources:", "Notes:", "Context:" sections and everything after
+        # Remove "References:", "Sources:", etc. sections and everything after
         response = re.sub(r"\n?\s*(References|Sources|Notes?|Context|Data|Observations?)\s*:.*", "", response, flags=re.IGNORECASE | re.DOTALL)
 
         # Remove numbered data lists like "1. Tire Wear Data: 100%"
         response = re.sub(r"\n\s*\d+\.\s+\w[\w\s]*?:\s*[\d.]+[%°CLs]*\s*", "", response)
 
-        # Remove lines starting with "Understood." or "Copy that." filler before actual content
+        # Remove filler openers
         response = re.sub(r"^(Understood|Copy that|Roger|Noted)[.,]?\s*", "", response, flags=re.IGNORECASE)
 
-        # Remove lines that are purely meta-commentary markers
+        # Remove meta-commentary markers
         response = re.sub(r"\n\s*---+\s*\n?", "", response)
 
-        # Remove asterisks used for emphasis (LLM habit)
+        # Remove asterisks used for emphasis
         response = response.replace("*", "")
 
-        # Strip surrounding quotes the LLM sometimes wraps responses in
+        # Strip surrounding quotes
         response = response.strip().strip('"').strip("'")
 
-        # Remove leading/trailing whitespace and collapse multiple newlines
+        # Collapse multiple newlines and trim
         response = re.sub(r"\n{2,}", "\n", response).strip()
+
+        # Final safety: if response is still very long (>200 chars), take first sentence only
+        if len(response) > 200:
+            first_sentence = re.split(r'(?<=[.!?])\s', response, maxsplit=1)
+            if first_sentence:
+                response = first_sentence[0]
 
         return response
 
