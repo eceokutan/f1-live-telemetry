@@ -14,6 +14,14 @@ Usage:
 import sys
 import os
 import logging
+
+# Import torch BEFORE PyQt5 to avoid DLL conflict on Windows
+# (PyQt5 changes DLL search paths, breaking torch's c10.dll loading)
+try:
+    import torch
+except ImportError:
+    pass
+
 from PyQt5 import QtWidgets
 
 # Configure logging FIRST - before any other imports
