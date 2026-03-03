@@ -134,8 +134,6 @@ def main(game: str = "ac", enable_ai: bool = False):
         watsonx_url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
         watsonx_project_id = os.getenv("WATSONX_PROJECT_ID", "")
         watsonx_api_key = os.getenv("WATSONX_API_KEY", "")
-        watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
-        watson_stt_url = os.getenv("WATSON_STT_URL", "")
         watson_tts_api_key = os.getenv("WATSON_TTS_API_KEY", "")
         watson_tts_url = os.getenv("WATSON_TTS_URL", "")
 
@@ -187,16 +185,12 @@ def main(game: str = "ac", enable_ai: bool = False):
                 ai_thread.start()
                 logger.info("AI Race Engineer started")
 
-                # Initialize voice input (if available and credentials present)
-                if VOICE_AVAILABLE and watson_stt_api_key and watson_stt_url:
-                    logger.info("Initializing Voice Input (streaming mode)")
+                # Initialize voice input (if available)
+                if VOICE_AVAILABLE:
+                    logger.info("Initializing Voice Input (faster-whisper)")
                     try:
                         voice_thread = VoiceInputWorker(
-                            watson_api_key=watson_stt_api_key,
-                            watson_url=watson_stt_url,
-                            model="en-US_BroadbandModel",
-                            # use_streaming=True  # Latency optimization: ~500-1000ms savings
-                            use_streaming=False  # Disabled due to WebSocket compatibility issues with Python 3.10
+                            whisper_model_size="base"
                         )
 
                         # Connect voice signals
@@ -212,8 +206,6 @@ def main(game: str = "ac", enable_ai: bool = False):
                     except Exception as e:
                         logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
                         voice_thread = None
-                elif VOICE_AVAILABLE:
-                    logger.warning("Voice Input requires WATSON_STT_API_KEY and WATSON_STT_URL in .env")
                 else:
                     logger.warning("Voice Input module not available (missing dependencies)")
 
