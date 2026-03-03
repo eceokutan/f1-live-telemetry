@@ -1,18 +1,19 @@
 """
 Voice Input Worker for F1 Telemetry Dashboard.
 
-Provides hands-free voice input using:
-- Continuous audio capture (pyaudio)
-- Silero VAD for voice activity detection (local, neural network)
-- faster-whisper for local speech-to-text transcription (CTranslate2)
+Provides voice input using either:
+- VAD mode (default): Continuous audio capture with Silero VAD for automatic
+  voice activity detection. No button press required.
+- PTT mode (--ptt flag): Push-to-talk. Records only while PTT button is held.
+  Skips VAD model loading entirely (saves memory).
 
-No button press required - automatically detects when driver is speaking.
+Both modes use faster-whisper for local speech-to-text transcription (CTranslate2).
 """
 
 import logging
+import threading
 import numpy as np
 import pyaudio
-import torch
 from PyQt5 import QtCore
 
 logger = logging.getLogger(__name__)
@@ -20,14 +21,17 @@ logger = logging.getLogger(__name__)
 
 class VoiceInputWorker(QtCore.QThread):
     """
-    Voice input worker thread for hands-free driver queries.
+    Voice input worker thread for driver queries.
 
-    Uses Silero VAD to detect speech, then transcribes locally with faster-whisper.
-    Runs continuously without requiring button presses.
+    Supports two modes:
+    - VAD mode (default): Uses Silero VAD to auto-detect speech, then transcribes
+      with faster-whisper. No button press required.
+    - PTT mode: Records audio only while push-to-talk is active (controlled via
+      start_recording/stop_recording). Skips VAD model loading.
 
     Signals:
         speech_detected(str text) - Emitted when speech is transcribed
-        vad_state_changed(bool is_speaking) - Emitted when VAD state changes
+        vad_state_changed(bool is_speaking) - Emitted when recording state changes
         status_update(str message) - Status messages for logging
         error_occurred(str error) - Error messages
     """
@@ -48,23 +52,26 @@ class VoiceInputWorker(QtCore.QThread):
     SPEECH_PAD_MS = 150  # Padding before/after speech (ms)
     MIN_SPEECH_DURATION_MS = 300  # Minimum speech duration to process
 
-    def __init__(self, whisper_model_size: str = "base"):
+    def __init__(self, whisper_model_size: str = "base", ptt_mode: bool = False):
         """
         Initialize voice input worker.
 
         Args:
             whisper_model_size: Whisper model size (tiny, base, small, medium, large).
                                 Default "base" (~140MB, good speed/accuracy balance).
+            ptt_mode: If True, use push-to-talk mode (skip VAD, record only when
+                      start_recording() is called). If False, use VAD auto-detection.
         """
         super().__init__()
 
         self.whisper_model_size = whisper_model_size
+        self.ptt_mode = ptt_mode
 
         # Audio stream
         self.audio = None
         self.stream = None
 
-        # Silero VAD model
+        # Silero VAD model (not loaded in PTT mode)
         self.vad_model = None
 
         # Whisper model
@@ -77,7 +84,12 @@ class VoiceInputWorker(QtCore.QThread):
         self._speech_buffer = []
         self._silence_chunks = 0
 
-        logger.info(f"VoiceInputWorker initialized (whisper_model={whisper_model_size})")
+        # PTT-specific state
+        self._ptt_recording = False
+        self._ptt_lock = threading.Lock()
+
+        mode_str = "PTT" if ptt_mode else "VAD"
+        logger.info(f"VoiceInputWorker initialized (whisper_model={whisper_model_size}, mode={mode_str})")
 
     def run(self):
         """Main thread execution loop."""
@@ -85,90 +97,18 @@ class VoiceInputWorker(QtCore.QThread):
         self.status_update.emit("Voice input starting...")
 
         try:
-            # Initialize components
-            self._initialize_vad()
+            # Initialize components (skip VAD in PTT mode to save memory)
+            if not self.ptt_mode:
+                self._initialize_vad()
             self._initialize_whisper()
             self._initialize_audio()
 
-            self.status_update.emit("[Voice] Voice input ready (faster-whisper) - speak naturally!")
-
-            # Main audio processing loop
-            while self._running:
-                try:
-                    # Read audio chunk
-                    audio_data = self.stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
-
-                    # Skip processing if paused (TTS is playing)
-                    if self._paused:
-                        # Reset speech state when paused
-                        if self._is_speaking:
-                            self._is_speaking = False
-                            self._speech_buffer = []
-                            self._silence_chunks = 0
-                            self.vad_state_changed.emit(False)
-                        continue
-
-                    audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
-
-                    # Convert to float32 for VAD
-                    audio_float32 = audio_int16.astype(np.float32) / 32768.0
-
-                    # Detect speech
-                    speech_prob = self._detect_speech(audio_float32)
-
-                    # Debug: Print speech probability periodically
-                    if hasattr(self, '_vad_debug_counter'):
-                        self._vad_debug_counter += 1
-                    else:
-                        self._vad_debug_counter = 0
-
-                    # Print VAD probability every 2 seconds (~125 chunks at 16kHz)
-                    if self._vad_debug_counter % 125 == 0:
-                        logger.info(f"[VAD] Speech probability: {speech_prob:.3f} (threshold: {self.VAD_THRESHOLD})")
-
-                    # Process based on VAD state
-                    if speech_prob > self.VAD_THRESHOLD:
-                        # Speech detected
-                        if not self._is_speaking:
-                            self._is_speaking = True
-                            self._speech_buffer = []
-                            self.vad_state_changed.emit(True)
-                            logger.info("[VAD] Speech started - recording...")
-                            self.status_update.emit("[Voice] Listening...")
-
-                        self._speech_buffer.append(audio_int16)
-                        self._silence_chunks = 0
-
-                    else:
-                        # Silence detected
-                        if self._is_speaking:
-                            self._silence_chunks += 1
-
-                            # Continue buffering for a bit (padding)
-                            if self._silence_chunks < self._chunks_for_ms(self.SPEECH_PAD_MS):
-                                self._speech_buffer.append(audio_int16)
-                            else:
-                                # End of speech
-                                self._is_speaking = False
-                                self.vad_state_changed.emit(False)
-                                logger.info("[VAD] Speech ended")
-
-                                # Check minimum duration and transcribe
-                                duration_ms = len(self._speech_buffer) * (self.CHUNK_SIZE / self.SAMPLE_RATE) * 1000
-                                logger.info(f"[VAD] Recorded {duration_ms:.0f}ms of speech (min: {self.MIN_SPEECH_DURATION_MS}ms)")
-                                if duration_ms >= self.MIN_SPEECH_DURATION_MS:
-                                    self.status_update.emit("[Voice] Transcribing speech...")
-                                    self._transcribe_speech()
-                                else:
-                                    logger.info(f"[VAD] Speech too short ({duration_ms:.0f}ms), ignoring")
-                                    self.status_update.emit(f"[Voice] Speech too short ({duration_ms:.0f}ms)")
-
-                                self._speech_buffer = []
-                                self._silence_chunks = 0
-
-                except Exception as e:
-                    logger.error(f"Error in audio processing loop: {e}")
-                    continue
+            if self.ptt_mode:
+                self.status_update.emit("[Voice] PTT mode ready — hold V or joystick button to talk")
+                self._run_ptt_loop()
+            else:
+                self.status_update.emit("[Voice] Voice input ready (faster-whisper) - speak naturally!")
+                self._run_vad_loop()
 
         except Exception as e:
             logger.error(f"Voice input error: {e}", exc_info=True)
@@ -177,9 +117,160 @@ class VoiceInputWorker(QtCore.QThread):
             self._cleanup()
             self.status_update.emit("Voice input stopped")
 
+    def _run_vad_loop(self):
+        """Audio processing loop for VAD mode. Auto-detects speech using Silero VAD."""
+        while self._running:
+            try:
+                # Read audio chunk
+                audio_data = self.stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
+
+                # Skip processing if paused (TTS is playing)
+                if self._paused:
+                    # Reset speech state when paused
+                    if self._is_speaking:
+                        self._is_speaking = False
+                        self._speech_buffer = []
+                        self._silence_chunks = 0
+                        self.vad_state_changed.emit(False)
+                    continue
+
+                audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
+
+                # Convert to float32 for VAD
+                audio_float32 = audio_int16.astype(np.float32) / 32768.0
+
+                # Detect speech
+                speech_prob = self._detect_speech(audio_float32)
+
+                # Debug: Print speech probability periodically
+                if hasattr(self, '_vad_debug_counter'):
+                    self._vad_debug_counter += 1
+                else:
+                    self._vad_debug_counter = 0
+
+                # Print VAD probability every 2 seconds (~125 chunks at 16kHz)
+                if self._vad_debug_counter % 125 == 0:
+                    logger.info(f"[VAD] Speech probability: {speech_prob:.3f} (threshold: {self.VAD_THRESHOLD})")
+
+                # Process based on VAD state
+                if speech_prob > self.VAD_THRESHOLD:
+                    # Speech detected
+                    if not self._is_speaking:
+                        self._is_speaking = True
+                        self._speech_buffer = []
+                        self.vad_state_changed.emit(True)
+                        logger.info("[VAD] Speech started - recording...")
+                        self.status_update.emit("[Voice] Listening...")
+
+                    self._speech_buffer.append(audio_int16)
+                    self._silence_chunks = 0
+
+                else:
+                    # Silence detected
+                    if self._is_speaking:
+                        self._silence_chunks += 1
+
+                        # Continue buffering for a bit (padding)
+                        if self._silence_chunks < self._chunks_for_ms(self.SPEECH_PAD_MS):
+                            self._speech_buffer.append(audio_int16)
+                        else:
+                            # End of speech
+                            self._is_speaking = False
+                            self.vad_state_changed.emit(False)
+                            logger.info("[VAD] Speech ended")
+
+                            # Check minimum duration and transcribe
+                            duration_ms = len(self._speech_buffer) * (self.CHUNK_SIZE / self.SAMPLE_RATE) * 1000
+                            logger.info(f"[VAD] Recorded {duration_ms:.0f}ms of speech (min: {self.MIN_SPEECH_DURATION_MS}ms)")
+                            if duration_ms >= self.MIN_SPEECH_DURATION_MS:
+                                self.status_update.emit("[Voice] Transcribing speech...")
+                                self._transcribe_speech()
+                            else:
+                                logger.info(f"[VAD] Speech too short ({duration_ms:.0f}ms), ignoring")
+                                self.status_update.emit(f"[Voice] Speech too short ({duration_ms:.0f}ms)")
+
+                            self._speech_buffer = []
+                            self._silence_chunks = 0
+
+            except Exception as e:
+                logger.error(f"Error in audio processing loop: {e}")
+                continue
+
+    def _run_ptt_loop(self):
+        """Audio processing loop for PTT mode. Records only while PTT button is held."""
+        while self._running:
+            try:
+                # Read audio chunk (keeps stream alive even when not recording)
+                audio_data = self.stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
+
+                # Skip if paused (TTS is playing)
+                if self._paused:
+                    if self._is_speaking:
+                        self._is_speaking = False
+                        self._speech_buffer = []
+                        self.vad_state_changed.emit(False)
+                    continue
+
+                # Check PTT state
+                with self._ptt_lock:
+                    is_recording = self._ptt_recording
+
+                if is_recording:
+                    audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
+
+                    # First chunk of a new recording
+                    if not self._is_speaking:
+                        self._is_speaking = True
+                        self._speech_buffer = []
+                        self.vad_state_changed.emit(True)
+                        logger.info("[PTT] Recording started")
+                        self.status_update.emit("[Voice] Recording (PTT held)...")
+
+                    self._speech_buffer.append(audio_int16)
+
+                else:
+                    # PTT released — if we were recording, transcribe
+                    if self._is_speaking:
+                        self._is_speaking = False
+                        self.vad_state_changed.emit(False)
+                        logger.info("[PTT] Recording stopped")
+
+                        duration_ms = len(self._speech_buffer) * (self.CHUNK_SIZE / self.SAMPLE_RATE) * 1000
+                        logger.info(f"[PTT] Recorded {duration_ms:.0f}ms of audio")
+
+                        if duration_ms >= self.MIN_SPEECH_DURATION_MS:
+                            self.status_update.emit("[Voice] Transcribing speech...")
+                            self._transcribe_speech()
+                        else:
+                            logger.info(f"[PTT] Recording too short ({duration_ms:.0f}ms), ignoring")
+                            self.status_update.emit(f"[Voice] Too short ({duration_ms:.0f}ms)")
+
+                        self._speech_buffer = []
+
+            except Exception as e:
+                logger.error(f"Error in PTT audio loop: {e}")
+                continue
+
+    def start_recording(self):
+        """Start recording audio (called when PTT button is pressed). Thread-safe."""
+        if self._paused:
+            logger.debug("PTT pressed but voice input is paused (TTS playing)")
+            return
+        with self._ptt_lock:
+            self._ptt_recording = True
+        logger.debug("PTT recording started")
+
+    def stop_recording(self):
+        """Stop recording audio (called when PTT button is released). Thread-safe."""
+        with self._ptt_lock:
+            self._ptt_recording = False
+        logger.debug("PTT recording stopped")
+
     def _initialize_vad(self):
-        """Initialize Silero VAD model."""
+        """Initialize Silero VAD model. Only called in VAD mode (not PTT)."""
         try:
+            import torch
+
             self.status_update.emit("Loading Silero VAD model...")
 
             # Load Silero VAD from torch hub
@@ -282,6 +373,8 @@ class VoiceInputWorker(QtCore.QThread):
             Speech probability (0.0 to 1.0)
         """
         try:
+            import torch
+
             # Convert to torch tensor
             audio_tensor = torch.from_numpy(audio_chunk)
 
