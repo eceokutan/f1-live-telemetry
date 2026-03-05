@@ -215,20 +215,8 @@ class MainWindow(QMainWindow):
         self.comms_text.setPlaceholderText("Radio messages will appear here...")
         comms_layout.addWidget(self.comms_text)
 
-        # Commentator transcript
-        comment_group = QGroupBox("Commentator Transcript")
-        comment_layout = QVBoxLayout()
-        comment_group.setLayout(comment_layout)
-
-        self.comment_text = QTextEdit()
-        self.comment_text.setReadOnly(True)
-        self.comment_text.setAcceptRichText(True)
-        self.comment_text.setPlaceholderText("Commentary will appear here...")
-        comment_layout.addWidget(self.comment_text)
-
         right_col.addWidget(driver_group)
         right_col.addWidget(comms_group)
-        right_col.addWidget(comment_group)
 
         return right_col
 
@@ -463,7 +451,7 @@ class MainWindow(QMainWindow):
 
             logger.info("AI Response: %s...", message[:80])
 
-        # All other AI commentary goes to Commentator Transcript
+        # All other AI commentary also goes to Communications Transcript
         else:
             priority_labels = {0: "🔴 CRITICAL", 1: "🟠 HIGH", 2: "🟡 MEDIUM", 3: "⚪ LOW"}
             priority_label = priority_labels.get(priority, "⚪ INFO")
@@ -478,11 +466,11 @@ class MainWindow(QMainWindow):
             )
 
             # Use insertHtml for proper HTML rendering
-            cursor = self.comment_text.textCursor()
+            cursor = self.comms_text.textCursor()
             cursor.movePosition(cursor.End)
             cursor.insertHtml(formatted_message)
-            self.comment_text.setTextCursor(cursor)
-            self.comment_text.ensureCursorVisible()
+            self.comms_text.setTextCursor(cursor)
+            self.comms_text.ensureCursorVisible()
 
             logger.info("AI Commentary [%s]: %s...", trigger, message[:80])
 
