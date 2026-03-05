@@ -43,7 +43,7 @@ try:
     from ai.race_engineer import AIRaceEngineerWorker
     AI_AVAILABLE = True
     print("[OK] AI Race Engineer module available")
-except ImportError as e:
+except Exception as e:
     AI_AVAILABLE = False
     print(f"[WARN] AI Race Engineer not available: {e}")
 
@@ -52,7 +52,7 @@ try:
     from ai.voice_input import VoiceInputWorker
     VOICE_AVAILABLE = True
     print("[OK] Voice Input module available")
-except ImportError as e:
+except Exception as e:
     VOICE_AVAILABLE = False
     print(f"[WARN] Voice Input not available: {e}")
 
@@ -61,7 +61,7 @@ try:
     from ai.tts_output import TTSOutputWorker
     TTS_AVAILABLE = True
     print("[OK] TTS Output module available")
-except ImportError as e:
+except Exception as e:
     TTS_AVAILABLE = False
     print(f"[WARN] TTS Output not available: {e}")
 
@@ -127,24 +127,24 @@ def main(game: str = "ac", enable_ai: bool = False):
     if enable_ai and AI_AVAILABLE:
         print("[INFO] Initializing AI Race Engineer...")
 
-        # Load credentials from environment
-        watsonx_url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
-        watsonx_project_id = os.getenv("WATSONX_PROJECT_ID", "")
-        watsonx_api_key = os.getenv("WATSONX_API_KEY", "")
+        # Load LLM credentials from environment (Hugging Face)
+        # Prefer HUGGINGFACE_TOKEN, fall back to HUGGINGFACE_API_KEY if set
+        huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HUGGINGFACE_API_KEY", "")
+        huggingface_model_id = os.getenv("HUGGINGFACE_MODEL_ID", "")
         watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
         watson_stt_url = os.getenv("WATSON_STT_URL", "")
         watson_tts_api_key = os.getenv("WATSON_TTS_API_KEY", "")
         watson_tts_url = os.getenv("WATSON_TTS_URL", "")
 
-        if not watsonx_api_key or not watsonx_project_id:
-            print("[WARN] AI Race Engineer requires WATSONX_API_KEY and WATSONX_PROJECT_ID")
+        if not huggingface_token or not huggingface_model_id:
+            print("[WARN] AI Race Engineer requires HUGGINGFACE_TOKEN (or HUGGINGFACE_API_KEY)")
+            print("[WARN] and HUGGINGFACE_MODEL_ID to be set in the environment.")
             print("[WARN] Skipping AI initialization. Set these in .env file to enable AI.")
         else:
             try:
                 ai_thread = AIRaceEngineerWorker(
-                    watsonx_url=watsonx_url,
-                    watsonx_project_id=watsonx_project_id,
-                    watsonx_api_key=watsonx_api_key,
+                    huggingface_token=huggingface_token,
+                    hf_model_id=huggingface_model_id,
                     track_name="Unknown Track",
                     session_id="ac_session_001",
                     verbosity="moderate"

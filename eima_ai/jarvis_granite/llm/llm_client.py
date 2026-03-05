@@ -1,11 +1,11 @@
 """
 LLM Client for Jarvis-Granite Live Telemetry.
 
-Provides interface to IBM Granite LLM via WatsonX using LangChain.
-Implements retry logic with Tenacity for robust API calls.
+Provides an interface to a text generation model hosted on Hugging Face
+using the `huggingface_hub` Inference API.
 
 Features:
-- LangChain integration with WatsonxLLM
+- Hugging Face InferenceClient integration
 - Tenacity retry with exponential backoff
 - Async support for non-blocking calls
 - Configurable model parameters
@@ -28,14 +28,15 @@ logger = logging.getLogger(__name__)
 
 class LLMError(Exception):
     """Exception raised for LLM-related errors."""
+
     pass
 
 
 class LLMClient:
     """
-    Client for IBM Granite LLM via WatsonX using LangChain.
+    Client for a Hugging Face-hosted LLM via `huggingface_hub.InferenceClient`.
 
-    This is a lightweight wrapper around WatsonxLLM that handles:
+    This is a lightweight wrapper that handles:
     - Connection configuration
     - Retry logic with Tenacity
     - Async invocation
@@ -43,7 +44,7 @@ class LLMClient:
     The actual prompt formatting is handled by RaceEngineerAgent.
 
     Attributes:
-        model_id: WatsonX model identifier
+        model_id: Hugging Face model identifier
         max_tokens: Maximum tokens for response generation
         temperature: LLM temperature for response variety
         max_retries: Maximum retry attempts for failed requests
@@ -51,10 +52,8 @@ class LLMClient:
 
     def __init__(
         self,
-        watsonx_url: str,
-        watsonx_project_id: str,
-        watsonx_api_key: str,
-        model_id: str = "ibm/granite-3-8b-instruct",
+        huggingface_token: str,
+        model_id: str,
         max_tokens: int = 75,  # Reduced from 150 for faster responses (~200-400ms savings)
         temperature: float = 0.7,
         max_retries: int = 3,
@@ -65,19 +64,15 @@ class LLMClient:
         Initialize LLM Client.
 
         Args:
-            watsonx_url: WatsonX API URL
-            watsonx_project_id: WatsonX project ID
-            watsonx_api_key: WatsonX API key
-            model_id: Model identifier (default: ibm/granite-3-8b-instruct)
+            huggingface_token: Hugging Face access token (HUGGINGFACE_TOKEN / HUGGINGFACE_API_KEY)
+            model_id: Model identifier on Hugging Face (e.g. "org/custom-race-engineer")
             max_tokens: Maximum response tokens (default: 75, reduced for racing brevity)
             temperature: Response temperature (default: 0.7)
             max_retries: Max retry attempts (default: 3)
             min_retry_wait: Minimum wait between retries in seconds (default: 1.0)
             max_retry_wait: Maximum wait between retries in seconds (default: 5.0)
         """
-        self.watsonx_url = watsonx_url
-        self.watsonx_project_id = watsonx_project_id
-        self.watsonx_api_key = watsonx_api_key
+        self.huggingface_token = huggingface_token
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -85,52 +80,54 @@ class LLMClient:
         self.min_retry_wait = min_retry_wait
         self.max_retry_wait = max_retry_wait
 
-        # Initialize LLM instance (lazy initialization)
-        self._llm = None
-        self._llm_initialized = False
+        # Initialize client instance (lazy initialization)
+        self._client = None
+        self._client_initialized = False
 
-    def _get_llm(self):
+    def _get_client(self):
         """
-        Get or create the WatsonxLLM instance.
+        Get or create the InferenceClient instance.
 
         Uses lazy initialization to avoid import errors during testing.
 
         Returns:
-            WatsonxLLM instance or None if not available
+            InferenceClient instance or None if not available
         """
-        if self._llm_initialized:
-            return self._llm
+        if self._client_initialized:
+            return self._client
 
         try:
-            from langchain_ibm import WatsonxLLM
+            from huggingface_hub import InferenceClient
 
-            self._llm = WatsonxLLM(
-                model_id=self.model_id,
-                url=self.watsonx_url,
-                project_id=self.watsonx_project_id,
-                apikey=self.watsonx_api_key,
-                params={
-                    "max_new_tokens": self.max_tokens,
-                    "temperature": self.temperature,
-                    "decoding_method": "greedy",
-                },
-            )
-            self._llm_initialized = True
-            logger.info(f"Initialized WatsonxLLM with model {self.model_id}")
+            if not self.huggingface_token:
+                logger.warning(
+                    "Hugging Face token not provided. LLM calls will use fallback."
+                )
+                self._client = None
+            else:
+                self._client = InferenceClient(
+                    model=self.model_id,
+                    token=self.huggingface_token,
+                )
+                logger.info(
+                    f"Initialized Hugging Face InferenceClient with model {self.model_id}"
+                )
+
+            self._client_initialized = True
 
         except ImportError:
             logger.warning(
-                "langchain_ibm not installed. LLM calls will use fallback."
+                "huggingface_hub not installed. LLM calls will use fallback."
             )
-            self._llm = None
-            self._llm_initialized = True
+            self._client = None
+            self._client_initialized = True
 
         except Exception as e:
-            logger.error(f"Failed to initialize WatsonxLLM: {e}")
-            self._llm = None
-            self._llm_initialized = True
+            logger.error(f"Failed to initialize Hugging Face InferenceClient: {e}")
+            self._client = None
+            self._client_initialized = True
 
-        return self._llm
+        return self._client
 
     async def invoke(self, prompt: str) -> str:
         """
@@ -170,9 +167,11 @@ class LLMClient:
             wait=wait_exponential(
                 multiplier=1,
                 min=self.min_retry_wait,
-                max=self.max_retry_wait
+                max=self.max_retry_wait,
             ),
-            retry=retry_if_exception_type((ConnectionError, TimeoutError, Exception)),
+            retry=retry_if_exception_type(
+                (ConnectionError, TimeoutError, Exception)
+            ),
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=True,
         )
@@ -185,7 +184,9 @@ class LLMClient:
             response = await _do_invoke()
             return self._clean_response(response)
         except Exception as e:
-            logger.error(f"LLM invocation failed after {self.max_retries} attempts: {e}")
+            logger.error(
+                f"LLM invocation failed after {self.max_retries} attempts: {e}"
+            )
             raise LLMError(f"Failed to invoke LLM: {e}") from e
 
     async def _invoke_llm(self, prompt: str) -> str:
@@ -198,16 +199,35 @@ class LLMClient:
         Returns:
             Raw LLM response text
         """
-        llm = self._get_llm()
+        client = self._get_client()
 
-        if llm is None:
+        if client is None:
             # Fallback for testing or when LLM is not available
             logger.warning("LLM not available, using fallback response")
             return self._generate_fallback_response(prompt)
 
         # Use asyncio to run the sync LLM call in a thread pool
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, llm.invoke, prompt)
+
+        def _call_hf():
+            # We intentionally keep parameters minimal so this works
+            # for both hosted inference endpoints and public models.
+            try:
+                return client.text_generation(
+                    prompt,
+                    max_new_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    do_sample=True,
+                )
+            except TypeError:
+                # Older versions of huggingface_hub may not support
+                # all kwargs; retry with the bare minimum.
+                return client.text_generation(
+                    prompt,
+                    max_new_tokens=self.max_tokens,
+                )
+
+        response = await loop.run_in_executor(None, _call_hf)
 
         return response
 
