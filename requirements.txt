@@ -24,6 +24,9 @@ pydantic-settings>=2.1.0
 ibm-watson>=8.0.0
 ibm-cloud-sdk-core>=3.18.0
 
+# Hugging Face Inference (for custom LLM instead of WatsonX)
+huggingface-hub>=0.23.0
+
 # LLM framework
 langchain>=0.1.0
 langchain-ibm>=0.1.0
