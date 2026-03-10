@@ -123,12 +123,6 @@ class EnvironmentSettings(BaseSettings):
         default="https://api.us-south.text-to-speech.watson.cloud.ibm.com",
         alias="WATSON_TTS_URL"
     )
-    watson_stt_api_key: str = Field(default="", alias="WATSON_STT_API_KEY")
-    watson_stt_url: str = Field(
-        default="https://api.us-south.speech-to-text.watson.cloud.ibm.com",
-        alias="WATSON_STT_URL"
-    )
-
     # LiveKit
     livekit_api_key: str = Field(default="", alias="LIVEKIT_API_KEY")
     livekit_api_secret: str = Field(default="", alias="LIVEKIT_API_SECRET")

@@ -10,6 +10,8 @@ Usage:
     python main.py --acc        # Run with ACC
     python main.py --ai         # Enable AI race engineer
     python main.py --acc --ai   # ACC with AI
+    python main.py --ai --ptt   # AI with push-to-talk (hold V key or joystick button)
+    python main.py --ai --ptt --ptt-button 5  # PTT with custom joystick button index
 """
 import sys
 import os
@@ -21,7 +23,6 @@ try:
     import torch
 except ImportError:
     pass
-
 
 from PyQt5 import QtWidgets
 
@@ -52,7 +53,7 @@ try:
     from ai.race_engineer import AIRaceEngineerWorker
     AI_AVAILABLE = True
     logger.info("AI Race Engineer module available")
-except ImportError as e:
+except Exception as e:
     AI_AVAILABLE = False
     logger.warning("AI Race Engineer not available: %s", e)
 
@@ -61,7 +62,7 @@ try:
     from ai.voice_input import VoiceInputWorker
     VOICE_AVAILABLE = True
     logger.info("Voice Input module available")
-except ImportError as e:
+except Exception as e:
     VOICE_AVAILABLE = False
     logger.warning("Voice Input not available: %s", e)
 
@@ -70,9 +71,18 @@ try:
     from ai.tts_output import TTSOutputWorker
     TTS_AVAILABLE = True
     logger.info("TTS Output module available")
-except ImportError as e:
+except Exception as e:
     TTS_AVAILABLE = False
     logger.warning("TTS Output not available: %s", e)
+
+# Try to import PTT controller (optional)
+try:
+    from ai.ptt_controller import PTTController
+    PTT_AVAILABLE = True
+    logger.info("PTT Controller module available")
+except ImportError as e:
+    PTT_AVAILABLE = False
+    logger.warning("PTT Controller not available: %s", e)
 
 # Try to import session recorder (optional)
 try:
@@ -86,13 +96,15 @@ except ImportError as e:
 logger.info("All core modules imported")
 
 
-def main(game: str = "ac", enable_ai: bool = False):
+def main(game: str = "ac", enable_ai: bool = False, enable_ptt: bool = False, ptt_button_index: int = 11):
     """
     Entry point for the telemetry dashboard.
 
     Args:
         game: "ac" for Assetto Corsa, "acc" for Assetto Corsa Competizione
         enable_ai: Enable AI race engineer (requires IBM WatsonX credentials)
+        enable_ptt: Enable push-to-talk mode (hold V key or joystick button)
+        ptt_button_index: Joystick button index for PTT (default 12 for Thrustmaster T128X RSB)
     """
     logger.info("Starting dashboard for: %s", game.upper())
     app = QtWidgets.QApplication(sys.argv)
@@ -131,23 +143,22 @@ def main(game: str = "ac", enable_ai: bool = False):
     if enable_ai and AI_AVAILABLE:
         logger.info("Initializing AI Race Engineer")
 
-        # Load credentials from environment
-        watsonx_url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
-        watsonx_project_id = os.getenv("WATSONX_PROJECT_ID", "")
-        watsonx_api_key = os.getenv("WATSONX_API_KEY", "")
+        # Load LLM credentials from environment (Hugging Face)
+        # Prefer HUGGINGFACE_TOKEN, fall back to HUGGINGFACE_API_KEY if set
+        huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HUGGINGFACE_API_KEY", "")
+        huggingface_model_id = os.getenv("HUGGINGFACE_MODEL_ID", "")
         watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
         watson_stt_url = os.getenv("WATSON_STT_URL", "")
         watson_tts_api_key = os.getenv("WATSON_TTS_API_KEY", "")
         watson_tts_url = os.getenv("WATSON_TTS_URL", "")
 
-        if not watsonx_api_key or not watsonx_project_id:
-            logger.warning("AI Race Engineer requires WATSONX_API_KEY and WATSONX_PROJECT_ID in .env")
+        if not huggingface_token or not huggingface_model_id:
+            logger.warning("AI Race Engineer requires HUGGINGFACE_TOKEN and HUGGINGFACE_MODEL_ID in .env")
         else:
             try:
                 ai_thread = AIRaceEngineerWorker(
-                    watsonx_url=watsonx_url,
-                    watsonx_project_id=watsonx_project_id,
-                    watsonx_api_key=watsonx_api_key,
+                    huggingface_token=huggingface_token,
+                    hf_model_id=huggingface_model_id,
                     track_name="Unknown Track",
                     session_id="ac_session_001",
                     verbosity="moderate"
@@ -188,16 +199,14 @@ def main(game: str = "ac", enable_ai: bool = False):
                 ai_thread.start()
                 logger.info("AI Race Engineer started")
 
-                # Initialize voice input (if available and credentials present)
-                if VOICE_AVAILABLE and watson_stt_api_key and watson_stt_url:
-                    logger.info("Initializing Voice Input (streaming mode)")
+                # Initialize voice input (if available)
+                if VOICE_AVAILABLE:
+                    voice_mode = "PTT" if enable_ptt else "VAD"
+                    logger.info("Initializing Voice Input (faster-whisper, %s mode)", voice_mode)
                     try:
                         voice_thread = VoiceInputWorker(
-                            watson_api_key=watson_stt_api_key,
-                            watson_url=watson_stt_url,
-                            model="en-US_BroadbandModel",
-                            # use_streaming=True  # Latency optimization: ~500-1000ms savings
-                            use_streaming=False  # Disabled due to WebSocket compatibility issues with Python 3.10
+                            whisper_model_size="base",
+                            ptt_mode=enable_ptt
                         )
 
                         # Connect voice signals
@@ -208,15 +217,39 @@ def main(game: str = "ac", enable_ai: bool = False):
 
                         # Start voice thread
                         voice_thread.start()
-                        logger.info("Voice Input started")
+                        logger.info("Voice Input started (%s mode)", voice_mode)
 
                     except Exception as e:
                         logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
                         voice_thread = None
-                elif VOICE_AVAILABLE:
-                    logger.warning("Voice Input requires WATSON_STT_API_KEY and WATSON_STT_URL in .env")
                 else:
                     logger.warning("Voice Input module not available (missing dependencies)")
+
+                # Initialize PTT controller (if PTT mode enabled)
+                ptt_controller = None
+                if enable_ptt and voice_thread and PTT_AVAILABLE:
+                    logger.info("Initializing PTT Controller (button index=%d)", ptt_button_index)
+                    try:
+                        ptt_controller = PTTController(
+                            joystick_button_index=ptt_button_index
+                        )
+
+                        # Connect PTT signals to voice worker
+                        ptt_controller.ptt_pressed.connect(voice_thread.start_recording)
+                        ptt_controller.ptt_released.connect(voice_thread.stop_recording)
+                        ptt_controller.status_update.connect(lambda msg: logger.info("PTT: %s", msg))
+
+                        # Start PTT monitoring
+                        ptt_controller.start()
+                        logger.info("PTT Controller started")
+
+                    except Exception as e:
+                        logger.error("Failed to initialize PTT Controller: %s", e, exc_info=True)
+                        ptt_controller = None
+                elif enable_ptt and not PTT_AVAILABLE:
+                    logger.warning("PTT requested but pynput not available. Install with: pip install pynput")
+                elif enable_ptt and not voice_thread:
+                    logger.warning("PTT requested but voice input failed to initialize")
 
                 # Initialize TTS output (if available and credentials present)
                 if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
@@ -391,14 +424,15 @@ def main(game: str = "ac", enable_ai: bool = False):
     # Show window
     window.show()
 
-    if ai_thread and voice_thread and tts_thread:
-        logger.info("Dashboard ready — AI Race Engineer + Voice I/O active")
-    elif ai_thread and voice_thread:
-        logger.info("Dashboard ready — AI Race Engineer + Voice Input active")
-    elif ai_thread and tts_thread:
-        logger.info("Dashboard ready — AI Race Engineer + TTS Output active")
-    elif ai_thread:
-        logger.info("Dashboard ready — AI Race Engineer active")
+    mode_parts = []
+    if ai_thread:
+        mode_parts.append("AI Race Engineer")
+    if voice_thread:
+        mode_parts.append("PTT Voice" if enable_ptt else "Voice Input")
+    if tts_thread:
+        mode_parts.append("TTS Output")
+    if mode_parts:
+        logger.info("Dashboard ready — %s active", " + ".join(mode_parts))
     else:
         logger.info("Dashboard ready — telemetry only")
 
@@ -431,6 +465,15 @@ def main(game: str = "ac", enable_ai: bool = False):
         except Exception as e:
             logger.warning("Error stopping voice thread: %s", e)
 
+    # Stop PTT controller (if it was initialized)
+    try:
+        if ptt_controller:
+            ptt_controller.stop()
+    except NameError:
+        pass  # ptt_controller not defined (AI not enabled)
+    except Exception as e:
+        logger.warning("Error stopping PTT controller: %s", e)
+
     if tts_thread:
         try:
             tts_thread.stop()
@@ -453,16 +496,29 @@ if __name__ == "__main__":
     # Parse command line arguments
     game = "ac"
     enable_ai = False
+    enable_ptt = False
+    ptt_button_index = 11  # Default: Thrustmaster T128X RSB
 
     if "--acc" in sys.argv:
         game = "acc"
     if "--ai" in sys.argv:
         enable_ai = True
+    if "--ptt" in sys.argv:
+        enable_ptt = True
 
-    logger.info("Game: %s | AI: %s", game, enable_ai)
+    # Parse --ptt-button N
+    for i, arg in enumerate(sys.argv):
+        if arg == "--ptt-button" and i + 1 < len(sys.argv):
+            try:
+                ptt_button_index = int(sys.argv[i + 1])
+            except ValueError:
+                logger.error("Invalid --ptt-button value: %s", sys.argv[i + 1])
+                sys.exit(1)
+
+    logger.info("Game: %s | AI: %s | PTT: %s", game, enable_ai, enable_ptt)
 
     try:
-        main(game, enable_ai)
+        main(game, enable_ai, enable_ptt, ptt_button_index)
     except Exception as e:
         logger.critical("Fatal error: %s", e, exc_info=True)
         sys.exit(1)

@@ -1,15 +1,21 @@
 """
 Prompt templates for Jarvis-Granite Live Telemetry.
 
-Contains LangChain PromptTemplate objects for:
-- System prompts with race engineer personality
-- Proactive prompts (event-triggered)
-- Reactive prompts (query-driven)
+Defines lightweight prompt template objects used to format prompts
+for the race engineer LLM. This avoids a hard dependency on LangChain
+while preserving the same `.format(**kwargs)` interface.
 
 All prompts support three verbosity levels: minimal, moderate, verbose.
 """
 
-from langchain_core.prompts import PromptTemplate
+
+class PromptTemplate:
+    def __init__(self, input_variables, template: str):
+        self.input_variables = input_variables
+        self.template = template
+
+    def format(self, **kwargs) -> str:
+        return self.template.format(**kwargs)
 
 
 # =============================================================================

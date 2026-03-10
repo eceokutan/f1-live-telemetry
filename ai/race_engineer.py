@@ -103,20 +103,18 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     def __init__(
         self,
-        watsonx_url: str,
-        watsonx_project_id: str,
-        watsonx_api_key: str,
+        huggingface_token: str,
+        hf_model_id: str,
         track_name: str = "Unknown Track",
         session_id: str = "ac_session_001",
-        verbosity: str = "minimal"
+        verbosity: str = "minimal",
     ):
         """
         Initialize AI Race Engineer.
 
         Args:
-            watsonx_url: IBM WatsonX API URL
-            watsonx_project_id: WatsonX project ID
-            watsonx_api_key: WatsonX API key
+            huggingface_token: Hugging Face access token
+            hf_model_id: Hugging Face model id for the race engineer LLM
             track_name: Name of the track
             session_id: Unique session identifier
             verbosity: AI verbosity level (minimal, moderate, verbose)
@@ -124,9 +122,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
         super().__init__()
 
         # Configuration
-        self.watsonx_url = watsonx_url
-        self.watsonx_project_id = watsonx_project_id
-        self.watsonx_api_key = watsonx_api_key
+        self.huggingface_token = huggingface_token
+        self.hf_model_id = hf_model_id
         self.track_name = track_name
         self.session_id = session_id
         self.verbosity = verbosity
@@ -194,10 +191,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
         # max_tokens=75 for faster responses (~200-400ms savings over 150 tokens)
         # Racing comms should be brief anyway
         llm_client = LLMClient(
-            watsonx_url=self.watsonx_url,
-            watsonx_project_id=self.watsonx_project_id,
-            watsonx_api_key=self.watsonx_api_key,
-            model_id="ibm/granite-3-8b-instruct",  # granite-4-h-small not available in this environment
+            huggingface_token=self.huggingface_token,
+            model_id=self.hf_model_id,
             max_tokens=75,  # Latency optimization: shorter responses
             max_retries=2
         )

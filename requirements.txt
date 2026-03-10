@@ -24,6 +24,9 @@ pydantic-settings>=2.1.0
 ibm-watson>=8.0.0
 ibm-cloud-sdk-core>=3.18.0
 
+# Hugging Face Inference (for custom LLM instead of WatsonX)
+huggingface-hub>=0.23.0
+
 # LLM framework
 langchain>=0.1.0
 langchain-ibm>=0.1.0
@@ -33,18 +36,20 @@ tenacity>=8.2.0
 python-dotenv>=1.0.0
 
 # =============================================================================
-# Voice Input/Output (Silero VAD + Watson STT/TTS)
+# Voice Input/Output (Silero VAD + faster-whisper + Watson TTS)
 # =============================================================================
 pyaudio>=0.2.13
 torch>=2.0.0
 torchaudio>=2.0.0
+faster-whisper>=1.0.0
 aiohttp>=3.9.0
 # Note: Silero VAD is loaded via torch.hub, no separate install needed
 
 # =============================================================================
-# Streaming STT (Watson WebSocket API)
+# Push-to-Talk (hold V key or joystick button to talk)
 # =============================================================================
-websockets>=12.0
+pynput>=1.7.6           # Global keyboard hooks (works when game has focus)
+# pygame>=2.5.0         # Optional: joystick/gamepad PTT button (pip install pygame)
 
 # =============================================================================
 # Optional: LiveKit (Future - not currently used)
