@@ -9,6 +9,7 @@ Receives telemetry samples, detects events, generates AI commentary.
 
 import asyncio
 import logging
+import re
 import sys
 from typing import Optional, Dict, Any
 from PyQt5 import QtCore
@@ -70,6 +71,7 @@ race_engineer_module = import_from_file(
 # Extract classes
 TelemetryData = telemetry_module.TelemetryData
 TireTemps = telemetry_module.TireTemps
+TireWear = telemetry_module.TireWear
 TirePressure = telemetry_module.TirePressure
 GForces = telemetry_module.GForces
 Event = events_module.Event
@@ -136,6 +138,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         # Thread control
         self._running = False
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._on_track = False  # True only when AC status is LIVE (2)
 
         # Queues (initialized in run() after event loop is created)
         self.telemetry_queue: Optional[asyncio.Queue] = None
@@ -289,6 +292,14 @@ class AIRaceEngineerWorker(QtCore.QThread):
             # Emit signal to show query in UI
             self.driver_query_received.emit(query)
 
+            # If not on track, don't waste an LLM call
+            if not self._on_track:
+                self.ai_commentary.emit(
+                    "We're not on track right now. Get out there and I'll have your data ready.",
+                    "driver_query", 2
+                )
+                return
+
             logger.info(f"Processing driver query: {query}")
             self.status_update.emit(f"Processing: \"{query}\"")
 
@@ -313,6 +324,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
             except Exception as llm_error:
                 logger.error(f"LLM error: {llm_error}", exc_info=True)
                 raise
+
+            # Clean LLM response (strip meta-commentary, references, prompt leakage)
+            response = self._clean_llm_response(response)
 
             # Check for empty response and provide fallback
             if not response or not response.strip():
@@ -369,17 +383,40 @@ class AIRaceEngineerWorker(QtCore.QThread):
             longitudinal=0.0
         )
 
-        # Create TelemetryData - AC sends 'rpm' not 'rpms'
+        # Tire wear: AC's tyreWear = remaining life (100=fresh, decreases with wear)
+        # eima_ai expects percent worn (0=fresh, 100=worn), so invert.
+        tire_wear = None
+        if "tyre_wear_fl" in data:
+            tire_wear = TireWear(
+                fl=max(0.0, min(100.0, 100.0 - data.get("tyre_wear_fl", 100.0))),
+                fr=max(0.0, min(100.0, 100.0 - data.get("tyre_wear_fr", 100.0))),
+                rl=max(0.0, min(100.0, 100.0 - data.get("tyre_wear_rl", 100.0))),
+                rr=max(0.0, min(100.0, 100.0 - data.get("tyre_wear_rr", 100.0)))
+            )
+
+        # Car damage (AC: 5 zones, values 0.0 = no damage)
+        car_damage = None
+        if "car_damage_front" in data:
+            car_damage = {
+                "front": data.get("car_damage_front", 0.0),
+                "rear": data.get("car_damage_rear", 0.0),
+                "left": data.get("car_damage_left", 0.0),
+                "right": data.get("car_damage_right", 0.0),
+                "centre": data.get("car_damage_centre", 0.0),
+            }
+
         lap_id = data.get("lap_id", 0)
         return TelemetryData(
             speed=data.get("speed", 0.0),
-            rpms=data.get("rpm", 0),  # AC sends "rpm" (without s)
+            rpms=data.get("rpms", 0),
             gear=data.get("gear", 0),
             throttle=data.get("throttle", 0.0),
             brake=data.get("brake", 0.0),
             fuel=data.get("fuel", None),
             tire_temps=tire_temps,
             tire_pressure=tire_pressure,
+            tire_wear=tire_wear,
+            car_damage=car_damage,
             x=data.get("x", 0.0),
             z=data.get("z", 0.0),
             lap_id=lap_id,
@@ -399,12 +436,19 @@ class AIRaceEngineerWorker(QtCore.QThread):
             response = await self.race_engineer_agent.handle_event(event, self.context)
 
             if response:
+                # Clean LLM response (strip meta-commentary, references, prompt leakage)
+                response = self._clean_llm_response(response)
+
                 # Emit AI commentary signal
                 self.ai_commentary.emit(response, event.type, event.priority.value)
                 logger.info(f"AI commentary generated for {event.type}: {response[:50]}...")
 
         except Exception as e:
             logger.error(f"Error generating AI response for {event.type}: {e}", exc_info=True)
+
+    def update_ac_status(self, ac_status: int):
+        """Update whether the car is on track (AC status 2=LIVE)."""
+        self._on_track = (ac_status == 2)
 
     def process_telemetry(self, telemetry_dict: Dict[str, Any]):
         """
@@ -436,6 +480,77 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 self.query_queue.put(query),
                 self._event_loop
             )
+
+    @staticmethod
+    def _clean_llm_response(response: str) -> str:
+        """
+        Post-process LLM output to strip meta-commentary, references,
+        and prompt template leakage that the model sometimes outputs.
+
+        Args:
+            response: Raw LLM response text
+
+        Returns:
+            Cleaned response suitable for TTS/display
+        """
+        # Split into lines for line-level filtering
+        lines = response.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip instruction leakage lines (model echoing its own rules)
+            if stripped.startswith("- Do NOT") or stripped.startswith("Do NOT"):
+                continue
+            if stripped.startswith("- Do not") or stripped.startswith("Do not"):
+                continue
+            if re.match(r"^-\s+(Keep|Reply|Answer|Speak|Focus|Provide|Use)\b", stripped, re.IGNORECASE):
+                continue
+            # Skip lines that look like rule headers
+            if re.match(r"^(RULES|CONSTRAINTS|INSTRUCTIONS|GUIDELINES)\s*:", stripped, re.IGNORECASE):
+                continue
+            # Skip lines that are just bullet points with instructions
+            if re.match(r"^[-•]\s+(You are|The driver|Responses?|Lead with|Match)\b", stripped, re.IGNORECASE):
+                continue
+            cleaned_lines.append(line)
+        response = "\n".join(cleaned_lines)
+
+        # Remove "Driver's Question: ..." echo (prompt leakage)
+        response = re.sub(r"Driver'?s?\s*Question\s*:\s*\"?[^\"]*\"?\s*", "", response, flags=re.IGNORECASE)
+
+        # Remove "Driver: [Event: ...] Engineer:" pattern (prompt leakage)
+        response = re.sub(r"Driver:\s*\[Event:\s*[^\]]*\]\s*Engineer:\s*", "", response, flags=re.IGNORECASE)
+
+        # Remove "Radio Message:" / "Engineer:" / "Alert:" prefix
+        response = re.sub(r"^(Radio\s*Message|Engineer|Response|Alert|Answer)\s*:\s*", "", response, flags=re.IGNORECASE)
+
+        # Remove "References:", "Sources:", etc. sections and everything after
+        response = re.sub(r"\n?\s*(References|Sources|Notes?|Context|Data|Observations?)\s*:.*", "", response, flags=re.IGNORECASE | re.DOTALL)
+
+        # Remove numbered data lists like "1. Tire Wear Data: 100%"
+        response = re.sub(r"\n\s*\d+\.\s+\w[\w\s]*?:\s*[\d.]+[%°CLs]*\s*", "", response)
+
+        # Remove filler openers
+        response = re.sub(r"^(Understood|Copy that|Roger|Noted)[.,]?\s*", "", response, flags=re.IGNORECASE)
+
+        # Remove meta-commentary markers
+        response = re.sub(r"\n\s*---+\s*\n?", "", response)
+
+        # Remove asterisks used for emphasis
+        response = response.replace("*", "")
+
+        # Strip surrounding quotes
+        response = response.strip().strip('"').strip("'")
+
+        # Collapse multiple newlines and trim
+        response = re.sub(r"\n{2,}", "\n", response).strip()
+
+        # Final safety: if response is still very long (>200 chars), take first sentence only
+        if len(response) > 200:
+            first_sentence = re.split(r'(?<=[.!?])\s', response, maxsplit=1)
+            if first_sentence:
+                response = first_sentence[0]
+
+        return response
 
     def stop(self):
         """Stop the worker thread."""

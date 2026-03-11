@@ -59,33 +59,24 @@ VERBOSITY_INSTRUCTIONS = {
 
 PROACTIVE_PROMPT_MINIMAL = PromptTemplate(
     input_variables=["event_type", "event_data", "session_context", "conversation_history"],
-    template="""You are a concise F1 race engineer. Alert the driver about: {event_type}.
-Data: {event_data}
-Context: {session_context}
+    template="""F1 engineer radio. Alert driver about {event_type}. Data: {event_data}. Under 10 words.
 
-Recent conversation:
-{conversation_history}
-
-Respond in under 15 words. Be direct and urgent if needed. No notes or meta-commentary."""
+Alert:"""
 )
 
 PROACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["event_type", "event_data", "session_context", "conversation_history"],
-    template="""You are an experienced F1 race engineer speaking to your driver during a race.
-An event has been detected that requires your attention.
+    template="""F1 race engineer on radio. Alert the driver in one short sentence.
 
-Event Type: {event_type}
-Event Data: {event_data}
+Event: {event_type}
+Details: {event_data}
 
-Current Session Context:
+Data:
 {session_context}
 
-Recent conversation:
-{conversation_history}
+Example alerts: "Fuel getting low, box in 3 laps." / "Front left tire is overheating, ease off." / "Good lap, two tenths faster."
 
-Provide a clear, actionable radio message (1-2 sentences). Be direct but informative.
-Focus on what the driver needs to know and any recommended action.
-Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-commentary."""
+Alert:"""
 )
 
 PROACTIVE_PROMPT_VERBOSE = PromptTemplate(
@@ -117,30 +108,23 @@ Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-
 
 REACTIVE_PROMPT_MINIMAL = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""You are a concise F1 race engineer. Driver asks: "{query}"
-Context: {session_context}
+    template="""F1 engineer radio. Driver asks: "{query}". Data: {session_context}. Under 10 words.
 
-Recent conversation:
-{conversation_history}
-
-Answer in under 15 words. Reply ONLY as the engineer speaking to the driver. No notes, explanations, or meta-commentary."""
+Answer:"""
 )
 
 REACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""You are an experienced F1 race engineer responding to your driver's question during a race.
+    template="""F1 race engineer on radio. Answer the driver's question in one short sentence using the data below.
 
-Driver's Question: "{query}"
+Question: "{query}"
 
-Current Session Context:
+Data:
 {session_context}
 
-Recent conversation:
-{conversation_history}
+Example answers: "Tires at 75 degrees, looking good." / "Fuel for 8 more laps." / "No damage, car is clean."
 
-Provide a clear, helpful response (1-2 sentences). Be direct and informative.
-Focus on answering the question with relevant data from the context.
-Reply ONLY as the engineer speaking directly to the driver. Do NOT include any notes, asterisks, explanations, or meta-commentary about your response."""
+Answer:"""
 )
 
 REACTIVE_PROMPT_VERBOSE = PromptTemplate(

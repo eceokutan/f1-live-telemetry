@@ -70,6 +70,11 @@ class LiveSessionContext:
     gap_ahead: Optional[float] = None
     gap_behind: Optional[float] = None
 
+    # Car damage (5 zones: front, rear, left, right, centre; 0.0 = no damage)
+    car_damage: Dict[str, float] = field(
+        default_factory=lambda: {"front": 0.0, "rear": 0.0, "left": 0.0, "right": 0.0, "centre": 0.0}
+    )
+
     # Lap history
     lap_times: List[float] = field(default_factory=list)
     best_lap: Optional[float] = None
@@ -125,7 +130,11 @@ class LiveSessionContext:
                 "rr": telemetry.tire_wear.rr,
             }
         else:
-            self.tire_wear = {"fl": 100.0, "fr": 100.0, "rl": 100.0, "rr": 100.0}
+            self.tire_wear = {"fl": 0.0, "fr": 0.0, "rl": 0.0, "rr": 0.0}
+
+        # Car damage
+        if telemetry.car_damage is not None:
+            self.car_damage = telemetry.car_damage
 
         # Lap and sector (keep current values if None in AC)
         if telemetry.lap_number is not None:
@@ -278,11 +287,26 @@ class LiveSessionContext:
         best_lap_str = self._format_lap_time(self.best_lap) if self.best_lap else "N/A"
         last_lap_str = self._format_lap_time(self.last_lap) if self.last_lap else "N/A"
 
+        # Format car damage
+        total_damage = sum(self.car_damage.values())
+        if total_damage > 0:
+            damage_parts = [f"{zone}: {val:.0f}%" for zone, val in self.car_damage.items() if val > 0]
+            damage_str = ", ".join(damage_parts)
+        else:
+            damage_str = "No damage"
+
+        # Format tire wear
+        wear_str = f"FL:{self.tire_wear['fl']:.0f}% FR:{self.tire_wear['fr']:.0f}% RL:{self.tire_wear['rl']:.0f}% RR:{self.tire_wear['rr']:.0f}%"
+
         return f"""Track: {self.track_name}
 Lap: {self.current_lap} | Position: P{self.position}
+Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}
+Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%}
 Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}
 Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)
-Tires: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
+Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
+Tire Wear: {wear_str}
+Car Damage: {damage_str}
 Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"""
 
     def _format_lap_time(self, seconds: float) -> str:

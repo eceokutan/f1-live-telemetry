@@ -1,5 +1,6 @@
 # telemetry/ac_shared_memory.py
 import ctypes as ct
+import logging
 import mmap
 import time
 from typing import List, Dict, Any, Optional
@@ -7,6 +8,8 @@ from typing import List, Dict, Any, Optional
 from PyQt5 import QtCore
 
 from telemetry.lap_buffer import LapBuffer
+
+logger = logging.getLogger(__name__)
 
 
 # ===================== PHYSICS SHARED MEMORY =====================
@@ -151,8 +154,8 @@ def open_shared_memory(name: str, size: int) -> Optional[mmap.mmap]:
     try:
         return mmap.mmap(0, size, tagname=name, access=mmap.ACCESS_READ)
     except Exception as e:
-        print(f"ERROR: Could not open shared memory '{name}': {e}")
-        print("Make sure Assetto Corsa is running and you're in a session.")
+        logger.error("Could not open shared memory '%s': %s", name, e)
+        logger.error("Make sure Assetto Corsa is running and you're in a session.")
         return None
 
 
@@ -191,224 +194,243 @@ class AcTelemetryWorker(QtCore.QThread):
         super().__init__(parent)
         self.running = False
 
-    def run(self):
-        print("\n" + "="*60)
-        print("🔍 AC TELEMETRY WORKER STARTING")
-        print("="*60)
-        self.status_update.emit("Connecting to Assetto Corsa...")
+    def _close_handles(self, mm_phys, mm_graph, mm_static):
+        """Safely close all shared memory handles."""
+        for mm in (mm_phys, mm_graph, mm_static):
+            if mm is not None:
+                try:
+                    mm.close()
+                except Exception:
+                    pass
 
+    def _connect(self):
+        """Try to open all shared memory handles. Returns (phys, graph, static) or None."""
         mm_phys = open_shared_memory(SHM_NAME_PHYSICS, PHYSICS_SIZE)
         mm_graph = open_shared_memory(SHM_NAME_GRAPHICS, GRAPHICS_SIZE)
         mm_static = open_shared_memory(SHM_NAME_STATIC, STATIC_SIZE)
-
         if mm_phys is None or mm_graph is None:
-            print("❌ ERROR: Could not connect to AC shared memory.")
-            print("   Make sure Assetto Corsa is running and you're in a session.")
-            self.status_update.emit("ERROR: Could not connect to AC shared memory.")
+            self._close_handles(mm_phys, mm_graph, mm_static)
+            return None
+        return mm_phys, mm_graph, mm_static
+
+    def _read_session_info(self, mm_static):
+        """Read and emit static session info (track, car, driver)."""
+        if mm_static is None:
             return
-
-        print("✅ Successfully connected to AC shared memory!")
-        self.status_update.emit("Connected! Start driving...")
-
-        # Read static info once and emit it
-        if mm_static is not None:
-            try:
-                static_data = read_static(mm_static)
-                session_data = {
-                    "track": static_data.track,
-                    "track_config": static_data.trackConfiguration,
-                    "car_model": static_data.carModel,
-                    "player_name": static_data.playerName,
-                    "player_surname": static_data.playerSurname,
-                    "player_nick": static_data.playerNick,
-                    "max_rpm": static_data.maxRpm,
-                    "max_fuel": static_data.maxFuel,
-                }
-                print(f"📊 Session Info:")
-                print(f"   Track: {session_data['track']} ({session_data['track_config']})")
-                print(f"   Car: {session_data['car_model']}")
-                print(f"   Driver: {session_data['player_name']} {session_data['player_surname']}")
-                self.session_info_update.emit(session_data)
-            except Exception as e:
-                print(f"⚠️  Warning: Could not read static info: {e}")
-
-        # LapBuffer with callback that emits a Qt signal
-        lap_buffer = LapBuffer(
-            on_lap_complete=lambda lap_id, samples: self.lap_completed.emit(lap_id, samples)
-        )
-
-        t0 = time.time()
-        self.running = True
-        frame_count = 0
-        last_debug_time = time.time()
-        last_lap_id = -1
-        baseline_lap = None  # Track starting lap for normalization
-        last_valid_raw_lap = None  # Track last known good raw value for garbage detection
-
-        # Position integration (since carCoordinates is often zero in AC)
-        integrated_x = 0.0
-        integrated_z = 0.0
-        last_time = t0
-
-        print("\n🏁 Starting telemetry loop (reading at ~60Hz)...")
-        print("   📍 IMPORTANT: Make sure you're IN THE CAR and DRIVING!")
-        print("   📍 Car coordinates will only appear when physics is active\n")
-
         try:
-            while self.running:
-                phys = read_physics(mm_phys)
-                gfx = read_graphics(mm_graph)
-
-                now = time.time()
-                elapsed = now - t0
-                dt = now - last_time
-                last_time = now
-
-                # Check if carCoordinates has data (non-zero)
-                x = gfx.carCoordinates[0]
-                z = gfx.carCoordinates[2]
-
-                # If carCoordinates is zero, integrate velocity to estimate position
-                if x == 0.0 and z == 0.0 and dt > 0:
-                    # Integrate velocity: position += velocity * dt
-                    integrated_x += phys.velocity[0] * dt
-                    integrated_z += phys.velocity[2] * dt
-                    x = integrated_x
-                    z = integrated_z
-
-                raw_lap_id = gfx.completedLaps
-
-                # Validate raw_lap_id from shared memory — reject garbage values
-                # that occur during loading, replay, or pit states
-                if last_valid_raw_lap is not None:
-                    if raw_lap_id < 0 or abs(raw_lap_id - last_valid_raw_lap) > 1:
-                        raw_lap_id = last_valid_raw_lap
-                elif raw_lap_id < 0:
-                    raw_lap_id = 0
-                last_valid_raw_lap = raw_lap_id
-
-                # Initialize baseline on first read to handle mid-race starts
-                if baseline_lap is None:
-                    baseline_lap = raw_lap_id
-                    print(f"[INFO] Baseline lap set to {baseline_lap} (normalizing to lap 0)")
-
-                # Normalize lap number so it always starts from 0
-                lap_id = max(0, raw_lap_id - baseline_lap)
-                speed = phys.speedKmh
-
-                # Convert AC gear to display gear
-                # AC: 0=R, 1=N, 2=1st, 3=2nd, etc.
-                # Display: -1=R, 0=N, 1=1st, 2=2nd, etc.
-                raw_gear = phys.gear
-                if raw_gear == 0:
-                    display_gear = -1  # Reverse
-                elif raw_gear == 1:
-                    display_gear = 0   # Neutral
-                else:
-                    display_gear = raw_gear - 1  # 1st, 2nd, 3rd, etc.
-
-                # Clamp RPM to non-negative (shared memory can return -39 when stationary)
-                clamped_rpms = max(0, phys.rpms)
-
-                # Debug print every 60 frames (~1 second at 60Hz)
-                frame_count += 1
-                if frame_count % 60 == 0:
-                    print(f"📦 Packet #{frame_count:04d} | Lap: {lap_id+1} | Speed: {speed:6.1f} km/h | "
-                          f"Gear: {display_gear} (raw:{raw_gear}) | RPM: {clamped_rpms:5d} | Pos: ({x:.1f}, {z:.1f})")
-
-                # Debug warning if coordinates are still zero after 5 seconds
-                if frame_count == 300 and x == 0 and z == 0:
-                    print("⚠️  WARNING: Car coordinates still (0,0) after 5 seconds!")
-                    print("   Make sure you're IN THE CAR and DRIVING (not in menus or paused)")
-
-                # Debug print when lap changes
-                if lap_id != last_lap_id and last_lap_id != -1:
-                    print(f"\n🏁 LAP COMPLETED! Lap {last_lap_id+1} -> {lap_id+1}\n")
-                    # Reset integrated position at lap change
-                    integrated_x = 0.0
-                    integrated_z = 0.0
-                last_lap_id = lap_id
-
-                # Create sample dict
-                sample_data = {
-                    "lap_id": lap_id,
-                    "t": elapsed,
-                    "x": x,
-                    "z": z,
-                    "speed": speed,
-                    "gear": display_gear,
-                    "rpms": clamped_rpms,
-                    "brake": phys.brake,
-                    "throttle": phys.gas,
-                    "fuel": phys.fuel,
-                    # Tire data (4 values: FL, FR, RL, RR)
-                    "tyre_pressure_fl": phys.wheelsPressure[0],
-                    "tyre_pressure_fr": phys.wheelsPressure[1],
-                    "tyre_pressure_rl": phys.wheelsPressure[2],
-                    "tyre_pressure_rr": phys.wheelsPressure[3],
-                    "tyre_temp_fl": phys.tyreCoreTemperature[0],
-                    "tyre_temp_fr": phys.tyreCoreTemperature[1],
-                    "tyre_temp_rl": phys.tyreCoreTemperature[2],
-                    "tyre_temp_rr": phys.tyreCoreTemperature[3],
-                }
-
-                # Feed sample into lap buffer
-                lap_buffer.add_sample(
-                    lap_id=lap_id,
-                    t=elapsed,
-                    x=x,
-                    z=z,
-                    speed_kmh=speed,
-                    gear=display_gear,
-                    rpms=clamped_rpms,
-                    brake=phys.brake,
-                    throttle=phys.gas,
-                    fuel=phys.fuel,
-                    # Tire data
-                    tyre_pressure_fl=phys.wheelsPressure[0],
-                    tyre_pressure_fr=phys.wheelsPressure[1],
-                    tyre_pressure_rl=phys.wheelsPressure[2],
-                    tyre_pressure_rr=phys.wheelsPressure[3],
-                    tyre_temp_fl=phys.tyreCoreTemperature[0],
-                    tyre_temp_fr=phys.tyreCoreTemperature[1],
-                    tyre_temp_rl=phys.tyreCoreTemperature[2],
-                    tyre_temp_rr=phys.tyreCoreTemperature[3],
-                )
-
-                # Emit real-time sample for live visualization
-                self.realtime_sample.emit(sample_data)
-
-                # Emit live data every 10 frames (~6 times/sec at 60Hz)
-                if frame_count % 10 == 0:
-                    live_data = {
-                        "current_lap": lap_id + 1,
-                        "speed": speed,
-                        "gear": raw_gear,  # Use raw for live display (dashboard will convert)
-                        "rpm": phys.rpms,
-                        "fuel": phys.fuel,
-                        "position": gfx.position,
-                        "is_in_pit": gfx.isInPit,
-                        "ac_status": gfx.status,  # 0=OFF, 1=REPLAY, 2=LIVE, 3=PAUSE
-                        "current_time": gfx.currentTime,
-                        "last_time": gfx.lastTime,
-                        "best_time": gfx.bestTime,
-                    }
-                    self.live_data_update.emit(live_data)
-
-                # ~60 Hz loop
-                time.sleep(1 / 60.0)
-
+            static_data = read_static(mm_static)
+            session_data = {
+                "track": static_data.track,
+                "track_config": static_data.trackConfiguration,
+                "car_model": static_data.carModel,
+                "player_name": static_data.playerName,
+                "player_surname": static_data.playerSurname,
+                "player_nick": static_data.playerNick,
+                "max_rpm": static_data.maxRpm,
+                "max_fuel": static_data.maxFuel,
+            }
+            logger.info("Session: Track=%s (%s), Car=%s, Driver=%s %s",
+                        session_data['track'], session_data['track_config'],
+                        session_data['car_model'], session_data['player_name'],
+                        session_data['player_surname'])
+            self.session_info_update.emit(session_data)
         except Exception as e:
-            self.status_update.emit(f"Error in telemetry loop: {str(e)}")
-        finally:
+            logger.warning("Could not read static info: %s", e)
+
+    def run(self):
+        logger.info("AC Telemetry Worker starting")
+        self.running = True
+
+        RECONNECT_INTERVAL = 3  # seconds between reconnection attempts
+
+        # Outer reconnection loop — keeps trying until stopped
+        while self.running:
+            self.status_update.emit("Connecting to Assetto Corsa...")
+
+            handles = self._connect()
+            if handles is None:
+                logger.warning("AC not available, retrying in %ds...", RECONNECT_INTERVAL)
+                self.status_update.emit("Waiting for Assetto Corsa...")
+                # Wait with periodic checks so we can stop quickly
+                for _ in range(RECONNECT_INTERVAL * 10):
+                    if not self.running:
+                        return
+                    time.sleep(0.1)
+                continue
+
+            mm_phys, mm_graph, mm_static = handles
+            logger.info("Connected to AC shared memory")
+            self.status_update.emit("Connected! Start driving...")
+
+            self._read_session_info(mm_static)
+
+            # LapBuffer with callback that emits a Qt signal
+            lap_buffer = LapBuffer(
+                on_lap_complete=lambda lap_id, samples: self.lap_completed.emit(lap_id, samples)
+            )
+
+            t0 = time.time()
+            frame_count = 0
+            last_lap_id = -1
+            baseline_lap = None
+            last_valid_raw_lap = None
+            integrated_x = 0.0
+            integrated_z = 0.0
+            last_time = t0
+
+            logger.info("Starting telemetry loop at ~60Hz")
+
             try:
-                mm_phys.close()
-                mm_graph.close()
-                if mm_static is not None:
-                    mm_static.close()
-            except Exception:
-                pass
-            self.status_update.emit("Disconnected from Assetto Corsa.")
+                while self.running:
+                    gfx = read_graphics(mm_graph)
+
+                    # AC status: 0=OFF, 1=REPLAY, 2=LIVE, 3=PAUSE
+                    ac_status = gfx.status
+                    if ac_status != 2:
+                        frame_count += 1
+                        if frame_count % 10 == 0:
+                            self.live_data_update.emit({
+                                "current_lap": (last_lap_id + 1) if last_lap_id >= 0 else 1,
+                                "speed": 0, "gear": 1, "rpm": 0, "fuel": 0,
+                                "position": gfx.position, "is_in_pit": gfx.isInPit,
+                                "ac_status": ac_status,
+                                "current_time": gfx.currentTime,
+                                "last_time": gfx.lastTime, "best_time": gfx.bestTime,
+                            })
+                        time.sleep(0.5)
+                        continue
+
+                    phys = read_physics(mm_phys)
+
+                    now = time.time()
+                    elapsed = now - t0
+                    dt = now - last_time
+                    last_time = now
+
+                    x = gfx.carCoordinates[0]
+                    z = gfx.carCoordinates[2]
+
+                    if x == 0.0 and z == 0.0 and dt > 0:
+                        integrated_x += phys.velocity[0] * dt
+                        integrated_z += phys.velocity[2] * dt
+                        x = integrated_x
+                        z = integrated_z
+
+                    raw_lap_id = gfx.completedLaps
+
+                    if last_valid_raw_lap is not None:
+                        if raw_lap_id < 0 or abs(raw_lap_id - last_valid_raw_lap) > 1:
+                            raw_lap_id = last_valid_raw_lap
+                    elif raw_lap_id < 0:
+                        raw_lap_id = 0
+                    last_valid_raw_lap = raw_lap_id
+
+                    if baseline_lap is None:
+                        baseline_lap = raw_lap_id
+                        logger.info("Baseline lap set to %d (normalizing to lap 0)", baseline_lap)
+
+                    lap_id = max(0, raw_lap_id - baseline_lap)
+                    speed = phys.speedKmh
+
+                    raw_gear = phys.gear
+                    if raw_gear == 0:
+                        display_gear = -1
+                    elif raw_gear == 1:
+                        display_gear = 0
+                    else:
+                        display_gear = raw_gear - 1
+
+                    clamped_rpms = max(0, phys.rpms)
+
+                    frame_count += 1
+                    if frame_count % 60 == 0:
+                        logger.debug("Frame %04d | Lap: %d | Speed: %6.1f km/h | Gear: %d | RPM: %5d | Pos: (%.1f, %.1f)",
+                                     frame_count, lap_id+1, speed, display_gear, clamped_rpms, x, z)
+                        logger.debug("Pressure FL=%.1f FR=%.1f | Temp FL=%.1f FR=%.1f",
+                                     phys.wheelsPressure[0], phys.wheelsPressure[1],
+                                     phys.tyreCoreTemperature[0], phys.tyreCoreTemperature[1])
+
+                    if frame_count == 300 and x == 0 and z == 0:
+                        logger.warning("Car coordinates still (0,0) after 5 seconds — are you on track?")
+
+                    if lap_id != last_lap_id and last_lap_id != -1:
+                        logger.info("Lap completed: %d -> %d", last_lap_id+1, lap_id+1)
+                        integrated_x = 0.0
+                        integrated_z = 0.0
+                    last_lap_id = lap_id
+
+                    sample_data = {
+                        "lap_id": lap_id,
+                        "t": elapsed,
+                        "x": x,
+                        "z": z,
+                        "speed": speed,
+                        "gear": display_gear,
+                        "rpms": clamped_rpms,
+                        "brake": phys.brake,
+                        "throttle": phys.gas,
+                        "fuel": phys.fuel,
+                        "tyre_pressure_fl": phys.wheelsPressure[0],
+                        "tyre_pressure_fr": phys.wheelsPressure[1],
+                        "tyre_pressure_rl": phys.wheelsPressure[2],
+                        "tyre_pressure_rr": phys.wheelsPressure[3],
+                        "tyre_temp_fl": phys.tyreCoreTemperature[0],
+                        "tyre_temp_fr": phys.tyreCoreTemperature[1],
+                        "tyre_temp_rl": phys.tyreCoreTemperature[2],
+                        "tyre_temp_rr": phys.tyreCoreTemperature[3],
+                        "tyre_wear_fl": phys.tyreWear[0],
+                        "tyre_wear_fr": phys.tyreWear[1],
+                        "tyre_wear_rl": phys.tyreWear[2],
+                        "tyre_wear_rr": phys.tyreWear[3],
+                        "car_damage_front": phys.carDamage[0],
+                        "car_damage_rear": phys.carDamage[1],
+                        "car_damage_left": phys.carDamage[2],
+                        "car_damage_right": phys.carDamage[3],
+                        "car_damage_centre": phys.carDamage[4],
+                    }
+
+                    lap_buffer.add_sample(
+                        lap_id=lap_id, t=elapsed, x=x, z=z,
+                        speed_kmh=speed, gear=display_gear, rpms=clamped_rpms,
+                        brake=phys.brake, throttle=phys.gas, fuel=phys.fuel,
+                        tyre_pressure_fl=phys.wheelsPressure[0],
+                        tyre_pressure_fr=phys.wheelsPressure[1],
+                        tyre_pressure_rl=phys.wheelsPressure[2],
+                        tyre_pressure_rr=phys.wheelsPressure[3],
+                        tyre_temp_fl=phys.tyreCoreTemperature[0],
+                        tyre_temp_fr=phys.tyreCoreTemperature[1],
+                        tyre_temp_rl=phys.tyreCoreTemperature[2],
+                        tyre_temp_rr=phys.tyreCoreTemperature[3],
+                    )
+
+                    self.realtime_sample.emit(sample_data)
+
+                    if frame_count % 10 == 0:
+                        live_data = {
+                            "current_lap": lap_id + 1,
+                            "speed": speed,
+                            "gear": raw_gear,
+                            "rpm": phys.rpms,
+                            "fuel": phys.fuel,
+                            "position": gfx.position,
+                            "is_in_pit": gfx.isInPit,
+                            "ac_status": gfx.status,
+                            "current_time": gfx.currentTime,
+                            "last_time": gfx.lastTime,
+                            "best_time": gfx.bestTime,
+                        }
+                        self.live_data_update.emit(live_data)
+
+                    time.sleep(1 / 60.0)
+
+            except Exception as e:
+                logger.warning("Shared memory read failed: %s — will reconnect", e)
+                self.status_update.emit("Connection lost, reconnecting...")
+            finally:
+                self._close_handles(mm_phys, mm_graph, mm_static)
+
+        logger.info("Disconnected from Assetto Corsa")
+        self.status_update.emit("Disconnected from Assetto Corsa.")
 
     def stop(self):
         self.running = False

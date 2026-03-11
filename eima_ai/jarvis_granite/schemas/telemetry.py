@@ -8,7 +8,7 @@ Defines Pydantic models for:
 - TelemetryData: Complete telemetry snapshot
 """
 
-from typing import Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -135,3 +135,6 @@ class TelemetryData(BaseModel):
     position: Optional[int] = Field(default=None, ge=1, description="Race position")
     gap_ahead: Optional[float] = Field(default=None, description="Gap to car ahead (seconds)")
     gap_behind: Optional[float] = Field(default=None, description="Gap to car behind (seconds)")
+
+    # Car damage (AC: 5 zones — front, rear, left, right, centre; 0.0 = no damage)
+    car_damage: Optional[Dict[str, float]] = Field(default=None, description="Car damage per zone (0.0=none)")
