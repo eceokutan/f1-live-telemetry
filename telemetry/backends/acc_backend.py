@@ -1,9 +1,13 @@
+import logging
 import socket
 import struct
 import time
-from typing import Dict, Any, List
-from PyQt5 import QtCore
 from enum import IntEnum
+from typing import Any, Dict, List, Optional
+
+from PyQt5 import QtCore
+
+logger = logging.getLogger(__name__)
 
 
 # ===================== ACC BROADCASTING PROTOCOL ENUMS =====================
@@ -320,11 +324,12 @@ class AccTelemetryWorker(QtCore.QThread):
         self.display_name = display_name
         self.running = False
         self.connection_id = None
-        self.focused_car_index = 0
+        self.focused_car_index: Optional[int] = None
         self.car_data = {}
         self.track_info = {}
         self.current_lap_samples = {}  # car_index -> [samples]
         self.last_lap_count = {}  # car_index -> lap_count
+        self.latest_car_updates = {}  # car_index -> latest realtime packet
         
     def run(self):
         self.status_update.emit("Connecting to ACC...")
@@ -378,6 +383,12 @@ class AccTelemetryWorker(QtCore.QThread):
                             "max_fuel": 100,
                         }
                         self.session_info_update.emit(session_data)
+
+                    elif msg_type == InboundMessageType.REALTIME_UPDATE:
+                        realtime = AccPacketParser.parse_realtime_update(data)
+                        focused = realtime.get("focused_car_index")
+                        if focused is not None:
+                            self.focused_car_index = int(focused)
                     
                     elif msg_type == InboundMessageType.ENTRY_LIST_CAR:
                         car_info = AccPacketParser.parse_entry_list_car(data)
@@ -390,7 +401,7 @@ class AccTelemetryWorker(QtCore.QThread):
                         
                         # Emit live data every ~0.1s
                         if time.time() - last_realtime > 0.1:
-                            self._emit_live_data(car_update)
+                            self._emit_live_data()
                             last_realtime = time.time()
                     
                 except socket.timeout:
@@ -458,9 +469,27 @@ class AccTelemetryWorker(QtCore.QThread):
         """Handle car telemetry update and buffer lap data"""
         car_index = car_update.get("car_index", 0)
         laps = car_update.get("laps", 0)
+        self.latest_car_updates[car_index] = car_update
+
+        # If focused car is unknown, treat first seen car as driver car.
+        if self.focused_car_index is None:
+            self.focused_car_index = car_index
 
         # Initialize if first time seeing this car
         if car_index not in self.current_lap_samples:
+            self.current_lap_samples[car_index] = []
+            self.last_lap_count[car_index] = laps
+
+        # Only emit real-time telemetry for the focused (driver) car.
+        if car_index != self.focused_car_index:
+            return
+
+        # Check for lap completion before appending the new-lap sample.
+        previous_laps = self.last_lap_count[car_index]
+        if laps > previous_laps:
+            completed_samples = self.current_lap_samples[car_index]
+            if completed_samples:
+                self.lap_completed.emit(laps, completed_samples)
             self.current_lap_samples[car_index] = []
             self.last_lap_count[car_index] = laps
 
@@ -484,35 +513,54 @@ class AccTelemetryWorker(QtCore.QThread):
             "tyre_temp_fr": 0,
             "tyre_temp_rl": 0,
             "tyre_temp_rr": 0,
+            "position": car_update.get("position", 0),
+            "gap_ahead": None,
+            "gap_behind": None,
+            "opponents": self._build_opponent_context(),
         }
         self.current_lap_samples[car_index].append(sample)
 
         # Emit real-time sample for live visualization
         self.realtime_sample.emit(sample)
-
-        # Check for lap completion
-        if laps > self.last_lap_count[car_index]:
-            # Lap completed!
-            if self.current_lap_samples[car_index]:
-                self.lap_completed.emit(laps, self.current_lap_samples[car_index])
-
-            # Reset for next lap
-            self.current_lap_samples[car_index] = [sample]
-            self.last_lap_count[car_index] = laps
     
-    def _emit_live_data(self, car_update: Dict[str, Any]):
+    def _build_opponent_context(self) -> List[Dict[str, Any]]:
+        """Build lightweight per-opponent context for the AI layer."""
+        focused = self.focused_car_index
+        if focused is None:
+            return []
+
+        opponents = []
+        for car_index, update in self.latest_car_updates.items():
+            if car_index == focused:
+                continue
+            opponents.append({
+                "car_index": car_index,
+                "position": update.get("position", 0),
+                "lap_number": update.get("laps", 0),
+                "speed": update.get("kmh", 0),
+                "track_position": update.get("track_position"),
+            })
+
+        opponents.sort(key=lambda c: c.get("position", 9999))
+        return opponents
+
+    def _emit_live_data(self):
         """Emit live telemetry data for UI"""
+        focused_update = self.latest_car_updates.get(self.focused_car_index)
+        if focused_update is None:
+            return
+
         live_data = {
-            "current_lap": car_update.get("laps", 0) + 1,
-            "speed": car_update.get("kmh", 0),
-            "gear": car_update.get("gear", 0),
+            "current_lap": focused_update.get("laps", 0) + 1,
+            "speed": focused_update.get("kmh", 0),
+            "gear": focused_update.get("gear", 0),
             "rpm": 0,  # Not available
             "fuel": 0,  # Would need physics data
-            "position": car_update.get("position", 0),
+            "position": focused_update.get("position", 0),
             "is_in_pit": 0,  # Would need to detect from data
             "current_time": "",
-            "last_time": self._format_lap_time(car_update.get("last_lap_ms", 0)),
-            "best_time": self._format_lap_time(car_update.get("best_session_lap_ms", 0)),
+            "last_time": self._format_lap_time(focused_update.get("last_lap_ms", 0)),
+            "best_time": self._format_lap_time(focused_update.get("best_session_lap_ms", 0)),
         }
         self.live_data_update.emit(live_data)
     

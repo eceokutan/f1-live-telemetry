@@ -201,7 +201,7 @@ tts.tts_to_file(text=text, file_path="output.wav")
 
 #### Current Configuration
 
-**Default value** in `eima_ai/jarvis_granite/llm/llm_client.py:58`:
+**Default value** in `ai/race_engineer_core/llm_client.py:58`:
 
 ```python
 max_tokens: int = 75,  # Reduced from 150 for faster responses (~200-400ms savings)
@@ -221,7 +221,7 @@ llm_client = LLMClient(
 
 **Option 1: Change the default** (affects all LLM clients)
 
-Edit `eima_ai/jarvis_granite/llm/llm_client.py`:
+Edit `ai/race_engineer_core/llm_client.py`:
 
 ```python
 def __init__(
@@ -238,10 +238,8 @@ Edit `ai/race_engineer.py` in the `_initialize_agents()` method:
 
 ```python
 llm_client = LLMClient(
-    watsonx_url=self.watsonx_url,
-    watsonx_project_id=self.watsonx_project_id,
-    watsonx_api_key=self.watsonx_api_key,
-    model_id="ibm/granite-3-8b-instruct",
+    huggingface_token=self.huggingface_token,
+    model_id=self.hf_model_id,
     max_tokens=75,  # ← Adjust this value
     max_retries=2
 )
@@ -314,7 +312,7 @@ ai_thread = AIRaceEngineerWorker(
    MIN_SPEECH_DURATION_MS = 300  # was 500
    ```
 
-2. **Reduce max tokens** (`eima_ai/jarvis_granite/llm/llm_client.py:58`)
+2. **Reduce max tokens** (`ai/race_engineer_core/llm_client.py:58`)
    ```python
    max_tokens: int = 75  # was 150
    ```
@@ -354,7 +352,7 @@ This would bring you close to the docs.md target of <3000ms end-to-end, with fir
 | Streaming TTS | `ai/tts_output.py` | - |
 | Sentence pipelining | `ai/race_engineer.py` | `ai/tts_output.py` |
 | Local TTS | `ai/tts_output.py` | `requirements.txt` |
-| Max tokens | `eima_ai/jarvis_granite/llm/llm_client.py` | - |
+| Max tokens | `ai/race_engineer_core/llm_client.py` | - |
 
 ---
 

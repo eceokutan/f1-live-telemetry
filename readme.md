@@ -1,6 +1,6 @@
 # F1 Live Telemetry Dashboard
 
-A real-time telemetry visualization tool for sim racing games with AI race engineer capabilities. Built with PyQt5 and IBM Watson AI services.
+A real-time telemetry visualization tool for sim racing games with AI race engineer capabilities. Built with PyQt5 and a local AI pipeline backed by Hugging Face inference.
 
 **Team 17 - Systems Course Project**
 
@@ -10,7 +10,7 @@ A real-time telemetry visualization tool for sim racing games with AI race engin
 
 - 📊 **Real-time Telemetry** - Live track maps and performance graphs updating at 12Hz
 - 🏎️ **Multi-Game Support** - Assetto Corsa (full telemetry) and ACC (limited)
-- 🤖 **AI Race Engineer** - IBM WatsonX-powered voice assistant with proactive alerts
+- 🤖 **AI Race Engineer** - Hugging Face-powered voice assistant with proactive alerts
 - 🎙️ **Voice Interaction** - Hands-free queries with speech-to-text/text-to-speech
 - 💾 **Session Recording** - SQLite database recording all telemetry and AI interactions
 - 📈 **Multi-Tire Analysis** - Separate graphs for FL/FR/RL/RR tire temps and pressures
@@ -42,14 +42,14 @@ python main.py --acc --ai    # ACC with AI features
 **Prerequisites:**
 - **AC:** Windows only, shared memory enabled in game settings
 - **ACC:** `broadcasting.json` configured (see [SETUP_GUIDE.md](SETUP_GUIDE.md))
-- **AI:** IBM Watson credentials in `.env` file (see `.env.example`)
+- **AI:** Hugging Face credentials in `.env` file (see `.env.example`)
 
 ---
 
 ## Project Structure
 
 ```
-f1_telemetry_app/
+f1-live-telemetry/
 ├── main.py                     # Entry point
 ├── requirements.txt            # Dependencies
 ├── .env.example                # Environment template
@@ -70,15 +70,7 @@ f1_telemetry_app/
 │   ├── voice_input.py          # Voice queries
 │   └── tts_output.py           # Voice output
 │
-├── eima_ai/                    # AI race engineer system
-│   ├── config/                 # Config models
-│   └── jarvis_granite/
-│       ├── agents/             # Event detection + LLM
-│       ├── llm/                # WatsonX client
-│       ├── prompts/            # Prompt templates
-│       ├── schemas/            # Data models
-│       └── live/
-│           └── context.py      # Session state
+│   └── race_engineer_core/     # AI core (models, context, agents, prompts, LLM)
 │
 ├── data/                       # Recording
 │   ├── session_recorder.py     # SQLite recorder
@@ -96,21 +88,16 @@ f1_telemetry_app/
 Create `.env` file (copy from `.env.example`):
 
 ```bash
-# IBM WatsonX (AI race engineer)
-WATSONX_URL=https://us-south.ml.cloud.ibm.com
-WATSONX_PROJECT_ID=your_project_id
-WATSONX_API_KEY=your_api_key
-
-# IBM Watson STT (voice input)
-WATSON_STT_API_KEY=your_stt_key
-WATSON_STT_URL=https://api.us-south.speech-to-text.watson.cloud.ibm.com
+# Hugging Face (AI race engineer LLM)
+HUGGINGFACE_TOKEN=hf_your_api_key_here
+HUGGINGFACE_MODEL_ID=your_model_id
 
 # IBM Watson TTS (voice output)
 WATSON_TTS_API_KEY=your_tts_key
 WATSON_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com
 ```
 
-See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed Watson setup.
+See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed platform setup.
 
 ---
 
@@ -157,7 +144,7 @@ TelemetryAgent detects events
 (fuel warnings, tire issues, gap changes)
     ↓
 RaceEngineerAgent generates response
-(IBM WatsonX LLM call ~2s)
+(Hugging Face LLM call ~2s)
     ↓
 ai_commentary signal → UI + SessionRecorder
 
@@ -165,7 +152,7 @@ Voice Input (optional)
     ↓
 Silero VAD detects speech
     ↓
-Watson STT transcribes
+faster-whisper transcribes
     ↓
 driver_query signal → AI Race Engineer
 ```
@@ -183,12 +170,12 @@ driver_query signal → AI Race Engineer
 - Cross-platform
 
 **[ai/race_engineer.py](ai/race_engineer.py)**
-- QThread integrating eima_ai system with telemetry
+- QThread integrating local AI core with telemetry
 - Converts dict → Pydantic models → TelemetryAgent → RaceEngineerAgent
 - Emits AI commentary via Qt signals
 
-**[eima_ai/](eima_ai/)**
-- Standalone AI race engineer system (Eima's project, integrated)
+**[ai/race_engineer_core/](ai/race_engineer_core/)**
+- Local AI race engineer core (models, context, prompts, LLM client, agents)
 - Event detection (<50ms), LLM generation (~2000ms)
 - Configuration-based thresholds and verbosity
 
@@ -262,13 +249,13 @@ driver_query signal → AI Race Engineer
 ### AI Issues
 
 **"AI not responding":**
-- Check `.env` has correct Watson credentials
+- Check `.env` has correct Hugging Face credentials
 - Verify internet connection (API calls require network)
 - Check console for error messages
 
 **"Microphone not working":**
 - Check system microphone permissions
-- Verify Watson STT credentials in `.env`
+- Verify microphone device is available to Python/PyAudio
 - Look for microphone indicator when speaking
 
 ---
@@ -288,8 +275,8 @@ driver_query signal → AI Race Engineer
 **Team 17 Systems Course Project**
 
 - Telemetry dashboard: Team 17
-- AI race engineer (`eima_ai/`): Eima (integrated)
-- IBM Watson: WatsonX LLM, STT, TTS
+- AI race engineer (`ai/race_engineer_core/`): Team 17 (integrated)
+- IBM Watson: TTS
 - Silero VAD: Voice activity detection
 - Game APIs: AC shared memory, ACC broadcasting
 
@@ -298,7 +285,7 @@ driver_query signal → AI Race Engineer
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Detailed technical architecture for AI assistant
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Step-by-step installation and Watson setup
+- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Step-by-step installation and configuration
 - **[.env.example](.env.example)** - Environment variable template
 
 ---

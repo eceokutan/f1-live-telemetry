@@ -20,10 +20,10 @@ import logging
 import time
 from typing import Any, Dict, Optional, Union
 
-from jarvis_granite.llm import LLMClient, LLMError
-from jarvis_granite.schemas.events import Event
-from jarvis_granite.live.context import LiveSessionContext
-from jarvis_granite.prompts import (
+from ai.race_engineer_core.context import LiveSessionContext
+from ai.race_engineer_core.events import Event
+from ai.race_engineer_core.llm_client import LLMClient, LLMError
+from ai.race_engineer_core.prompts import (
     get_proactive_prompt,
     get_reactive_prompt,
     format_conversation_history,
@@ -277,33 +277,30 @@ class RaceEngineerAgent:
 
 
 def create_race_engineer_agent(
-    watsonx_url: str,
-    watsonx_project_id: str,
-    watsonx_api_key: str,
-    model_id: str = "ibm/granite-3-8b-instruct",
+    huggingface_token: str,
+    model_id: str,
     verbosity: str = "moderate",
     max_retries: int = 3,
+    endpoint_url: Optional[str] = None,
 ) -> RaceEngineerAgent:
     """
     Factory function to create a RaceEngineerAgent with LLMClient.
 
     Args:
-        watsonx_url: WatsonX API URL
-        watsonx_project_id: WatsonX project ID
-        watsonx_api_key: WatsonX API key
+        huggingface_token: Hugging Face token
         model_id: Model identifier
         verbosity: Response verbosity level
         max_retries: Maximum retry attempts
+        endpoint_url: Optional Hugging Face Inference Endpoint URL
 
     Returns:
         Configured RaceEngineerAgent instance
     """
     llm_client = LLMClient(
-        watsonx_url=watsonx_url,
-        watsonx_project_id=watsonx_project_id,
-        watsonx_api_key=watsonx_api_key,
+        huggingface_token=huggingface_token,
         model_id=model_id,
         max_retries=max_retries,
+        endpoint_url=endpoint_url,
     )
 
     return RaceEngineerAgent(

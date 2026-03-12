@@ -88,6 +88,22 @@ class GForces(BaseModel):
     longitudinal: float = Field(..., description="Longitudinal G-force")
 
 
+class OpponentSnapshot(BaseModel):
+    """
+    Lightweight per-car session context for AI race strategy.
+
+    This is intentionally minimal and does not include full telemetry traces.
+    """
+
+    car_index: int = Field(..., ge=0, description="ACC car index")
+    position: int = Field(..., ge=1, description="Race position")
+    lap_number: int = Field(..., ge=0, description="Completed laps")
+    speed: float = Field(..., ge=0, description="Current speed in km/h")
+    track_position: Optional[float] = Field(
+        default=None, ge=0, le=1, description="Track position (0-1)"
+    )
+
+
 class TelemetryData(BaseModel):
     """
     Complete telemetry data snapshot from a racing session.
@@ -135,6 +151,10 @@ class TelemetryData(BaseModel):
     position: Optional[int] = Field(default=None, ge=1, description="Race position")
     gap_ahead: Optional[float] = Field(default=None, description="Gap to car ahead (seconds)")
     gap_behind: Optional[float] = Field(default=None, description="Gap to car behind (seconds)")
+    opponents: Optional[List[OpponentSnapshot]] = Field(
+        default=None,
+        description="Other cars in the same session (lightweight context only)",
+    )
 
     # Car damage (AC: 5 zones — front, rear, left, right, centre; 0.0 = no damage)
     car_damage: Optional[Dict[str, float]] = Field(default=None, description="Car damage per zone (0.0=none)")

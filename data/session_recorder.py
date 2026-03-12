@@ -18,6 +18,7 @@ Architecture:
 import sqlite3
 import logging
 import time
+import threading
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from PyQt5 import QtCore
@@ -68,6 +69,7 @@ class SessionRecorder(QtCore.QThread):
 
         # State
         self._running = False
+        self._db_lock = threading.RLock()
 
         logger.info(f"SessionRecorder initialized with db_path={db_path}")
 
@@ -97,20 +99,21 @@ class SessionRecorder(QtCore.QThread):
     def _initialize_database(self):
         """Create database and tables if they don't exist."""
         try:
-            self.status_update.emit("Initializing database...")
+            with self._db_lock:
+                self.status_update.emit("Initializing database...")
 
-            # Ensure directory exists
-            db_dir = Path(self.db_path).parent
-            db_dir.mkdir(parents=True, exist_ok=True)
+                # Ensure directory exists
+                db_dir = Path(self.db_path).parent
+                db_dir.mkdir(parents=True, exist_ok=True)
 
-            # Connect to database
-            self.db = sqlite3.connect(self.db_path, check_same_thread=False)
-            self.db.row_factory = sqlite3.Row  # Enable column access by name
+                # Connect to database
+                self.db = sqlite3.connect(self.db_path, check_same_thread=False)
+                self.db.row_factory = sqlite3.Row  # Enable column access by name
 
-            cursor = self.db.cursor()
+                cursor = self.db.cursor()
 
-            # Create sessions table
-            cursor.execute("""
+                # Create sessions table
+                cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     start_time REAL NOT NULL,
@@ -125,10 +128,10 @@ class SessionRecorder(QtCore.QThread):
                     ai_enabled INTEGER DEFAULT 0,
                     notes TEXT
                 )
-            """)
+                """)
 
-            # Create laps table
-            cursor.execute("""
+                # Create laps table
+                cursor.execute("""
                 CREATE TABLE IF NOT EXISTS laps (
                     lap_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id INTEGER NOT NULL,
@@ -146,10 +149,10 @@ class SessionRecorder(QtCore.QThread):
                     timestamp REAL NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
-            """)
+                """)
 
-            # Create telemetry table (high-frequency data)
-            cursor.execute("""
+                # Create telemetry table (high-frequency data)
+                cursor.execute("""
                 CREATE TABLE IF NOT EXISTS telemetry (
                     telemetry_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id INTEGER NOT NULL,
@@ -174,10 +177,10 @@ class SessionRecorder(QtCore.QThread):
                     timestamp REAL NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
-            """)
+                """)
 
-            # Create AI commentary table
-            cursor.execute("""
+                # Create AI commentary table
+                cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ai_commentary (
                     commentary_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id INTEGER NOT NULL,
@@ -188,10 +191,10 @@ class SessionRecorder(QtCore.QThread):
                     lap_number INTEGER,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
-            """)
+                """)
 
-            # Create voice queries table
-            cursor.execute("""
+                # Create voice queries table
+                cursor.execute("""
                 CREATE TABLE IF NOT EXISTS voice_queries (
                     query_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id INTEGER NOT NULL,
@@ -201,16 +204,16 @@ class SessionRecorder(QtCore.QThread):
                     lap_number INTEGER,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
-            """)
+                """)
 
-            # Create indices for common queries
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_laps_session ON laps(session_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_session ON telemetry(session_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_lap ON telemetry(lap_number)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_session ON ai_commentary(session_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_voice_session ON voice_queries(session_id)")
+                # Create indices for common queries
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_laps_session ON laps(session_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_session ON telemetry(session_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_lap ON telemetry(lap_number)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_session ON ai_commentary(session_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_voice_session ON voice_queries(session_id)")
 
-            self.db.commit()
+                self.db.commit()
             logger.info("Database initialized successfully")
 
         except Exception as e:
@@ -239,24 +242,25 @@ class SessionRecorder(QtCore.QThread):
             Session ID
         """
         try:
-            self.session_start_time = time.time()
+            with self._db_lock:
+                self.session_start_time = time.time()
 
-            cursor = self.db.cursor()
-            cursor.execute("""
+                cursor = self.db.cursor()
+                cursor.execute("""
                 INSERT INTO sessions (
                     start_time, game, track_name, car_model, player_name, ai_enabled
                 ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                self.session_start_time,
-                game,
-                track_name,
-                car_model,
-                player_name,
-                1 if ai_enabled else 0
-            ))
+                """, (
+                    self.session_start_time,
+                    game,
+                    track_name,
+                    car_model,
+                    player_name,
+                    1 if ai_enabled else 0
+                ))
 
-            self.session_id = cursor.lastrowid
-            self.db.commit()
+                self.session_id = cursor.lastrowid
+                self.db.commit()
 
             logger.info(f"Session started: session_id={self.session_id}, game={game}, track={track_name}")
             self.status_update.emit(f"Recording session {self.session_id}")
@@ -275,33 +279,34 @@ class SessionRecorder(QtCore.QThread):
             return
 
         try:
-            # Flush any remaining telemetry
-            self._flush_telemetry_batch()
+            with self._db_lock:
+                # Flush any remaining telemetry
+                self._flush_telemetry_batch()
 
-            # Update session end time
-            cursor = self.db.cursor()
+                # Update session end time
+                cursor = self.db.cursor()
 
-            # Calculate session statistics
-            cursor.execute("""
+                # Calculate session statistics
+                cursor.execute("""
                 SELECT
                     COUNT(*) as total_laps,
                     MIN(lap_time) as best_lap_time
                 FROM laps
                 WHERE session_id = ? AND valid = 1
-            """, (self.session_id,))
+                """, (self.session_id,))
 
-            row = cursor.fetchone()
-            total_laps = row["total_laps"] if row else 0
-            best_lap_time = row["best_lap_time"] if row else None
+                row = cursor.fetchone()
+                total_laps = row["total_laps"] if row else 0
+                best_lap_time = row["best_lap_time"] if row else None
 
-            # Update session record
-            cursor.execute("""
+                # Update session record
+                cursor.execute("""
                 UPDATE sessions
                 SET end_time = ?, total_laps = ?, best_lap_time = ?
                 WHERE session_id = ?
-            """, (time.time(), total_laps, best_lap_time, self.session_id))
+                """, (time.time(), total_laps, best_lap_time, self.session_id))
 
-            self.db.commit()
+                self.db.commit()
 
             logger.info(f"Session ended: session_id={self.session_id}, laps={total_laps}")
             self.status_update.emit(f"Session {self.session_id} saved ({total_laps} laps)")
@@ -324,53 +329,55 @@ class SessionRecorder(QtCore.QThread):
             return
 
         try:
-            # Sanitize lap_number — reject negative values from garbage shared memory reads
-            lap_number = sample.get("lap_id", 0)
-            if lap_number < 0:
-                lap_number = self._last_valid_lap_number
-            else:
-                self._last_valid_lap_number = lap_number
+            with self._db_lock:
+                # Sanitize lap_number — reject negative values from garbage shared memory reads
+                lap_number = sample.get("lap_id", 0)
+                if lap_number < 0:
+                    lap_number = self._last_valid_lap_number
+                else:
+                    self._last_valid_lap_number = lap_number
 
-            # Add to buffer
-            self.telemetry_buffer.append({
-                "session_id": self.session_id,
-                "lap_number": lap_number,
-                "elapsed_time": sample.get("t", 0.0),
-                "pos_x": sample.get("x", 0.0),
-                "pos_z": sample.get("z", 0.0),
-                "speed": sample.get("speed", 0.0),
-                "gear": sample.get("gear", 0),
-                "rpm": sample.get("rpms", 0),  # AC sends "rpms" (with s)
-                "throttle": sample.get("throttle", 0.0),
-                "brake": sample.get("brake", 0.0),
-                "fuel": sample.get("fuel", 0.0),
-                "tyre_pressure_fl": sample.get("tyre_pressure_fl", 0.0),
-                "tyre_pressure_fr": sample.get("tyre_pressure_fr", 0.0),
-                "tyre_pressure_rl": sample.get("tyre_pressure_rl", 0.0),
-                "tyre_pressure_rr": sample.get("tyre_pressure_rr", 0.0),
-                "tyre_temp_fl": sample.get("tyre_temp_fl", 0.0),
-                "tyre_temp_fr": sample.get("tyre_temp_fr", 0.0),
-                "tyre_temp_rl": sample.get("tyre_temp_rl", 0.0),
-                "tyre_temp_rr": sample.get("tyre_temp_rr", 0.0),
-                "timestamp": time.time()
-            })
+                # Add to buffer
+                self.telemetry_buffer.append({
+                    "session_id": self.session_id,
+                    "lap_number": lap_number,
+                    "elapsed_time": sample.get("t", 0.0),
+                    "pos_x": sample.get("x", 0.0),
+                    "pos_z": sample.get("z", 0.0),
+                    "speed": sample.get("speed", 0.0),
+                    "gear": sample.get("gear", 0),
+                    "rpm": sample.get("rpms", 0),  # AC sends "rpms" (with s)
+                    "throttle": sample.get("throttle", 0.0),
+                    "brake": sample.get("brake", 0.0),
+                    "fuel": sample.get("fuel", 0.0),
+                    "tyre_pressure_fl": sample.get("tyre_pressure_fl", 0.0),
+                    "tyre_pressure_fr": sample.get("tyre_pressure_fr", 0.0),
+                    "tyre_pressure_rl": sample.get("tyre_pressure_rl", 0.0),
+                    "tyre_pressure_rr": sample.get("tyre_pressure_rr", 0.0),
+                    "tyre_temp_fl": sample.get("tyre_temp_fl", 0.0),
+                    "tyre_temp_fr": sample.get("tyre_temp_fr", 0.0),
+                    "tyre_temp_rl": sample.get("tyre_temp_rl", 0.0),
+                    "tyre_temp_rr": sample.get("tyre_temp_rr", 0.0),
+                    "timestamp": time.time()
+                })
 
-            # Flush if batch is full
-            if len(self.telemetry_buffer) >= self.TELEMETRY_BATCH_SIZE:
-                self._flush_telemetry_batch()
+                # Flush if batch is full
+                if len(self.telemetry_buffer) >= self.TELEMETRY_BATCH_SIZE:
+                    self._flush_telemetry_batch()
 
         except Exception as e:
             logger.error(f"Failed to record telemetry sample: {e}")
 
     def _flush_telemetry_batch(self):
         """Flush buffered telemetry samples to database."""
-        if not self.telemetry_buffer:
-            return
+        with self._db_lock:
+            if not self.telemetry_buffer:
+                return
 
-        try:
-            cursor = self.db.cursor()
+            try:
+                cursor = self.db.cursor()
 
-            cursor.executemany("""
+                cursor.executemany("""
                 INSERT INTO telemetry (
                     session_id, lap_number, elapsed_time, pos_x, pos_z, speed,
                     gear, rpm, throttle, brake, fuel,
@@ -382,15 +389,15 @@ class SessionRecorder(QtCore.QThread):
                     :tyre_pressure_fl, :tyre_pressure_fr, :tyre_pressure_rl, :tyre_pressure_rr,
                     :tyre_temp_fl, :tyre_temp_fr, :tyre_temp_rl, :tyre_temp_rr, :timestamp
                 )
-            """, self.telemetry_buffer)
+                """, self.telemetry_buffer)
 
-            self.db.commit()
+                self.db.commit()
 
-            logger.debug(f"Flushed {len(self.telemetry_buffer)} telemetry samples to database")
-            self.telemetry_buffer.clear()
+                logger.debug(f"Flushed {len(self.telemetry_buffer)} telemetry samples to database")
+                self.telemetry_buffer.clear()
 
-        except Exception as e:
-            logger.error(f"Failed to flush telemetry batch: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Failed to flush telemetry batch: {e}", exc_info=True)
 
     def record_lap(
         self,
@@ -420,26 +427,27 @@ class SessionRecorder(QtCore.QThread):
             return
 
         try:
-            cursor = self.db.cursor()
-            cursor.execute("""
+            with self._db_lock:
+                cursor = self.db.cursor()
+                cursor.execute("""
                 INSERT INTO laps (
                     session_id, lap_number, lap_time, fuel_start, fuel_end,
                     avg_speed, max_speed, min_speed, valid, timestamp
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                self.session_id,
-                lap_number,
-                lap_time,
-                fuel_start,
-                fuel_end,
-                avg_speed,
-                max_speed,
-                min_speed,
-                1 if valid else 0,
-                time.time()
-            ))
+                """, (
+                    self.session_id,
+                    lap_number,
+                    lap_time,
+                    fuel_start,
+                    fuel_end,
+                    avg_speed,
+                    max_speed,
+                    min_speed,
+                    1 if valid else 0,
+                    time.time()
+                ))
 
-            self.db.commit()
+                self.db.commit()
             logger.info(f"Lap recorded: lap={lap_number}, time={lap_time}")
 
         except Exception as e:
@@ -466,21 +474,22 @@ class SessionRecorder(QtCore.QThread):
             return
 
         try:
-            cursor = self.db.cursor()
-            cursor.execute("""
+            with self._db_lock:
+                cursor = self.db.cursor()
+                cursor.execute("""
                 INSERT INTO ai_commentary (
                     session_id, timestamp, message, trigger, priority, lap_number
                 ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                self.session_id,
-                time.time(),
-                message,
-                trigger,
-                priority,
-                lap_number
-            ))
+                """, (
+                    self.session_id,
+                    time.time(),
+                    message,
+                    trigger,
+                    priority,
+                    lap_number
+                ))
 
-            self.db.commit()
+                self.db.commit()
             logger.debug(f"AI commentary recorded: {message[:50]}...")
 
         except Exception as e:
@@ -504,20 +513,21 @@ class SessionRecorder(QtCore.QThread):
             return
 
         try:
-            cursor = self.db.cursor()
-            cursor.execute("""
+            with self._db_lock:
+                cursor = self.db.cursor()
+                cursor.execute("""
                 INSERT INTO voice_queries (
                     session_id, timestamp, query_text, response_text, lap_number
                 ) VALUES (?, ?, ?, ?, ?)
-            """, (
-                self.session_id,
-                time.time(),
-                query_text,
-                response_text,
-                lap_number
-            ))
+                """, (
+                    self.session_id,
+                    time.time(),
+                    query_text,
+                    response_text,
+                    lap_number
+                ))
 
-            self.db.commit()
+                self.db.commit()
             logger.debug(f"Voice query recorded: {query_text[:50]}...")
 
         except Exception as e:
@@ -525,19 +535,20 @@ class SessionRecorder(QtCore.QThread):
 
     def _cleanup(self):
         """Clean up database resources."""
-        # Flush remaining telemetry
-        self._flush_telemetry_batch()
+        with self._db_lock:
+            # Flush remaining telemetry
+            self._flush_telemetry_batch()
 
-        # End current session if active
-        if self.session_id:
-            self.end_session()
+            # End current session if active
+            if self.session_id:
+                self.end_session()
 
-        # Close database
-        if self.db:
-            try:
-                self.db.close()
-            except:
-                pass
+            # Close database
+            if self.db:
+                try:
+                    self.db.close()
+                except Exception:
+                    pass
 
         logger.info("Database resources cleaned up")
 

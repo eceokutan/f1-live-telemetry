@@ -24,8 +24,8 @@ Event Types:
 import time
 from typing import List, Optional
 
-from jarvis_granite.schemas.telemetry import TelemetryData
-from jarvis_granite.schemas.events import (
+from ai.race_engineer_core.context import LiveSessionContext
+from ai.race_engineer_core.events import (
     Event,
     Priority,
     create_fuel_critical_event,
@@ -37,8 +37,8 @@ from jarvis_granite.schemas.events import (
     create_sector_complete_event,
     create_pit_window_event,
 )
-from jarvis_granite.live.context import LiveSessionContext
-from config.config import ThresholdsConfig
+from ai.race_engineer_core.telemetry import TelemetryData
+from ai.race_engineer_core.config import ThresholdsConfig
 
 
 class TelemetryAgent:

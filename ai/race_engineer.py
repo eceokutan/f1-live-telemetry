@@ -1,8 +1,8 @@
 """
 AI Race Engineer Worker for F1 Telemetry Dashboard.
 
-Integrates Eima's AI race engineer (TelemetryAgent + RaceEngineerAgent)
-with the AC telemetry system. Runs in a separate QThread to avoid blocking the UI.
+Integrates the local race engineer pipeline with telemetry ingestion.
+Runs in a separate QThread to avoid blocking the UI.
 
 Receives telemetry samples, detects events, generates AI commentary.
 """
@@ -10,76 +10,24 @@ Receives telemetry samples, detects events, generates AI commentary.
 import asyncio
 import logging
 import re
-import sys
 from typing import Optional, Dict, Any
 from PyQt5 import QtCore
 
-# Add eima_ai to Python path
 import os
-import importlib.util
-
-eima_path = os.path.join(os.path.dirname(__file__), '..', 'eima_ai')
-sys.path.insert(0, os.path.abspath(eima_path))
-
-# Import modules directly to avoid circular imports from __init__.py files
-def import_from_file(module_name, file_path):
-    """Import module directly from file path without triggering __init__.py"""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-# Import schemas
-telemetry_module = import_from_file(
-    "jarvis_granite.schemas.telemetry",
-    os.path.join(eima_path, "jarvis_granite/schemas/telemetry.py")
+from ai.race_engineer_core import (
+    Event,
+    GForces,
+    LLMClient,
+    LiveSessionContext,
+    OpponentSnapshot,
+    RaceEngineerAgent,
+    TelemetryAgent,
+    TelemetryData,
+    ThresholdsConfig,
+    TirePressure,
+    TireTemps,
+    TireWear,
 )
-events_module = import_from_file(
-    "jarvis_granite.schemas.events",
-    os.path.join(eima_path, "jarvis_granite/schemas/events.py")
-)
-
-# Import config
-config_module = import_from_file(
-    "config.config",
-    os.path.join(eima_path, "config/config.py")
-)
-
-# Import live context
-context_module = import_from_file(
-    "jarvis_granite.live.context",
-    os.path.join(eima_path, "jarvis_granite/live/context.py")
-)
-
-# Import LLM client
-llm_module = import_from_file(
-    "jarvis_granite.llm.llm_client",
-    os.path.join(eima_path, "jarvis_granite/llm/llm_client.py")
-)
-
-# Import agents
-telemetry_agent_module = import_from_file(
-    "jarvis_granite.agents.telemetry_agent",
-    os.path.join(eima_path, "jarvis_granite/agents/telemetry_agent.py")
-)
-race_engineer_module = import_from_file(
-    "jarvis_granite.agents.race_engineer_agent",
-    os.path.join(eima_path, "jarvis_granite/agents/race_engineer_agent.py")
-)
-
-# Extract classes
-TelemetryData = telemetry_module.TelemetryData
-TireTemps = telemetry_module.TireTemps
-TireWear = telemetry_module.TireWear
-TirePressure = telemetry_module.TirePressure
-GForces = telemetry_module.GForces
-Event = events_module.Event
-TelemetryAgent = telemetry_agent_module.TelemetryAgent
-RaceEngineerAgent = race_engineer_module.RaceEngineerAgent
-LiveSessionContext = context_module.LiveSessionContext
-LLMClient = llm_module.LLMClient
-ThresholdsConfig = config_module.ThresholdsConfig
 
 
 logger = logging.getLogger(__name__)
@@ -90,7 +38,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
     AI Race Engineer worker thread.
 
     Processes telemetry samples, detects events, and generates AI commentary
-    using Eima's race engineer agents.
+    using local race engineer agents.
 
     Signals:
         ai_commentary(str message, str trigger, int priority) - AI-generated commentary
@@ -395,7 +343,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         )
 
         # Tire wear: AC's tyreWear = remaining life (100=fresh, decreases with wear)
-        # eima_ai expects percent worn (0=fresh, 100=worn), so invert.
+        # AI context expects percent worn (0=fresh, 100=worn), so invert.
         tire_wear = None
         if "tyre_wear_fl" in data:
             tire_wear = TireWear(
@@ -416,6 +364,23 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 "centre": data.get("car_damage_centre", 0.0),
             }
 
+        opponents = None
+        if data.get("opponents"):
+            opponents = []
+            for car in data.get("opponents", []):
+                try:
+                    opponents.append(
+                        OpponentSnapshot(
+                            car_index=int(car.get("car_index", 0)),
+                            position=max(1, int(car.get("position", 1))),
+                            lap_number=max(0, int(car.get("lap_number", 0))),
+                            speed=max(0.0, float(car.get("speed", 0.0))),
+                            track_position=car.get("track_position", None),
+                        )
+                    )
+                except Exception:
+                    continue
+
         lap_id = data.get("lap_id", 0)
         return TelemetryData(
             speed=data.get("speed", 0.0),
@@ -432,7 +397,11 @@ class AIRaceEngineerWorker(QtCore.QThread):
             z=data.get("z", 0.0),
             lap_id=lap_id,
             lap_number=lap_id,  # AI uses lap_number, AC provides lap_id
-            t=data.get("t", 0.0)
+            t=data.get("t", 0.0),
+            position=data.get("position"),
+            gap_ahead=data.get("gap_ahead"),
+            gap_behind=data.get("gap_behind"),
+            opponents=opponents,
         )
 
     async def _handle_event(self, event: Event):
@@ -469,14 +438,28 @@ class AIRaceEngineerWorker(QtCore.QThread):
             telemetry_dict: Telemetry data dictionary from AC worker
         """
         if self._event_loop and self._running:
-            # Thread-safe: put telemetry in queue
-            # If queue is full, drop oldest sample (non-blocking)
+            # Thread-safe enqueue into event-loop-owned queue.
+            asyncio.run_coroutine_threadsafe(
+                self._enqueue_telemetry(telemetry_dict),
+                self._event_loop
+            )
+
+    async def _enqueue_telemetry(self, telemetry_dict: Dict[str, Any]):
+        """
+        Thread-safe enqueue helper.
+
+        Keeps the queue bounded and drops oldest telemetry when full.
+        """
+        if self.telemetry_queue is None:
+            return
+
+        if self.telemetry_queue.full():
             try:
-                self.telemetry_queue.put_nowait(telemetry_dict)
-            except asyncio.QueueFull:
-                # Queue full - drop this sample to prevent backlog
-                # This is acceptable for real-time telemetry
+                self.telemetry_queue.get_nowait()
+            except asyncio.QueueEmpty:
                 pass
+
+        await self.telemetry_queue.put(telemetry_dict)
 
     def process_driver_query(self, query: str):
         """
