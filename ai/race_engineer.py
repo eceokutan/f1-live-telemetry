@@ -437,7 +437,11 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Args:
             telemetry_dict: Telemetry data dictionary from AC worker
         """
-        if self._event_loop and self._running:
+        if self._event_loop and self._running and self.telemetry_queue is not None:
+            # Receiving realtime samples implies we're on track.
+            if not self._on_track:
+                self._on_track = True
+
             # Thread-safe enqueue into event-loop-owned queue.
             asyncio.run_coroutine_threadsafe(
                 self._enqueue_telemetry(telemetry_dict),
@@ -468,7 +472,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Args:
             query: Driver's question/command as text
         """
-        if self._event_loop and self._running:
+        if self._event_loop and self._running and self.query_queue is not None:
             # Thread-safe: put query in queue
             asyncio.run_coroutine_threadsafe(
                 self.query_queue.put(query),
