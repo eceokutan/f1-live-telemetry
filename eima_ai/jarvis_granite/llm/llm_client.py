@@ -15,6 +15,7 @@ import asyncio
 import logging
 from typing import Optional
 
+import requests
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -59,18 +60,30 @@ class LLMClient:
         max_retries: int = 3,
         min_retry_wait: float = 1.0,
         max_retry_wait: float = 5.0,
+        endpoint_url: Optional[str] = None,
+        space_url: Optional[str] = None,
+        space_skip_ssl_verify: bool = False,
     ):
         """
         Initialize LLM Client.
 
         Args:
             huggingface_token: Hugging Face access token (HUGGINGFACE_TOKEN / HUGGINGFACE_API_KEY)
-            model_id: Model identifier on Hugging Face (e.g. "org/custom-race-engineer")
+            model_id: Model identifier on Hugging Face (e.g. "org/custom-race-engineer").
+                      Used when no endpoint_url is provided.
             max_tokens: Maximum response tokens (default: 75, reduced for racing brevity)
             temperature: Response temperature (default: 0.7)
             max_retries: Max retry attempts (default: 3)
             min_retry_wait: Minimum wait between retries in seconds (default: 1.0)
             max_retry_wait: Maximum wait between retries in seconds (default: 5.0)
+            endpoint_url: Optional Hugging Face Inference Endpoint URL. When set,
+                          requests will be sent to this endpoint instead of the
+                          generic model API.
+            space_url: Optional Hugging Face Space URL (FastAPI-style backend)
+                       that exposes a /chat endpoint. When set, this is preferred
+                       over endpoint_url/model_id and will be called via HTTP POST.
+            space_skip_ssl_verify: If True, skip SSL cert verification for Space
+                                  requests only (use when HF Space hostname/cert mismatch).
         """
         self.huggingface_token = huggingface_token
         self.model_id = model_id
@@ -79,6 +92,9 @@ class LLMClient:
         self.max_retries = max_retries
         self.min_retry_wait = min_retry_wait
         self.max_retry_wait = max_retry_wait
+        self.endpoint_url = endpoint_url
+        self.space_url = space_url
+        self.space_skip_ssl_verify = space_skip_ssl_verify
 
         # Initialize client instance (lazy initialization)
         self._client = None
@@ -105,13 +121,24 @@ class LLMClient:
                 )
                 self._client = None
             else:
-                self._client = InferenceClient(
-                    model=self.model_id,
-                    token=self.huggingface_token,
-                )
-                logger.info(
-                    f"Initialized Hugging Face InferenceClient with model {self.model_id}"
-                )
+                # Prefer a dedicated Hugging Face Inference Endpoint if configured.
+                if self.endpoint_url:
+                    self._client = InferenceClient(
+                        base_url=self.endpoint_url,
+                        token=self.huggingface_token,
+                    )
+                    logger.info(
+                        f"Initialized Hugging Face InferenceClient with endpoint {self.endpoint_url}"
+                    )
+                else:
+                    # Fallback to generic model API using model_id.
+                    self._client = InferenceClient(
+                        model=self.model_id,
+                        token=self.huggingface_token,
+                    )
+                    logger.info(
+                        f"Initialized Hugging Face InferenceClient with model {self.model_id}"
+                    )
 
             self._client_initialized = True
 
@@ -199,6 +226,33 @@ class LLMClient:
         Returns:
             Raw LLM response text
         """
+        # If a custom Space backend is configured, prefer calling it directly.
+        if self.space_url:
+            loop = asyncio.get_event_loop()
+
+            def _call_space():
+                try:
+                    resp = requests.post(
+                        self.space_url,
+                        json={
+                            "prompt": prompt,
+                            "max_new_tokens": self.max_tokens,
+                            "temperature": self.temperature,
+                        },
+                        timeout=30,
+                        verify=not self.space_skip_ssl_verify,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    # Expecting {"response": "..."} from the Space
+                    return data.get("response", "").strip()
+                except Exception as e:
+                    logger.error(f"Error calling Hugging Face Space at {self.space_url}: {e}")
+                    raise
+
+            return await loop.run_in_executor(None, _call_space)
+
+        # Otherwise, fall back to Hugging Face model / endpoint APIs.
         client = self._get_client()
 
         if client is None:

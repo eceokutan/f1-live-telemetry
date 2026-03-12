@@ -190,11 +190,22 @@ class AIRaceEngineerWorker(QtCore.QThread):
         # Create LLM client
         # max_tokens=75 for faster responses (~200-400ms savings over 150 tokens)
         # Racing comms should be brief anyway
+
+        # Optional: support dedicated Hugging Face Inference Endpoint
+        endpoint_url = os.getenv("HUGGINGFACE_ENDPOINT_URL", None)
+
+        # Optional: support custom Hugging Face Space backend
+        space_url = os.getenv("HUGGINGFACE_SPACE_URL", None)
+        space_skip_ssl = os.getenv("HUGGINGFACE_SPACE_SKIP_SSL_VERIFY", "").lower() in ("1", "true", "yes")
+
         llm_client = LLMClient(
             huggingface_token=self.huggingface_token,
             model_id=self.hf_model_id,
             max_tokens=75,  # Latency optimization: shorter responses
-            max_retries=2
+            max_retries=2,
+            endpoint_url=endpoint_url,
+            space_url=space_url,
+            space_skip_ssl_verify=space_skip_ssl,
         )
 
         # Create race engineer agent
