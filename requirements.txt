@@ -14,22 +14,13 @@ numpy>=1.21.0
 accapi>=0.0.3  # ACC UDP broadcasting
 
 # =============================================================================
-# AI Race Engineer (Optional - requires IBM WatsonX)
+# AI Race Engineer (Optional - Hugging Face LLM + local rules)
 # =============================================================================
 # Data validation
 pydantic>=2.5.0
-pydantic-settings>=2.1.0
 
-# IBM Watson services
-ibm-watson>=8.0.0
-ibm-cloud-sdk-core>=3.18.0
-
-# Hugging Face Inference (for custom LLM instead of WatsonX)
+# Hugging Face Inference
 huggingface-hub>=0.23.0
-
-# LLM framework
-langchain>=0.1.0
-langchain-ibm>=0.1.0
 
 # Utilities
 tenacity>=8.2.0

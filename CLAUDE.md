@@ -113,9 +113,9 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   - For full telemetry, would need ACC's physics shared memory plugin (different API)
 
 **[ai/race_engineer.py](ai/race_engineer.py)** - AI Race Engineer (experimental)
-- `AIRaceEngineerWorker` - QThread that integrates Eima's AI race engineer with AC telemetry
-- Uses IBM WatsonX (Granite 3-8B-Instruct) for LLM-powered race engineering commentary
-- **Components integrated from eima_ai/**:
+- `AIRaceEngineerWorker` - QThread that integrates the local AI core with AC telemetry
+- Uses Hugging Face-hosted models for LLM-powered race engineering commentary
+- **Components integrated from ai/race_engineer_core/**:
   - `TelemetryAgent` - Rule-based event detection (<50ms latency)
     - Detects fuel warnings/critical (< 5/2 laps remaining)
     - Detects tire temperature warnings/critical (> 100°C/110°C)
@@ -135,7 +135,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   3. TelemetryAgent detects events (rule-based, <50ms)
   4. RaceEngineerAgent generates AI response (LLM call, ~2s)
   5. Emit ai_commentary signal → UI displays in "Commentator Transcript" panel
-- **Environment variables required**: WATSONX_API_KEY, WATSONX_PROJECT_ID
+- **Environment variables required**: HUGGINGFACE_TOKEN, HUGGINGFACE_MODEL_ID
 - **Optional**: Works best with AC (full telemetry), degraded with ACC (limited telemetry)
 
 **[ai/voice_input.py](ai/voice_input.py)** - Voice Input (experimental)
@@ -180,34 +180,26 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
   - `python -m data.session_viewer export <session_id>` - Export to CSV files
 - **Export format**: CSV files for telemetry, laps, AI commentary
 
-### eima_ai Integration Components
+### AI Core Components
 
-The `eima_ai/` folder contains the AI race engineer system that's integrated into our telemetry dashboard. Only the essential modules are kept - all demo files, tests, and unused utilities have been removed for clarity.
+The `ai/race_engineer_core/` folder contains the integrated AI race engineer system.
 
 **Structure:**
 ```
-eima_ai/
-├── config/
-│   ├── config.py - Configuration models (ThresholdsConfig, VerbosityConfig, etc.)
-├── jarvis_granite/
-│   ├── agents/
-│   │   ├── telemetry_agent.py - Event detection (fuel warnings, tire issues, etc.)
-│   │   └── race_engineer_agent.py - LLM-powered response generation
-│   ├── live/
-│   │   └── context.py - LiveSessionContext for maintaining session state
-│   ├── llm/
-│   │   └── llm_client.py - IBM WatsonX LLM client wrapper
-│   ├── prompts/
-│   │   └── live_prompts.py - Prompt templates for proactive/reactive responses
-│   └── schemas/
-│       ├── events.py - Event data models
-│       ├── messages.py - Message data models
-│       └── telemetry.py - TelemetryData, TireTemps, TirePressure models
+ai/race_engineer_core/
+├── config.py - Threshold configuration models
+├── telemetry_agent.py - Event detection (fuel warnings, tire issues, etc.)
+├── race_engineer_agent.py - LLM-powered response generation
+├── context.py - LiveSessionContext for maintaining session state
+├── llm_client.py - Hugging Face LLM client wrapper
+├── prompts.py - Prompt templates for proactive/reactive responses
+├── events.py - Event data models
+└── telemetry.py - TelemetryData, TireTemps, TirePressure models
 ```
 
 **How it integrates:**
-- `ai/race_engineer.py` imports these modules using dynamic file loading (to avoid import conflicts)
-- AC telemetry data is converted to eima_ai's Pydantic models
+- `ai/race_engineer.py` imports these modules directly
+- AC telemetry data is converted to the local core's Pydantic models
 - TelemetryAgent detects events, RaceEngineerAgent generates AI responses
 - Responses are emitted back to main UI via Qt signals
 

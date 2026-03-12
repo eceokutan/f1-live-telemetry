@@ -15,6 +15,7 @@ Usage:
 import logging
 import threading
 import time
+import ctypes
 
 from PyQt5 import QtCore
 
@@ -59,12 +60,14 @@ class PTTController(QtCore.QObject):
         # Control
         self._running = False
         self._keyboard_listener = None
+        self._keyboard_poll_thread = None
         self._joystick_thread = None
 
     def start(self):
         """Start monitoring PTT inputs (keyboard + joystick)."""
         self._running = True
         self._start_keyboard_listener()
+        self._start_keyboard_polling_fallback()
         self._start_joystick_polling()
         logger.info("PTT controller started (keyboard=V, joystick=button %d)",
                      self._joystick_button_index)
@@ -138,6 +141,35 @@ class PTTController(QtCore.QObject):
             name="PTT-Joystick"
         )
         self._joystick_thread.start()
+
+    def _start_keyboard_polling_fallback(self):
+        """
+        Start a Windows key-state polling fallback for V key.
+
+        This improves reliability in scenarios where global keyboard hooks are
+        throttled or intermittently blocked by game focus/state.
+        """
+        self._keyboard_poll_thread = threading.Thread(
+            target=self._keyboard_poll_loop,
+            daemon=True,
+            name="PTT-KeyboardPoll"
+        )
+        self._keyboard_poll_thread.start()
+
+    def _keyboard_poll_loop(self):
+        """Poll V key state via Win32 API as fallback."""
+        if not hasattr(ctypes, "windll"):
+            return
+
+        VK_V = 0x56
+        while self._running:
+            try:
+                pressed = bool(ctypes.windll.user32.GetAsyncKeyState(VK_V) & 0x8000)
+                self._update_state(keyboard_held=pressed)
+            except Exception:
+                # Keep hook-based mode alive even if fallback polling fails.
+                pass
+            time.sleep(0.016)  # ~60Hz polling
 
     def _joystick_poll_loop(self):
         """Poll joystick button state in a background thread."""

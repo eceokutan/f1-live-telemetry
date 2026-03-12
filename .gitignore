@@ -22,6 +22,7 @@ __pycache__/
 .vscode/
 .idea/
 .claude/
+.gradio/
 *.swp
 *.swo
 *~
@@ -38,6 +39,7 @@ data/exports/
 # Temporary files
 *.tmp
 *.bak
+.pytest_cache/
 
 # Torch cache
 .cache/
@@ -46,8 +48,7 @@ data/exports/
 *.pt
 *.pth
 
-# Test files and utilities
-test_*.py
+# Local test utilities
 list_audio_devices.py
 
 # Installers
@@ -64,3 +65,7 @@ run.ps1
 
 # Temporary Python files
 nul
+
+docs.md
+notes.md
+ms-reduction.md

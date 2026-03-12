@@ -20,7 +20,7 @@ def _utcnow() -> datetime:
     """Get current UTC time as timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
-from jarvis_granite.schemas.telemetry import TelemetryData
+from ai.race_engineer_core.telemetry import OpponentSnapshot, TelemetryData
 
 
 @dataclass
@@ -69,6 +69,7 @@ class LiveSessionContext:
     position: int = 1
     gap_ahead: Optional[float] = None
     gap_behind: Optional[float] = None
+    opponents: List[OpponentSnapshot] = field(default_factory=list)
 
     # Car damage (5 zones: front, rear, left, right, centre; 0.0 = no damage)
     car_damage: Dict[str, float] = field(
@@ -147,6 +148,7 @@ class LiveSessionContext:
             self.position = telemetry.position
         self.gap_ahead = telemetry.gap_ahead
         self.gap_behind = telemetry.gap_behind
+        self.opponents = telemetry.opponents or []
 
         # Add to buffer
         self.add_telemetry(telemetry)
@@ -282,6 +284,7 @@ class LiveSessionContext:
         # Format gaps
         gap_ahead_str = f"{self.gap_ahead:.2f}s" if self.gap_ahead is not None else "N/A"
         gap_behind_str = f"{self.gap_behind:.2f}s" if self.gap_behind is not None else "N/A"
+        nearby_str = self._format_nearby_opponents()
 
         # Format lap times
         best_lap_str = self._format_lap_time(self.best_lap) if self.best_lap else "N/A"
@@ -303,11 +306,26 @@ Lap: {self.current_lap} | Position: P{self.position}
 Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}
 Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%}
 Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}
+Nearby Opponents: {nearby_str}
 Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)
 Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
 Tire Wear: {wear_str}
 Car Damage: {damage_str}
 Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"""
+
+    def _format_nearby_opponents(self) -> str:
+        """Format up to three opponents nearest in race position."""
+        if not self.opponents:
+            return "N/A"
+
+        sorted_cars = sorted(
+            self.opponents,
+            key=lambda c: abs(c.position - self.position),
+        )[:3]
+        return ", ".join(
+            f"P{car.position}(car {car.car_index}, {car.speed:.0f} km/h)"
+            for car in sorted_cars
+        )
 
     def _format_lap_time(self, seconds: float) -> str:
         """Format lap time as M:SS.mmm."""

@@ -202,8 +202,15 @@ def main(settings: dict):
 
                 # Keep AI informed of AC status (on track / in menu / paused)
                 if hasattr(telemetry_thread, 'live_data_update'):
+                    def on_live_data_for_ai(data: dict):
+                        # AC provides ac_status; ACC does not. Treat ACC as on-track.
+                        if "ac_status" in data:
+                            ai_thread.update_ac_status(data.get("ac_status", 0))
+                        else:
+                            ai_thread.update_ac_status(2)
+
                     telemetry_thread.live_data_update.connect(
-                        lambda data: ai_thread.update_ac_status(data.get("ac_status", 0))
+                        on_live_data_for_ai
                     )
 
                 # Start AI thread
@@ -362,7 +369,9 @@ def main(settings: dict):
                 current_lap_number[0] = lap_id
 
                 # Calculate lap statistics
-                lap_time = samples[-1].get("t", 0.0) if samples else 0.0
+                lap_start_t = samples[0].get("t", 0.0)
+                lap_end_t = samples[-1].get("t", 0.0)
+                lap_time = max(0.0, lap_end_t - lap_start_t)
                 speeds = [s.get("speed", 0.0) for s in samples]
                 avg_speed = sum(speeds) / len(speeds) if speeds else 0.0
                 max_speed = max(speeds) if speeds else 0.0
