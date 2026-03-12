@@ -3,15 +3,10 @@
 F1 Telemetry Dashboard - Main Entry Point
 
 Real-time telemetry visualization and AI race engineering for sim racing.
-Supports Assetto Corsa and Assetto Corsa Competizione.
+Supports Assetto Corsa.
 
 Usage:
-    python main.py              # Run with Assetto Corsa
-    python main.py --acc        # Run with ACC
-    python main.py --ai         # Enable AI race engineer
-    python main.py --acc --ai   # ACC with AI
-    python main.py --ai --ptt   # AI with push-to-talk (hold V key or joystick button)
-    python main.py --ai --ptt --ptt-button 5  # PTT with custom joystick button index
+    python main.py      # Opens launcher GUI for configuration
 """
 import sys
 import os
@@ -96,18 +91,34 @@ except ImportError as e:
 logger.info("All core modules imported")
 
 
-def main(game: str = "ac", enable_ai: bool = False, enable_ptt: bool = False, ptt_button_index: int = 11):
+def main(settings: dict):
     """
     Entry point for the telemetry dashboard.
 
     Args:
-        game: "ac" for Assetto Corsa, "acc" for Assetto Corsa Competizione
-        enable_ai: Enable AI race engineer (requires IBM WatsonX credentials)
-        enable_ptt: Enable push-to-talk mode (hold V key or joystick button)
-        ptt_button_index: Joystick button index for PTT (default 12 for Thrustmaster T128X RSB)
+        settings: Configuration dict from the launcher (or CLI defaults).
     """
+    game = "ac"
+    enable_ai = settings.get("ai_enabled", False)
+    enable_ptt = settings.get("voice_mode") == "push_to_talk"
+    ptt_key = settings.get("ptt_key", "v")
+
+    # Inject credentials into environment so existing code picks them up
+    credential_map = {
+        "HUGGINGFACE_TOKEN": "huggingface_token",
+        "HUGGINGFACE_MODEL_ID": "huggingface_model_id",
+        "WATSON_STT_API_KEY": "watson_stt_api_key",
+        "WATSON_STT_URL": "watson_stt_url",
+        "WATSON_TTS_API_KEY": "watson_tts_api_key",
+        "WATSON_TTS_URL": "watson_tts_url",
+    }
+    for env_key, settings_key in credential_map.items():
+        val = settings.get(settings_key, "")
+        if val:
+            os.environ[env_key] = val
+
     logger.info("Starting dashboard for: %s", game.upper())
-    app = QtWidgets.QApplication(sys.argv)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
     window = MainWindow()
 
@@ -199,8 +210,9 @@ def main(game: str = "ac", enable_ai: bool = False, enable_ptt: bool = False, pt
                 ai_thread.start()
                 logger.info("AI Race Engineer started")
 
-                # Initialize voice input (if available)
-                if VOICE_AVAILABLE:
+                # Initialize voice input (if available and not disabled)
+                voice_mode_setting = settings.get("voice_mode", "disabled")
+                if VOICE_AVAILABLE and voice_mode_setting != "disabled":
                     voice_mode = "PTT" if enable_ptt else "VAD"
                     logger.info("Initializing Voice Input (faster-whisper, %s mode)", voice_mode)
                     try:
@@ -228,6 +240,7 @@ def main(game: str = "ac", enable_ai: bool = False, enable_ptt: bool = False, pt
                 # Initialize PTT controller (if PTT mode enabled)
                 ptt_controller = None
                 if enable_ptt and voice_thread and PTT_AVAILABLE:
+                    ptt_button_index = 11  # Default: Thrustmaster T128X RSB
                     logger.info("Initializing PTT Controller (button index=%d)", ptt_button_index)
                     try:
                         ptt_controller = PTTController(
@@ -493,32 +506,26 @@ def main(game: str = "ac", enable_ai: bool = False, enable_ptt: bool = False, pt
 
 
 if __name__ == "__main__":
-    # Parse command line arguments
-    game = "ac"
-    enable_ai = False
-    enable_ptt = False
-    ptt_button_index = 11  # Default: Thrustmaster T128X RSB
+    # Show launcher GUI for configuration
+    from ui.launcher import LauncherWindow
 
-    if "--acc" in sys.argv:
-        game = "acc"
-    if "--ai" in sys.argv:
-        enable_ai = True
-    if "--ptt" in sys.argv:
-        enable_ptt = True
+    launch_app = QtWidgets.QApplication(sys.argv)
+    launcher = LauncherWindow()
+    launcher.exec_()
 
-    # Parse --ptt-button N
-    for i, arg in enumerate(sys.argv):
-        if arg == "--ptt-button" and i + 1 < len(sys.argv):
-            try:
-                ptt_button_index = int(sys.argv[i + 1])
-            except ValueError:
-                logger.error("Invalid --ptt-button value: %s", sys.argv[i + 1])
-                sys.exit(1)
+    if not launcher.was_accepted():
+        sys.exit(0)
 
-    logger.info("Game: %s | AI: %s | PTT: %s", game, enable_ai, enable_ptt)
+    settings = launcher.get_settings()
+    logger.info(
+        "AI: %s | Voice: %s | PTT key: %s",
+        settings.get("ai_enabled"),
+        settings.get("voice_mode"),
+        settings.get("ptt_key"),
+    )
 
     try:
-        main(game, enable_ai, enable_ptt, ptt_button_index)
+        main(settings)
     except Exception as e:
         logger.critical("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
