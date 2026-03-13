@@ -259,6 +259,26 @@ class AcTelemetryWorker(QtCore.QThread):
                 continue
 
             mm_phys, mm_graph, mm_static = handles
+
+            # Verify AC is actually alive — stale shared memory from a
+            # previous session can linger after the game exits.  If status
+            # is OFF (0) for several consecutive reads, release the handles
+            # so we don't block AC from reinitializing them on next launch.
+            try:
+                gfx_check = read_graphics(mm_graph)
+                if gfx_check.status == 0:
+                    logger.info("Shared memory exists but AC status=OFF — stale region, releasing")
+                    self.status_update.emit("Waiting for Assetto Corsa...")
+                    self._close_handles(mm_phys, mm_graph, mm_static)
+                    for _ in range(RECONNECT_INTERVAL * 10):
+                        if not self.running:
+                            return
+                        time.sleep(0.1)
+                    continue
+            except Exception:
+                self._close_handles(mm_phys, mm_graph, mm_static)
+                continue
+
             logger.info("Connected to AC shared memory")
             self.status_update.emit("Connected! Start driving...")
 
@@ -275,6 +295,8 @@ class AcTelemetryWorker(QtCore.QThread):
             last_valid_raw_lap = None
             stable_count = 0       # frames with a consistent completedLaps value
             STABLE_THRESHOLD = 10  # require 10 consistent frames before trusting
+            off_count = 0          # consecutive frames with status=OFF
+            OFF_DISCONNECT = 10    # release handles after this many OFF frames
             integrated_x = 0.0
             integrated_z = 0.0
             last_time = t0
@@ -289,6 +311,18 @@ class AcTelemetryWorker(QtCore.QThread):
                     ac_status = gfx.status
                     if ac_status != 2:
                         frame_count += 1
+
+                        # If AC has been OFF for a while, release handles so
+                        # the game can reinitialize shared memory on restart
+                        if ac_status == 0:
+                            off_count += 1
+                            if off_count >= OFF_DISCONNECT:
+                                logger.info("AC status=OFF for %d reads, releasing handles", off_count)
+                                self.status_update.emit("Waiting for Assetto Corsa...")
+                                break  # exit to outer reconnection loop
+                        else:
+                            off_count = 0
+
                         if frame_count % 10 == 0:
                             self.live_data_update.emit({
                                 "current_lap": (last_lap_id + 1) if last_lap_id >= 0 else 1,
@@ -300,6 +334,7 @@ class AcTelemetryWorker(QtCore.QThread):
                             })
                         time.sleep(0.5)
                         continue
+                    off_count = 0  # reset when LIVE
 
                     phys = read_physics(mm_phys)
 
