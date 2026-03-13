@@ -14,6 +14,14 @@ import os
 import logging
 import threading
 
+# Pre-load native DLLs BEFORE PyQt5 to avoid DLL conflicts on Windows.
+# PyQt5 changes the DLL search path, which breaks onnxruntime if loaded after.
+for _mod in ("onnxruntime", "ctranslate2"):
+    try:
+        __import__(_mod)
+    except Exception:
+        pass
+
 from PyQt5 import QtWidgets, QtCore
 
 # Configure logging FIRST - before any other imports
@@ -268,138 +276,140 @@ def run_jarvis_live(settings: dict):
                 ai_thread.start()
                 logger.info("AI Race Engineer started")
 
-                # Initialize voice input
-                voice_mode_setting = settings.get("voice_mode", "disabled")
-                if VOICE_AVAILABLE and voice_mode_setting != "disabled":
-                    voice_mode = "PTT" if enable_ptt else "VAD"
-                    logger.info("Initializing Voice Input (faster-whisper, %s mode)", voice_mode)
-                    try:
-                        voice_thread = VoiceInputWorker(
-                            whisper_model_size="base",
-                            ptt_mode=enable_ptt
-                        )
-                        voice_thread.speech_detected.connect(ai_thread.process_driver_query)
-                        voice_thread.vad_state_changed.connect(window.handle_vad_state_change)
-                        voice_thread.status_update.connect(lambda msg: logger.info("Voice: %s", msg))
-                        voice_thread.error_occurred.connect(lambda err: logger.error("Voice: %s", err))
-                        voice_thread.start()
-                        logger.info("Voice Input started (%s mode)", voice_mode)
-                    except Exception as e:
-                        logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
-                        voice_thread = None
-
-                # Initialize PTT controller
-                if enable_ptt and voice_thread and PTT_AVAILABLE:
-                    ptt_button_index = 11
-                    logger.info(
-                        "Initializing PTT Controller (keyboard=%s, joystick button=%d)",
-                        ptt_key,
-                        ptt_button_index,
-                    )
-                    try:
-                        ptt_controller = PTTController(
-                            joystick_button_index=ptt_button_index,
-                            keyboard_key=ptt_key,
-                        )
-                        ptt_controller.ptt_pressed.connect(voice_thread.start_recording)
-                        ptt_controller.ptt_released.connect(voice_thread.stop_recording)
-                        ptt_controller.status_update.connect(lambda msg: logger.info("PTT: %s", msg))
-                        ptt_controller.start()
-                        window.set_ptt_controller(ptt_controller)
-                        logger.info("PTT Controller started")
-                    except Exception as e:
-                        logger.error("Failed to initialize PTT Controller: %s", e, exc_info=True)
-                        ptt_controller = None
-
-                # Initialize TTS output (Kokoro local TTS)
-                if TTS_AVAILABLE and voice_mode_setting != "disabled":
-                    logger.info(
-                        "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s, speed=%.2f)",
-                        KOKORO_VOICE_ID,
-                        KOKORO_SPEED,
-                    )
-                    try:
-                        def _build_tts_worker() -> TTSOutputWorker:
-                            worker = TTSOutputWorker(
-                                use_sentence_pipelining=True,
-                                kokoro_voice_id=KOKORO_VOICE_ID,
-                                kokoro_lang=KOKORO_LANG,
-                                kokoro_speed=KOKORO_SPEED,
-                                kokoro_use_cuda=KOKORO_USE_CUDA,
-                            )
-                            worker.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
-                            worker.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
-                            worker.finished.connect(lambda: logger.warning("TTS worker stopped"))
-                            if voice_thread:
-                                worker.playback_started.connect(voice_thread.pause)
-                                worker.playback_finished.connect(voice_thread.resume)
-                            return worker
-
-                        def _ensure_tts_worker_running(reason: str) -> bool:
-                            if tts_runtime["restarting"]:
-                                return False
-                            worker = tts_runtime["worker"]
-                            if worker and worker.isRunning():
-                                return True
-
-                            tts_runtime["restarting"] = True
-                            try:
-                                worker = _build_tts_worker()
-                                tts_runtime["worker"] = worker
-                                worker.start()
-                                logger.info("TTS worker started (%s)", reason)
-                                return True
-                            except Exception as e:
-                                logger.error("Failed to start TTS worker (%s): %s", reason, e, exc_info=True)
-                                tts_runtime["worker"] = None
-                                return False
-                            finally:
-                                tts_runtime["restarting"] = False
-
-                        def _speak_with_retry(message: str, retries_left: int = 6):
-                            worker = tts_runtime["worker"]
-                            if worker and worker.isRunning():
-                                worker.speak(message)
-                                return
-
-                            if not _ensure_tts_worker_running("auto-restart"):
-                                if retries_left <= 0:
-                                    logger.error("Dropping TTS message after failed restart: %s", message[:80])
-                                    return
-                                QtCore.QTimer.singleShot(
-                                    200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
-                                )
-                                return
-
-                            if retries_left <= 0:
-                                logger.error("Dropping TTS message; worker never became ready: %s", message[:80])
-                                return
-
-                            QtCore.QTimer.singleShot(
-                                200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
-                            )
-
-                        def on_ai_commentary_for_tts(msg, trigger, priority):
-                            _speak_with_retry(msg)
-
-                        ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
-
-                        if _ensure_tts_worker_running("initialization"):
-                            tts_thread = tts_runtime["worker"]
-                            logger.info("TTS Output started")
-                        else:
-                            tts_thread = None
-                    except Exception as e:
-                        logger.error("Failed to initialize TTS Output: %s", e, exc_info=True)
-                        tts_thread = None
-                elif not TTS_AVAILABLE and voice_mode_setting != "disabled":
-                    logger.warning("Voice mode enabled but TTS module is unavailable")
-
             except Exception as e:
                 logger.error("Failed to initialize AI Race Engineer: %s", e, exc_info=True)
                 ai_thread = None
     elif enable_ai:
         logger.warning("AI requested but AIRaceEngineerWorker module not available")
+
+    # Initialize voice input (independent of AI)
+    voice_mode_setting = settings.get("voice_mode", "disabled")
+    if VOICE_AVAILABLE and voice_mode_setting != "disabled":
+        voice_mode = "PTT" if enable_ptt else "VAD"
+        logger.info("Initializing Voice Input (faster-whisper, %s mode)", voice_mode)
+        try:
+            voice_thread = VoiceInputWorker(
+                whisper_model_size="base",
+                ptt_mode=enable_ptt
+            )
+            if ai_thread:
+                voice_thread.speech_detected.connect(ai_thread.process_driver_query)
+            voice_thread.vad_state_changed.connect(window.handle_vad_state_change)
+            voice_thread.status_update.connect(lambda msg: logger.info("Voice: %s", msg))
+            voice_thread.error_occurred.connect(lambda err: logger.error("Voice: %s", err))
+            voice_thread.start()
+            logger.info("Voice Input started (%s mode)", voice_mode)
+        except Exception as e:
+            logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
+            voice_thread = None
+
+    # Initialize PTT controller (independent of AI)
+    if enable_ptt and voice_thread and PTT_AVAILABLE:
+        ptt_button_index = 11
+        logger.info(
+            "Initializing PTT Controller (keyboard=%s, joystick button=%d)",
+            ptt_key,
+            ptt_button_index,
+        )
+        try:
+            ptt_controller = PTTController(
+                joystick_button_index=ptt_button_index,
+                keyboard_key=ptt_key,
+            )
+            ptt_controller.ptt_pressed.connect(voice_thread.start_recording)
+            ptt_controller.ptt_released.connect(voice_thread.stop_recording)
+            ptt_controller.status_update.connect(lambda msg: logger.info("PTT: %s", msg))
+            ptt_controller.start()
+            window.set_ptt_controller(ptt_controller)
+            logger.info("PTT Controller started")
+        except Exception as e:
+            logger.error("Failed to initialize PTT Controller: %s", e, exc_info=True)
+            ptt_controller = None
+
+    # Initialize TTS output (Kokoro local TTS)
+    if TTS_AVAILABLE and voice_mode_setting != "disabled":
+        logger.info(
+            "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s, speed=%.2f)",
+            KOKORO_VOICE_ID,
+            KOKORO_SPEED,
+        )
+        try:
+            def _build_tts_worker() -> TTSOutputWorker:
+                worker = TTSOutputWorker(
+                    use_sentence_pipelining=True,
+                    kokoro_voice_id=KOKORO_VOICE_ID,
+                    kokoro_lang=KOKORO_LANG,
+                    kokoro_speed=KOKORO_SPEED,
+                    kokoro_use_cuda=KOKORO_USE_CUDA,
+                )
+                worker.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
+                worker.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
+                worker.finished.connect(lambda: logger.warning("TTS worker stopped"))
+                if voice_thread:
+                    worker.playback_started.connect(voice_thread.pause)
+                    worker.playback_finished.connect(voice_thread.resume)
+                return worker
+
+            def _ensure_tts_worker_running(reason: str) -> bool:
+                if tts_runtime["restarting"]:
+                    return False
+                worker = tts_runtime["worker"]
+                if worker and worker.isRunning():
+                    return True
+
+                tts_runtime["restarting"] = True
+                try:
+                    worker = _build_tts_worker()
+                    tts_runtime["worker"] = worker
+                    worker.start()
+                    logger.info("TTS worker started (%s)", reason)
+                    return True
+                except Exception as e:
+                    logger.error("Failed to start TTS worker (%s): %s", reason, e, exc_info=True)
+                    tts_runtime["worker"] = None
+                    return False
+                finally:
+                    tts_runtime["restarting"] = False
+
+            def _speak_with_retry(message: str, retries_left: int = 6):
+                worker = tts_runtime["worker"]
+                if worker and worker.isRunning():
+                    worker.speak(message)
+                    return
+
+                if not _ensure_tts_worker_running("auto-restart"):
+                    if retries_left <= 0:
+                        logger.error("Dropping TTS message after failed restart: %s", message[:80])
+                        return
+                    QtCore.QTimer.singleShot(
+                        200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                    )
+                    return
+
+                if retries_left <= 0:
+                    logger.error("Dropping TTS message; worker never became ready: %s", message[:80])
+                    return
+
+                QtCore.QTimer.singleShot(
+                    200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                )
+
+            def on_ai_commentary_for_tts(msg, trigger, priority):
+                _speak_with_retry(msg)
+
+            if ai_thread:
+                ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
+
+            if _ensure_tts_worker_running("initialization"):
+                tts_thread = tts_runtime["worker"]
+                logger.info("TTS Output started")
+            else:
+                tts_thread = None
+        except Exception as e:
+            logger.error("Failed to initialize TTS Output: %s", e, exc_info=True)
+            tts_thread = None
+    elif not TTS_AVAILABLE and voice_mode_setting != "disabled":
+        logger.warning("Voice mode enabled but TTS module is unavailable")
 
     # Initialize session recorder (optional)
     recorder_thread = None
