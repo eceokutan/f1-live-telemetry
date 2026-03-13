@@ -35,12 +35,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         # Canvases (created when lap is loaded)
         self.track_map: Optional[TrackMapCanvas] = None
-        self.speed_canvas: Optional[TimeSeriesCanvas] = None
-        self.gear_canvas: Optional[TimeSeriesCanvas] = None
-        self.rpm_canvas: Optional[TimeSeriesCanvas] = None
-        self.throttle_brake_canvas: Optional[TimeSeriesCanvas] = None
-        self.tire_temp_canvas: Optional[TimeSeriesCanvas] = None
-        self.tire_pressure_canvas: Optional[TimeSeriesCanvas] = None
+        self._active_canvases: list = []
 
         # Timeline controller
         self.timeline = TimelineController(self)
@@ -66,6 +61,29 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         self._apply_dark_theme()
 
+    # All available graph definitions: (key, title, type, config)
+    # type: "single" or "multi"
+    # config: dict with plot parameters
+    GRAPH_DEFS = [
+        ("speed", "Speed", "single", {"col": "speed", "ylabel": "Speed [km/h]"}),
+        ("gear", "Gear", "single", {"col": "gear", "ylabel": "Gear"}),
+        ("rpm", "Engine RPM", "single", {"col": "rpm", "ylabel": "RPM"}),
+        ("throttle_brake", "Throttle & Brake", "multi_tb", {}),
+        ("fuel", "Fuel", "single", {"col": "fuel", "ylabel": "Fuel [L]"}),
+        ("steer_angle", "Steering Angle", "single", {"col": "steer_angle", "ylabel": "Steer [rad]"}),
+        ("g_forces", "G-Forces", "multi_gforce", {}),
+        ("tyre_temp", "Tire Temperatures", "multi_tyre", {"prefix": "tyre_temp", "ylabel": "Temperature [C]"}),
+        ("tyre_pressure", "Tire Pressures", "multi_tyre", {"prefix": "tyre_pressure", "ylabel": "Pressure [PSI]"}),
+        ("tyre_wear", "Tire Wear", "multi_tyre", {"prefix": "tyre_wear", "ylabel": "Wear [%]"}),
+        ("wheel_slip", "Wheel Slip", "multi_tyre", {"prefix": "wheel_slip", "ylabel": "Slip"}),
+        ("suspension", "Suspension Travel", "multi_tyre", {"prefix": "suspension", "ylabel": "Travel [m]"}),
+        ("ride_height", "Ride Height", "multi_rh", {}),
+        ("car_damage", "Car Damage", "multi_damage", {}),
+    ]
+
+    # Default enabled graphs
+    DEFAULT_GRAPHS = {"speed", "gear", "rpm", "throttle_brake", "tyre_temp", "tyre_pressure"}
+
     def _create_menu_bar(self) -> None:
         menu_bar = self.menuBar()
 
@@ -88,6 +106,19 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         fullscreen_action.setShortcut("F11")
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
+
+        # Graphs menu with checkable items
+        graphs_menu = menu_bar.addMenu("Graphs")
+        self._graph_actions = {}
+        for key, title, _, _ in self.GRAPH_DEFS:
+            action = QtWidgets.QAction(title, self)
+            action.setCheckable(True)
+            action.setChecked(key in self.DEFAULT_GRAPHS)
+            action.triggered.connect(self._on_graph_toggled)
+            graphs_menu.addAction(action)
+            self._graph_actions[key] = action
+
+        self._enabled_graphs = set(self.DEFAULT_GRAPHS)
 
     def _create_central_widget(self) -> None:
         central_widget = QtWidgets.QWidget()
@@ -210,24 +241,29 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         return widget
 
-    def _create_graph_container(self) -> QtWidgets.QScrollArea:
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-
+    def _create_graph_container(self) -> QtWidgets.QWidget:
         container = QtWidgets.QWidget()
-        self.graph_layout = QtWidgets.QVBoxLayout(container)
-        self.graph_layout.setSpacing(10)
-        self.graph_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout = QtWidgets.QHBoxLayout(container)
+        outer_layout.setSpacing(10)
+        outer_layout.setContentsMargins(10, 10, 10, 10)
 
-        placeholder = QtWidgets.QLabel("Load a session to view telemetry")
-        placeholder.setAlignment(QtCore.Qt.AlignCenter)
-        placeholder.setStyleSheet("font-size: 14px; color: #888; padding: 50px;")
-        self.graph_layout.addWidget(placeholder)
+        # Left column: Speed, Gear, RPM
+        self.graph_layout_left = QtWidgets.QVBoxLayout()
+        self.graph_layout_left.setSpacing(6)
+        outer_layout.addLayout(self.graph_layout_left)
 
-        scroll_area.setWidget(container)
-        return scroll_area
+        # Right column: Throttle/Brake, Tire Temps, Tire Pressures
+        self.graph_layout_right = QtWidgets.QVBoxLayout()
+        self.graph_layout_right.setSpacing(6)
+        outer_layout.addLayout(self.graph_layout_right)
+
+        # Placeholder (spans both columns initially)
+        self.graph_placeholder = QtWidgets.QLabel("Load a session to view telemetry")
+        self.graph_placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        self.graph_placeholder.setStyleSheet("font-size: 14px; color: #888; padding: 50px;")
+        self.graph_layout_left.addWidget(self.graph_placeholder)
+
+        return container
 
     def _create_analysis_panel(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()
@@ -260,7 +296,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _create_timeline_widget(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()
-        widget.setFixedHeight(80)
+        widget.setFixedHeight(110)
 
         layout = QtWidgets.QVBoxLayout(widget)
         layout.setContentsMargins(10, 5, 10, 5)
@@ -293,6 +329,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.speed_combo.setCurrentText("1x")
         self.speed_combo.currentTextChanged.connect(self.on_speed_changed)
         controls_row.addWidget(self.speed_combo)
+
+        controls_row.addSpacing(20)
+        controls_row.addWidget(QtWidgets.QLabel("Zoom:"))
+        self.zoom_combo = QtWidgets.QComboBox()
+        self.zoom_combo.addItems(["15s", "30s", "45s", "60s", "Full Lap"])
+        self.zoom_combo.setCurrentText("45s")
+        self.zoom_combo.currentTextChanged.connect(self.on_zoom_changed)
+        controls_row.addWidget(self.zoom_combo)
 
         controls_row.addStretch()
         layout.addLayout(controls_row)
@@ -333,6 +377,35 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     def on_speed_changed(self, text: str) -> None:
         speed_map = {"0.25x": 0.25, "0.5x": 0.5, "1x": 1.0, "2x": 2.0, "4x": 4.0}
         self.timeline.set_playback_speed(speed_map.get(text, 1.0))
+
+    def on_zoom_changed(self, text: str) -> None:
+        zoom_map = {"15s": 15.0, "30s": 30.0, "45s": 45.0, "60s": 60.0, "Full Lap": None}
+        window = zoom_map.get(text)
+        for canvas in self._active_canvases:
+            canvas.window_duration = window
+            canvas.update_sliding_window(self.timeline.current_time if self.timeline else 0.0)
+
+    MAX_GRAPHS = 6
+
+    def _on_graph_toggled(self) -> None:
+        """Rebuild enabled graphs set and repopulate canvases (max 6)."""
+        new_enabled = set()
+        for key, action in self._graph_actions.items():
+            if action.isChecked():
+                new_enabled.add(key)
+
+        if len(new_enabled) > self.MAX_GRAPHS:
+            # Find which graph was just toggled on and uncheck it
+            newly_added = new_enabled - self._enabled_graphs
+            for key in newly_added:
+                self._graph_actions[key].setChecked(False)
+            self.statusBar().showMessage(f"Maximum {self.MAX_GRAPHS} graphs allowed (3 per column)", 3000)
+            return
+
+        self._enabled_graphs = new_enabled
+        if self.current_lap:
+            self._populate_canvases()
+            self._update_visualizations_at_time(self.timeline.current_time if self.timeline else 0.0)
 
     def on_lap_selected(self, item: QtWidgets.QListWidgetItem) -> None:
         if not self.session:
@@ -472,82 +545,133 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         if self.analysis_source_label:
             self.analysis_source_label.setText(source_text)
 
+    def _clear_layout(self, layout):
+        """Remove all widgets from a layout."""
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+    def _col_exists(self, df, col):
+        """Check if column exists and has non-zero data."""
+        return col in df.columns and df[col].abs().sum() > 0
+
     def _populate_canvases(self) -> None:
-        """Create and populate all canvases with current lap data."""
+        """Create and populate canvases based on enabled graphs."""
         if not self.current_lap:
             return
 
+        from ui.styles import ACCENT_GREEN, ACCENT_RED, ACCENT_CYAN, ACCENT_YELLOW
+
         df = self.current_lap.telemetry
+        times = df['elapsed_time'].values
 
-        while self.graph_layout.count():
-            child = self.graph_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+        self._clear_layout(self.graph_layout_left)
+        self._clear_layout(self.graph_layout_right)
+        self._clear_layout(self.track_map_container)
+        self._active_canvases = []
 
-        while self.track_map_container.count():
-            child = self.track_map_container.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
+        # Track map (always shown)
         self.track_map = TrackMapCanvas(width=3, height=3)
         x, z = self.current_lap.get_racing_line()
         speeds = self.current_lap.get_speed_trace()
         self.track_map.load_lap(x, z, speeds)
         self.track_map_container.addWidget(self.track_map)
 
-        self.speed_canvas = TimeSeriesCanvas(width=10, height=2.5)
-        self.speed_canvas.plot_single_line(
-            df['elapsed_time'].values, df['speed'].values,
-            ylabel="Speed [km/h]", title="Speed"
-        )
-        self.graph_layout.addWidget(self.speed_canvas)
+        # Build canvases for enabled graphs
+        canvases = []
+        for key, title, gtype, config in self.GRAPH_DEFS:
+            if key not in self._enabled_graphs:
+                continue
 
-        self.gear_canvas = TimeSeriesCanvas(width=10, height=2)
-        self.gear_canvas.plot_single_line(
-            df['elapsed_time'].values, df['gear'].values,
-            ylabel="Gear", title="Gear"
-        )
-        self.graph_layout.addWidget(self.gear_canvas)
+            canvas = TimeSeriesCanvas(width=5, height=2.5)
 
-        self.rpm_canvas = TimeSeriesCanvas(width=10, height=2.5)
-        self.rpm_canvas.plot_single_line(
-            df['elapsed_time'].values, df['rpm'].values,
-            ylabel="RPM", title="Engine RPM"
-        )
-        self.graph_layout.addWidget(self.rpm_canvas)
+            if gtype == "single":
+                col = config["col"]
+                if not self._col_exists(df, col):
+                    continue
+                canvas.plot_single_line(times, df[col].values, ylabel=config["ylabel"], title=title)
 
-        from ui.styles import ACCENT_GREEN, ACCENT_RED
-        self.throttle_brake_canvas = TimeSeriesCanvas(width=10, height=2.5)
-        self.throttle_brake_canvas.plot_multi_line(
-            df['elapsed_time'].values,
-            [df['throttle'].values * 100, df['brake'].values * 100],
-            labels=['Throttle', 'Brake'],
-            colors=[ACCENT_GREEN, ACCENT_RED],
-            ylabel="Input [%]", title="Throttle & Brake"
-        )
-        self.graph_layout.addWidget(self.throttle_brake_canvas)
+            elif gtype == "multi_tb":
+                if not (self._col_exists(df, "throttle") or self._col_exists(df, "brake")):
+                    continue
+                canvas.plot_multi_line(
+                    times,
+                    [df['throttle'].values * 100, df['brake'].values * 100],
+                    labels=['Throttle', 'Brake'],
+                    colors=[ACCENT_GREEN, ACCENT_RED],
+                    ylabel="Input [%]", title=title
+                )
 
-        self.tire_temp_canvas = TimeSeriesCanvas(width=10, height=2.5)
-        self.tire_temp_canvas.plot_multi_line(
-            df['elapsed_time'].values,
-            [df['tyre_temp_fl'].values, df['tyre_temp_fr'].values,
-             df['tyre_temp_rl'].values, df['tyre_temp_rr'].values],
-            labels=TIRE_LABELS, colors=TIRE_COLORS,
-            ylabel="Temperature [C]", title="Tire Temperatures"
-        )
-        self.graph_layout.addWidget(self.tire_temp_canvas)
+            elif gtype == "multi_tyre":
+                prefix = config["prefix"]
+                cols = [f"{prefix}_fl", f"{prefix}_fr", f"{prefix}_rl", f"{prefix}_rr"]
+                if not any(self._col_exists(df, c) for c in cols):
+                    continue
+                canvas.plot_multi_line(
+                    times,
+                    [df[c].values if c in df.columns else times * 0 for c in cols],
+                    labels=TIRE_LABELS, colors=TIRE_COLORS,
+                    ylabel=config["ylabel"], title=title
+                )
 
-        self.tire_pressure_canvas = TimeSeriesCanvas(width=10, height=2.5)
-        self.tire_pressure_canvas.plot_multi_line(
-            df['elapsed_time'].values,
-            [df['tyre_pressure_fl'].values, df['tyre_pressure_fr'].values,
-             df['tyre_pressure_rl'].values, df['tyre_pressure_rr'].values],
-            labels=TIRE_LABELS, colors=TIRE_COLORS,
-            ylabel="Pressure [PSI]", title="Tire Pressures"
-        )
-        self.graph_layout.addWidget(self.tire_pressure_canvas)
+            elif gtype == "multi_gforce":
+                if not (self._col_exists(df, "g_force_lat") or self._col_exists(df, "g_force_lon")):
+                    continue
+                vals = []
+                labels = []
+                colors = []
+                if self._col_exists(df, "g_force_lat"):
+                    vals.append(df["g_force_lat"].values)
+                    labels.append("Lateral")
+                    colors.append(ACCENT_CYAN)
+                if self._col_exists(df, "g_force_lon"):
+                    vals.append(df["g_force_lon"].values)
+                    labels.append("Longitudinal")
+                    colors.append(ACCENT_YELLOW)
+                canvas.plot_multi_line(times, vals, labels=labels, colors=colors,
+                                       ylabel="G-Force", title=title)
 
-        self.graph_layout.addStretch()
+            elif gtype == "multi_rh":
+                if not (self._col_exists(df, "ride_height_front") or self._col_exists(df, "ride_height_rear")):
+                    continue
+                vals, labels, colors = [], [], []
+                if self._col_exists(df, "ride_height_front"):
+                    vals.append(df["ride_height_front"].values)
+                    labels.append("Front")
+                    colors.append(ACCENT_CYAN)
+                if self._col_exists(df, "ride_height_rear"):
+                    vals.append(df["ride_height_rear"].values)
+                    labels.append("Rear")
+                    colors.append(ACCENT_YELLOW)
+                canvas.plot_multi_line(times, vals, labels=labels, colors=colors,
+                                       ylabel="Height [m]", title=title)
+
+            elif gtype == "multi_damage":
+                dmg_cols = ["car_damage_front", "car_damage_rear", "car_damage_left",
+                            "car_damage_right", "car_damage_centre"]
+                if not any(self._col_exists(df, c) for c in dmg_cols):
+                    continue
+                dmg_labels = ["Front", "Rear", "Left", "Right", "Centre"]
+                dmg_colors = [ACCENT_RED, ACCENT_YELLOW, ACCENT_CYAN, ACCENT_GREEN, "#FFFFFF"]
+                canvas.plot_multi_line(
+                    times,
+                    [df[c].values if c in df.columns else times * 0 for c in dmg_cols],
+                    labels=dmg_labels, colors=dmg_colors,
+                    ylabel="Damage", title=title
+                )
+            else:
+                continue
+
+            canvases.append(canvas)
+            self._active_canvases.append(canvas)
+
+        # Split canvases evenly between left and right columns
+        mid = (len(canvases) + 1) // 2
+        for canvas in canvases[:mid]:
+            self.graph_layout_left.addWidget(canvas)
+        for canvas in canvases[mid:]:
+            self.graph_layout_right.addWidget(canvas)
 
     def _update_visualizations_at_time(self, time: float) -> None:
         """Update all visualizations to show data at the given timestamp."""
@@ -568,10 +692,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         if self.track_map:
             self.track_map.update_position(sample_index)
 
-        for canvas in [self.speed_canvas, self.gear_canvas, self.rpm_canvas,
-                       self.throttle_brake_canvas, self.tire_temp_canvas, self.tire_pressure_canvas]:
-            if canvas:
-                canvas.update_timeline_marker(time)
+        for canvas in self._active_canvases:
+            canvas.update_timeline_marker(time)
 
     def toggle_fullscreen(self) -> None:
         if self.isFullScreen():

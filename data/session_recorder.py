@@ -166,6 +166,9 @@ class SessionRecorder(QtCore.QThread):
                     throttle REAL,
                     brake REAL,
                     fuel REAL,
+                    steer_angle REAL,
+                    g_force_lat REAL,
+                    g_force_lon REAL,
                     tyre_pressure_fl REAL,
                     tyre_pressure_fr REAL,
                     tyre_pressure_rl REAL,
@@ -174,6 +177,25 @@ class SessionRecorder(QtCore.QThread):
                     tyre_temp_fr REAL,
                     tyre_temp_rl REAL,
                     tyre_temp_rr REAL,
+                    tyre_wear_fl REAL,
+                    tyre_wear_fr REAL,
+                    tyre_wear_rl REAL,
+                    tyre_wear_rr REAL,
+                    wheel_slip_fl REAL,
+                    wheel_slip_fr REAL,
+                    wheel_slip_rl REAL,
+                    wheel_slip_rr REAL,
+                    suspension_fl REAL,
+                    suspension_fr REAL,
+                    suspension_rl REAL,
+                    suspension_rr REAL,
+                    ride_height_front REAL,
+                    ride_height_rear REAL,
+                    car_damage_front REAL,
+                    car_damage_rear REAL,
+                    car_damage_left REAL,
+                    car_damage_right REAL,
+                    car_damage_centre REAL,
                     timestamp REAL NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
@@ -218,6 +240,26 @@ class SessionRecorder(QtCore.QThread):
                     cursor.execute("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT ''")
                 except sqlite3.OperationalError:
                     pass  # column already exists
+
+                # Migration: add extended telemetry columns for existing databases
+                new_telemetry_cols = [
+                    ("steer_angle", "REAL"), ("g_force_lat", "REAL"), ("g_force_lon", "REAL"),
+                    ("tyre_wear_fl", "REAL"), ("tyre_wear_fr", "REAL"),
+                    ("tyre_wear_rl", "REAL"), ("tyre_wear_rr", "REAL"),
+                    ("wheel_slip_fl", "REAL"), ("wheel_slip_fr", "REAL"),
+                    ("wheel_slip_rl", "REAL"), ("wheel_slip_rr", "REAL"),
+                    ("suspension_fl", "REAL"), ("suspension_fr", "REAL"),
+                    ("suspension_rl", "REAL"), ("suspension_rr", "REAL"),
+                    ("ride_height_front", "REAL"), ("ride_height_rear", "REAL"),
+                    ("car_damage_front", "REAL"), ("car_damage_rear", "REAL"),
+                    ("car_damage_left", "REAL"), ("car_damage_right", "REAL"),
+                    ("car_damage_centre", "REAL"),
+                ]
+                for col_name, col_type in new_telemetry_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE telemetry ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass  # column already exists
 
                 self.db.commit()
             logger.info("Database initialized successfully")
@@ -443,6 +485,9 @@ class SessionRecorder(QtCore.QThread):
                     "throttle": sample.get("throttle", 0.0),
                     "brake": sample.get("brake", 0.0),
                     "fuel": sample.get("fuel", 0.0),
+                    "steer_angle": sample.get("steer_angle", 0.0),
+                    "g_force_lat": sample.get("g_force_lat", 0.0),
+                    "g_force_lon": sample.get("g_force_lon", 0.0),
                     "tyre_pressure_fl": sample.get("tyre_pressure_fl", 0.0),
                     "tyre_pressure_fr": sample.get("tyre_pressure_fr", 0.0),
                     "tyre_pressure_rl": sample.get("tyre_pressure_rl", 0.0),
@@ -451,6 +496,25 @@ class SessionRecorder(QtCore.QThread):
                     "tyre_temp_fr": sample.get("tyre_temp_fr", 0.0),
                     "tyre_temp_rl": sample.get("tyre_temp_rl", 0.0),
                     "tyre_temp_rr": sample.get("tyre_temp_rr", 0.0),
+                    "tyre_wear_fl": sample.get("tyre_wear_fl", 0.0),
+                    "tyre_wear_fr": sample.get("tyre_wear_fr", 0.0),
+                    "tyre_wear_rl": sample.get("tyre_wear_rl", 0.0),
+                    "tyre_wear_rr": sample.get("tyre_wear_rr", 0.0),
+                    "wheel_slip_fl": sample.get("wheel_slip_fl", 0.0),
+                    "wheel_slip_fr": sample.get("wheel_slip_fr", 0.0),
+                    "wheel_slip_rl": sample.get("wheel_slip_rl", 0.0),
+                    "wheel_slip_rr": sample.get("wheel_slip_rr", 0.0),
+                    "suspension_fl": sample.get("suspension_fl", 0.0),
+                    "suspension_fr": sample.get("suspension_fr", 0.0),
+                    "suspension_rl": sample.get("suspension_rl", 0.0),
+                    "suspension_rr": sample.get("suspension_rr", 0.0),
+                    "ride_height_front": sample.get("ride_height_front", 0.0),
+                    "ride_height_rear": sample.get("ride_height_rear", 0.0),
+                    "car_damage_front": sample.get("car_damage_front", 0.0),
+                    "car_damage_rear": sample.get("car_damage_rear", 0.0),
+                    "car_damage_left": sample.get("car_damage_left", 0.0),
+                    "car_damage_right": sample.get("car_damage_right", 0.0),
+                    "car_damage_centre": sample.get("car_damage_centre", 0.0),
                     "timestamp": time.time()
                 })
 
@@ -474,13 +538,27 @@ class SessionRecorder(QtCore.QThread):
                 INSERT INTO telemetry (
                     session_id, lap_number, elapsed_time, pos_x, pos_z, speed,
                     gear, rpm, throttle, brake, fuel,
+                    steer_angle, g_force_lat, g_force_lon,
                     tyre_pressure_fl, tyre_pressure_fr, tyre_pressure_rl, tyre_pressure_rr,
-                    tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr, timestamp
+                    tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr,
+                    tyre_wear_fl, tyre_wear_fr, tyre_wear_rl, tyre_wear_rr,
+                    wheel_slip_fl, wheel_slip_fr, wheel_slip_rl, wheel_slip_rr,
+                    suspension_fl, suspension_fr, suspension_rl, suspension_rr,
+                    ride_height_front, ride_height_rear,
+                    car_damage_front, car_damage_rear, car_damage_left, car_damage_right, car_damage_centre,
+                    timestamp
                 ) VALUES (
                     :session_id, :lap_number, :elapsed_time, :pos_x, :pos_z, :speed,
                     :gear, :rpm, :throttle, :brake, :fuel,
+                    :steer_angle, :g_force_lat, :g_force_lon,
                     :tyre_pressure_fl, :tyre_pressure_fr, :tyre_pressure_rl, :tyre_pressure_rr,
-                    :tyre_temp_fl, :tyre_temp_fr, :tyre_temp_rl, :tyre_temp_rr, :timestamp
+                    :tyre_temp_fl, :tyre_temp_fr, :tyre_temp_rl, :tyre_temp_rr,
+                    :tyre_wear_fl, :tyre_wear_fr, :tyre_wear_rl, :tyre_wear_rr,
+                    :wheel_slip_fl, :wheel_slip_fr, :wheel_slip_rl, :wheel_slip_rr,
+                    :suspension_fl, :suspension_fr, :suspension_rl, :suspension_rr,
+                    :ride_height_front, :ride_height_rear,
+                    :car_damage_front, :car_damage_rear, :car_damage_left, :car_damage_right, :car_damage_centre,
+                    :timestamp
                 )
                 """, self.telemetry_buffer)
 

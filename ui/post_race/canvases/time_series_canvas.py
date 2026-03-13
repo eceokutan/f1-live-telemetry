@@ -24,6 +24,9 @@ class TimeSeriesCanvas(FigureCanvas):
         super().__init__(self.fig)
         self.setParent(parent)
 
+        # Enforce minimum height so graphs don't get squished
+        self.setMinimumHeight(150)
+
         # Apply dark theme
         self.fig.patch.set_facecolor(BG_COLOR)
         self.ax.set_facecolor(BG_COLOR_LIGHT)
@@ -45,7 +48,7 @@ class TimeSeriesCanvas(FigureCanvas):
         self.timeline_marker = None
 
         # Sliding window configuration
-        self.window_duration = 20.0
+        self.window_duration = 45.0  # seconds of lap visible at once
         self.lap_duration = 0.0
 
         self.fig.tight_layout(pad=0.5)
@@ -73,7 +76,10 @@ class TimeSeriesCanvas(FigureCanvas):
             self.ax.set_title(title, fontsize=10, fontweight="bold")
         self.ax.grid(True, color=GRID_COLOR, alpha=0.6)
 
-        self.ax.set_xlim(0, min(self.window_duration, self.lap_duration))
+        if self.window_duration and self.lap_duration > self.window_duration:
+            self.ax.set_xlim(0, self.window_duration)
+        else:
+            self.ax.set_xlim(0, self.lap_duration)
 
         self.fig.tight_layout(pad=0.5)
         self.draw_idle()
@@ -102,7 +108,10 @@ class TimeSeriesCanvas(FigureCanvas):
         self.ax.legend(loc='upper right', fontsize=8, framealpha=0.8)
         self.ax.grid(True, color=GRID_COLOR, alpha=0.6)
 
-        self.ax.set_xlim(0, min(self.window_duration, self.lap_duration))
+        if self.window_duration and self.lap_duration > self.window_duration:
+            self.ax.set_xlim(0, self.window_duration)
+        else:
+            self.ax.set_xlim(0, self.lap_duration)
 
         self.fig.tight_layout(pad=0.5)
         self.draw_idle()
@@ -110,6 +119,11 @@ class TimeSeriesCanvas(FigureCanvas):
     def update_sliding_window(self, current_time: float):
         """Update x-axis limits to show a window centered on current_time."""
         if self.times is None or self.lap_duration <= 0:
+            return
+
+        # No sliding window — always show full lap
+        if not self.window_duration:
+            self.ax.set_xlim(0, self.lap_duration)
             return
 
         half_window = self.window_duration / 2.0

@@ -427,6 +427,9 @@ class AcTelemetryWorker(QtCore.QThread):
                     # Reject garbage speed values (AC cars don't exceed ~400 km/h)
                     if speed < 0 or speed > 500:
                         speed = 0.0
+                    # Deadzone: AC reports tiny speed jitter when stationary
+                    elif speed < 1.0:
+                        speed = 0.0
 
                     raw_gear = phys.gear
                     if raw_gear == 0:
@@ -471,6 +474,9 @@ class AcTelemetryWorker(QtCore.QThread):
                         "brake": phys.brake,
                         "throttle": phys.gas,
                         "fuel": phys.fuel,
+                        "steer_angle": phys.steerAngle,
+                        "g_force_lat": phys.accG[0],
+                        "g_force_lon": phys.accG[2],
                         "tyre_pressure_fl": phys.wheelsPressure[0],
                         "tyre_pressure_fr": phys.wheelsPressure[1],
                         "tyre_pressure_rl": phys.wheelsPressure[2],
@@ -483,6 +489,16 @@ class AcTelemetryWorker(QtCore.QThread):
                         "tyre_wear_fr": phys.tyreWear[1],
                         "tyre_wear_rl": phys.tyreWear[2],
                         "tyre_wear_rr": phys.tyreWear[3],
+                        "wheel_slip_fl": phys.wheelSlip[0],
+                        "wheel_slip_fr": phys.wheelSlip[1],
+                        "wheel_slip_rl": phys.wheelSlip[2],
+                        "wheel_slip_rr": phys.wheelSlip[3],
+                        "suspension_fl": phys.suspensionTravel[0],
+                        "suspension_fr": phys.suspensionTravel[1],
+                        "suspension_rl": phys.suspensionTravel[2],
+                        "suspension_rr": phys.suspensionTravel[3],
+                        "ride_height_front": phys.rideHeight[0],
+                        "ride_height_rear": phys.rideHeight[1],
                         "car_damage_front": phys.carDamage[0],
                         "car_damage_rear": phys.carDamage[1],
                         "car_damage_left": phys.carDamage[2],

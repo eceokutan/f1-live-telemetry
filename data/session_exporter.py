@@ -175,25 +175,21 @@ class SessionExporter:
         """, (session_id,))
 
         telemetry_file = output_path / f"session_{session_id}_telemetry.csv"
+
+        # Get column names from the query result
+        rows = cursor.fetchall()
+        if not rows:
+            return
+
+        # Export all columns except internal ones (telemetry_id, session_id, timestamp)
+        skip_cols = {"telemetry_id", "session_id", "timestamp"}
+        col_names = [key for key in rows[0].keys() if key not in skip_cols]
+
         with open(telemetry_file, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "lap_number", "elapsed_time", "pos_x", "pos_z", "speed", "gear", "rpm",
-                "throttle", "brake", "fuel",
-                "tyre_pressure_fl", "tyre_pressure_fr", "tyre_pressure_rl", "tyre_pressure_rr",
-                "tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr"
-            ])
-
-            for row in cursor:
-                writer.writerow([
-                    row["lap_number"], row["elapsed_time"], row["pos_x"], row["pos_z"],
-                    row["speed"], row["gear"], row["rpm"], row["throttle"], row["brake"],
-                    row["fuel"],
-                    row["tyre_pressure_fl"], row["tyre_pressure_fr"],
-                    row["tyre_pressure_rl"], row["tyre_pressure_rr"],
-                    row["tyre_temp_fl"], row["tyre_temp_fr"],
-                    row["tyre_temp_rl"], row["tyre_temp_rr"]
-                ])
+            writer.writerow(col_names)
+            for row in rows:
+                writer.writerow([row[col] for col in col_names])
 
     def _export_laps(self, db: sqlite3.Connection, session_id: int, output_path: Path) -> None:
         """Export lap summaries to CSV."""
