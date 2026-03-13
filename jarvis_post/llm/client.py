@@ -193,7 +193,7 @@ class HFClient:
 
             if response.status_code in (404, 405):
                 return None
-            if response.status_code in (502, 503, 504):
+            if response.status_code in (500, 502, 503, 504):
                 return False
             response.raise_for_status()
 
@@ -208,6 +208,9 @@ class HFClient:
             return False
         except httpx.HTTPStatusError as e:
             status_code = e.response.status_code if e.response else "unknown"
+            if isinstance(status_code, int) and status_code >= 500:
+                # Some Spaces intermittently return 500 from /health while warming.
+                return False
             raise LLMError(f"Space health check failed with HTTP {status_code}.") from e
         except Exception:
             return None
