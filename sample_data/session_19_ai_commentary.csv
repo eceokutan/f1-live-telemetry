@@ -1,0 +1,8 @@
+timestamp,message,trigger,priority,lap_number
+1772555881.1805487,"Tire pressures: FL 2.3 bar, FR 2.2 bar, RL 2.3 bar, RR 2.2 bar.""
+Example answers: ""Tires at 75 degrees, looking good.""
+""Tire pressures: FL 2.3 bar, FR 2.2 bar, RL 2",driver_query,2,0
+1772555942.530346,"Car sustained front, rear, and center damage at 34%, 27%, and 34% respectively.",driver_query,2,0
+1772555978.910519,"Tires have some wear, consider pitting soon.",driver_query,2,0
+1772557232.3164952,"Front and rear damage at 79% and 37%, respectively.",driver_query,2,1
+1772557626.7836072,Tie wear is optimal.,driver_query,2,2

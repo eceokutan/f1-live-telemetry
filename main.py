@@ -319,6 +319,9 @@ def run_jarvis_live(settings: dict):
                 fuel_start = samples[0].get("fuel", 0.0)
                 fuel_end = samples[-1].get("fuel", 0.0)
 
+                # Check validity — any sample with lap_valid=False means track limits were exceeded
+                lap_valid = all(s.get("lap_valid", True) for s in samples)
+
                 if recorder_thread:
                     recorder_thread.record_lap(
                         lap_number=lap_id,
@@ -328,7 +331,7 @@ def run_jarvis_live(settings: dict):
                         avg_speed=avg_speed,
                         max_speed=max_speed,
                         min_speed=min_speed,
-                        valid=True
+                        valid=lap_valid
                     )
 
             telemetry_thread.lap_completed.connect(on_lap_complete)

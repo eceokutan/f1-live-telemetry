@@ -45,6 +45,7 @@ class SessionExporter:
                 best_lap_time,
                 ai_enabled
             FROM sessions
+            WHERE total_laps > 0
             ORDER BY start_time DESC
         """)
 

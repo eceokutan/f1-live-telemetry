@@ -272,8 +272,9 @@ class AcTelemetryWorker(QtCore.QThread):
             t0 = time.time()
             frame_count = 0
             last_lap_id = -1
-            baseline_lap = None
             last_valid_raw_lap = None
+            stable_count = 0       # frames with a consistent completedLaps value
+            STABLE_THRESHOLD = 10  # require 10 consistent frames before trusting
             integrated_x = 0.0
             integrated_z = 0.0
             last_time = t0
@@ -318,18 +319,32 @@ class AcTelemetryWorker(QtCore.QThread):
 
                     raw_lap_id = gfx.completedLaps
 
-                    if last_valid_raw_lap is not None:
-                        if raw_lap_id < 0 or abs(raw_lap_id - last_valid_raw_lap) > 1:
-                            raw_lap_id = last_valid_raw_lap
-                    elif raw_lap_id < 0:
-                        raw_lap_id = 0
-                    last_valid_raw_lap = raw_lap_id
+                    # Reject clearly invalid values (negative)
+                    if raw_lap_id < 0:
+                        raw_lap_id = last_valid_raw_lap if last_valid_raw_lap is not None else 0
 
-                    if baseline_lap is None:
-                        baseline_lap = raw_lap_id
-                        logger.info("Baseline lap set to %d (normalizing to lap 0)", baseline_lap)
+                    # Wait for a stable reading before trusting the lap counter.
+                    # Shared memory can contain stale/garbage data on first connect.
+                    if last_valid_raw_lap is None:
+                        # First reading — start counting stability
+                        last_valid_raw_lap = raw_lap_id
+                        stable_count = 1
+                    elif raw_lap_id == last_valid_raw_lap:
+                        stable_count = min(stable_count + 1, STABLE_THRESHOLD + 1)
+                    elif stable_count >= STABLE_THRESHOLD:
+                        # We had a stable baseline and now the value changed —
+                        # trust it (this is a real lap completion or reset)
+                        logger.info("completedLaps changed: %d -> %d", last_valid_raw_lap, raw_lap_id)
+                        last_valid_raw_lap = raw_lap_id
+                    else:
+                        # Value changed before we had a stable baseline —
+                        # restart stability counting with the new value
+                        logger.debug("Unstable completedLaps: %d (was %d, stable_count=%d), restarting",
+                                     raw_lap_id, last_valid_raw_lap, stable_count)
+                        last_valid_raw_lap = raw_lap_id
+                        stable_count = 1
 
-                    lap_id = max(0, raw_lap_id - baseline_lap)
+                    lap_id = max(0, last_valid_raw_lap)
                     speed = phys.speedKmh
 
                     raw_gear = phys.gear
@@ -353,8 +368,13 @@ class AcTelemetryWorker(QtCore.QThread):
                     if frame_count == 300 and x == 0 and z == 0:
                         logger.warning("Car coordinates still (0,0) after 5 seconds — are you on track?")
 
+                    # Detect lap completion and read validity from AC
+                    # AC sets lastTimeMs > 0 for valid laps, 0 for invalid
+                    lap_valid = gfx.lastTimeMs > 0
+
                     if lap_id != last_lap_id and last_lap_id != -1:
-                        logger.info("Lap completed: %d -> %d", last_lap_id+1, lap_id+1)
+                        logger.info("Lap completed: %d -> %d (valid=%s, lastTimeMs=%d)",
+                                    last_lap_id+1, lap_id+1, lap_valid, gfx.lastTimeMs)
                         integrated_x = 0.0
                         integrated_z = 0.0
                     last_lap_id = lap_id
@@ -387,6 +407,8 @@ class AcTelemetryWorker(QtCore.QThread):
                         "car_damage_left": phys.carDamage[2],
                         "car_damage_right": phys.carDamage[3],
                         "car_damage_centre": phys.carDamage[4],
+                        "tyres_out": phys.numberOfTyresOut,
+                        "lap_valid": lap_valid,
                     }
 
                     lap_buffer.add_sample(
@@ -401,6 +423,7 @@ class AcTelemetryWorker(QtCore.QThread):
                         tyre_temp_fr=phys.tyreCoreTemperature[1],
                         tyre_temp_rl=phys.tyreCoreTemperature[2],
                         tyre_temp_rr=phys.tyreCoreTemperature[3],
+                        lap_valid=lap_valid,
                     )
 
                     self.realtime_sample.emit(sample_data)

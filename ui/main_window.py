@@ -411,6 +411,9 @@ class MainWindow(QMainWindow):
         times = np.array([s["t"] for s in samples], dtype=float)
         times = times - times[0]  # Normalize to start from 0
 
+        # Check validity from sample data
+        lap_valid = all(s.get("lap_valid", True) for s in samples)
+
         # Update lap table
         row = min(lap_id - 1, self.lap_table.rowCount() - 1)
         if row >= 0 and len(times) > 0:
@@ -418,8 +421,18 @@ class MainWindow(QMainWindow):
             minutes = int(lap_time_seconds // 60)
             seconds = lap_time_seconds % 60
             lap_time = f"{minutes}:{seconds:06.3f}"
-            self.lap_table.setItem(row, 0, QTableWidgetItem(lap_time))
-            self.lap_table.setItem(row, 1, QTableWidgetItem("--"))
+
+            time_item = QTableWidgetItem(lap_time)
+            valid_item = QTableWidgetItem("Valid" if lap_valid else "Invalid")
+
+            if not lap_valid:
+                from PyQt5.QtGui import QColor
+                invalid_color = QColor(255, 80, 80)  # red tint
+                time_item.setForeground(invalid_color)
+                valid_item.setForeground(invalid_color)
+
+            self.lap_table.setItem(row, 0, time_item)
+            self.lap_table.setItem(row, 1, valid_item)
 
     def handle_ai_commentary(self, message: str, trigger: str, priority: int):
         """
