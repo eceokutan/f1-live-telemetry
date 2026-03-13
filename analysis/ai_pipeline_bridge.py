@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 import threading
+from contextlib import contextmanager
 
 import pandas as pd
 
@@ -20,7 +21,6 @@ from data.session import Session
 from .ai_pipeline_types import (
     AIAnalysisResult,
     EXTERNAL_PIPELINE_MODULES,
-    JARVIS_POST_ROOT_CANDIDATES,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,66 +91,111 @@ class AIPipelineBridge:
                     return
 
     def _discover_jarvis_post_pipeline(self) -> Optional[dict[str, Any]]:
-        """Locate local Jarvis Post package and return callables for analyst/coach."""
-        for root in self._iter_jarvis_post_roots():
-            if str(root) not in sys.path:
-                sys.path.insert(0, str(root))
+        """
+        Locate Jarvis Post package and return callables for analyst/coach.
 
-            self._bootstrap_env_from_root(root)
-
-            try:
-                from jarvis_post.agents.race_analysis import RaceAnalysisAgent
-                from jarvis_post.agents.coaching import CoachingAgent
-            except Exception:
+        Discovery order is deterministic:
+        1) Explicit root via JARVIS_POST_ROOT (if valid)
+        2) Repository root (analysis/..)
+        """
+        for root in self._get_jarvis_post_candidate_roots():
+            if not self._is_valid_jarvis_post_root(root):
+                logger.warning(
+                    "Skipping invalid JARVIS_POST_ROOT candidate: %s",
+                    root,
+                )
                 continue
 
-            granite_client_cls = None
-            try:
-                from jarvis_post.llm.client import HFClient
-                granite_client_cls = HFClient
-            except Exception:
-                granite_client_cls = None
+            handler = self._load_jarvis_post_handler(root)
+            if handler is None:
+                continue
 
             self._external_source = f"jarvis_post:{root}"
-            return {
-                "kind": "jarvis_post",
-                "root": root,
-                "race_agent_cls": RaceAnalysisAgent,
-                "coach_agent_cls": CoachingAgent,
-                "llm_client_cls": granite_client_cls,
-            }
+            logger.info("Using Jarvis Post pipeline root: %s", root)
+            return handler
 
         return None
 
-    def _iter_jarvis_post_roots(self) -> list[Path]:
-        """Build a small set of candidate roots for Jarvis Post integration."""
-        cwd = Path.cwd()
-        candidates: list[Path] = [cwd]
+    def _get_jarvis_post_candidate_roots(self) -> list[Path]:
+        """
+        Return deterministic Jarvis Post candidate roots.
 
-        for name in JARVIS_POST_ROOT_CANDIDATES:
-            candidates.append(cwd / name)
+        Avoids scanning unrelated directories or importing external .env files.
+        """
+        candidates: list[Path] = []
 
-        for child in cwd.iterdir():
-            if child.is_dir():
-                candidates.append(child)
-
-        env_root = os.getenv("JARVIS_POST_ROOT")
+        env_root = (os.getenv("JARVIS_POST_ROOT") or "").strip()
         if env_root:
-            candidates.append(Path(env_root))
+            try:
+                candidates.append(Path(env_root).expanduser().resolve())
+            except Exception:
+                logger.warning("Invalid JARVIS_POST_ROOT value: %s", env_root)
 
-        candidates.append(Path.home() / "Downloads" / "f1-post-analysis-main")
+        repo_root = Path(__file__).resolve().parent.parent
+        if repo_root not in candidates:
+            candidates.append(repo_root)
 
-        roots: list[Path] = []
-        seen = set()
-        for candidate in candidates:
-            candidate = candidate.resolve()
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            if (candidate / "jarvis_post" / "agents" / "coaching.py").exists():
-                roots.append(candidate)
+        return candidates
 
-        return roots
+    def _is_valid_jarvis_post_root(self, root: Path) -> bool:
+        """Validate that a root contains the expected local Jarvis Post package."""
+        coaching_file = root / "jarvis_post" / "agents" / "coaching.py"
+        race_analysis_file = root / "jarvis_post" / "agents" / "race_analysis.py"
+        return coaching_file.exists() and race_analysis_file.exists()
+
+    @contextmanager
+    def _temporary_sys_path(self, root: Path):
+        """Temporarily prepend a root to sys.path for controlled imports."""
+        root_str = str(root)
+        inserted = False
+        if root_str not in sys.path:
+            sys.path.insert(0, root_str)
+            inserted = True
+        try:
+            yield
+        finally:
+            if inserted:
+                try:
+                    sys.path.remove(root_str)
+                except ValueError:
+                    pass
+
+    def _load_jarvis_post_handler(self, root: Path) -> Optional[dict[str, Any]]:
+        """
+        Import Jarvis Post agent/client classes from a specific root.
+
+        Returns:
+            Normalized handler dict or None if import failed.
+        """
+        with self._temporary_sys_path(root):
+            importlib.invalidate_caches()
+            try:
+                race_module = importlib.import_module("jarvis_post.agents.race_analysis")
+                coaching_module = importlib.import_module("jarvis_post.agents.coaching")
+                race_agent_cls = getattr(race_module, "RaceAnalysisAgent", None)
+                coach_agent_cls = getattr(coaching_module, "CoachingAgent", None)
+                if not callable(race_agent_cls) or not callable(coach_agent_cls):
+                    logger.warning("Jarvis Post agent classes missing under root: %s", root)
+                    return None
+            except Exception as exc:
+                logger.warning("Failed importing Jarvis Post agents from %s: %s", root, exc)
+                return None
+
+            llm_client_cls = None
+            try:
+                client_module = importlib.import_module("jarvis_post.llm.client")
+                llm_client_cls = getattr(client_module, "HFClient", None)
+            except Exception as exc:
+                logger.warning("Jarvis Post HF client import failed from %s: %s", root, exc)
+                llm_client_cls = None
+
+            return {
+                "kind": "jarvis_post",
+                "root": root,
+                "race_agent_cls": race_agent_cls,
+                "coach_agent_cls": coach_agent_cls,
+                "llm_client_cls": llm_client_cls,
+            }
 
     def _generate_from_external(self, session: Session, lap: Lap) -> Optional[AIAnalysisResult]:
         if self._external_handler is None:
@@ -251,24 +296,6 @@ class AIPipelineBridge:
             coach_agent.analyse(coach_payload),
         )
         return analyst_raw, coach_raw
-
-    def _bootstrap_env_from_root(self, root: Path) -> None:
-        """Load local `.env` values for desktop in-process execution."""
-        env_path = root / ".env"
-        if not env_path.exists():
-            return
-        try:
-            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
-        except Exception:
-            pass
 
     def _get_postrace_hf_settings(self) -> dict[str, str]:
         """
