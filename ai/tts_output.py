@@ -2,12 +2,11 @@
 TTS Output Worker for F1 Telemetry Dashboard.
 
 Provides audio output for AI race engineer responses using:
-- IBM Watson Text-to-Speech for synthesis (cloud API)
+- Kokoro Text-to-Speech for synthesis (local, default)
 - PyAudio for audio playback (local)
 
 Supports three modes:
 - Batch mode (default): Full synthesis before playback
-- Streaming mode: Start playback while still receiving audio (~300-500ms faster)
 - Sentence pipelining mode: Speak sentence-by-sentence (~500-1000ms faster for multi-sentence)
 
 Synthesizes AI responses and plays them through the default audio output device.
@@ -16,70 +15,192 @@ Synthesizes AI responses and plays them through the default audio output device.
 import asyncio
 import io
 import logging
+import time
 import wave
-from typing import Optional
+import platform
+from pathlib import Path
+from typing import Callable, Optional
 from PyQt5 import QtCore
 import pyaudio
-import aiohttp
-
-# Streaming TTS client
-from ai.streaming_tts import StreamingTTSClient, StreamingAudioPlayer
+import numpy as np
 
 # Sentence pipelining
 from ai.sentence_pipelining import SentencePipelinedTTS
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_KOKORO_VOICE_ID = "bm_lewis"
+DEFAULT_KOKORO_LANG = "en-gb"
+DEFAULT_KOKORO_SPEED = 1.3
+DEFAULT_KOKORO_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "kokoro_cache"
 
-class SimpleTTSClient:
-    """Simple Watson TTS client with minimal dependencies."""
 
-    def __init__(self, api_key: str, service_url: str, voice: str = "en-GB_JamesV3Voice"):
-        self.api_key = api_key
-        self.service_url = service_url.rstrip("/")
-        self.voice = voice
+class KokoroTTSClient:
+    """Local Kokoro TTS client (pykokoro) with automatic model/voice caching."""
+
+    def __init__(
+        self,
+        voice_id: str = DEFAULT_KOKORO_VOICE_ID,
+        lang: str = DEFAULT_KOKORO_LANG,
+        speed: float = DEFAULT_KOKORO_SPEED,
+        use_cuda: bool = False,
+        cache_dir: str = "",
+        status_callback: Optional[Callable[[str], None]] = None,
+    ):
+        self.voice_id = (voice_id or DEFAULT_KOKORO_VOICE_ID).strip()
+        self.lang = (lang or DEFAULT_KOKORO_LANG).strip().lower()
+        self.speed = float(speed)
+        self.use_cuda = use_cuda
+        self.cache_dir = Path(cache_dir).expanduser() if cache_dir else DEFAULT_KOKORO_CACHE_DIR
+        self.status_callback = status_callback
+        self._pipeline = None
+
+    def initialize(self):
+        """
+        Initialize Kokoro pipeline.
+
+        First run downloads model/voice assets into cache automatically.
+        """
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._emit_status(f"Loading Kokoro voice '{self.voice_id}'...")
+        self._clear_stale_locks()
+
+        from pykokoro import GenerationConfig, PipelineConfig, build_pipeline
+        from pykokoro import onnx_backend as kokoro_onnx_backend
+        from pykokoro import utils as kokoro_utils
+        from pykokoro.ssmd_parser import (
+            DEFAULT_PAUSE_NONE,
+            DEFAULT_PAUSE_WEAK,
+            parse_ssmd_to_segments,
+        )
+        from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+        from pykokoro.stages.protocols import DocumentResult
+        from pykokoro.tokenizer import TokenizerConfig
+
+        class NoSpacySsmdDocumentParser(SsmdDocumentParser):
+            """Doc parser variant that forces non-spaCy sentence splitting."""
+
+            def parse(self, text: str, cfg, trace):
+                generation = cfg.generation
+                initial_pause, segments = parse_ssmd_to_segments(
+                    text,
+                    lang=generation.lang,
+                    pause_none=DEFAULT_PAUSE_NONE,
+                    pause_weak=DEFAULT_PAUSE_WEAK,
+                    pause_clause=generation.pause_clause,
+                    pause_sentence=generation.pause_sentence,
+                    pause_paragraph=generation.pause_paragraph,
+                    use_spacy=False,
+                )
+                clean_text, spans, boundaries, doc_segments = self._build_document(
+                    segments, initial_pause, trace
+                )
+                if generation.pause_mode == "auto":
+                    boundaries.extend(self._sentence_boundaries(doc_segments, boundaries))
+                return DocumentResult(
+                    clean_text=clean_text,
+                    annotation_spans=spans,
+                    boundary_events=boundaries,
+                    segments=doc_segments,
+                )
+
+        def _project_cache_path(folder: str | None = None) -> Path:
+            base = self.cache_dir.resolve()
+            base.mkdir(parents=True, exist_ok=True)
+            if folder:
+                out = base / folder
+                out.mkdir(parents=True, exist_ok=True)
+                return out
+            return base
+
+        # Force pykokoro's internal cache resolver to use project-local cache.
+        kokoro_utils.get_user_cache_path = _project_cache_path
+        kokoro_onnx_backend.get_user_cache_path = _project_cache_path
+
+        provider = "cuda" if self.use_cuda else "cpu"
+        cfg = PipelineConfig(
+            voice=self.voice_id,
+            model_source="huggingface",
+            provider=provider,
+            cache_dir=str(self.cache_dir.resolve()),
+            tokenizer_config=TokenizerConfig(
+                use_spacy=False,
+                spacy_model_size="sm",
+            ),
+            generation=GenerationConfig(
+                lang=self.lang,
+                speed=self.speed,
+                pause_mode="tts",
+            ),
+        )
+        self._pipeline = build_pipeline(
+            config=cfg,
+            eager=True,
+            doc_parser=NoSpacySsmdDocumentParser(),
+        )
+
+        # Warm up once so model downloads/locks happen during initialization.
+        self._emit_status("Preparing Kokoro models...")
+        _ = self._pipeline.run("System ready.")
+
+        logger.info(
+            "Kokoro pipeline initialized (voice=%s, lang=%s, speed=%.2f, provider=%s)",
+            self.voice_id,
+            self.lang,
+            self.speed,
+            provider,
+        )
 
     async def synthesize(self, text: str) -> bytes:
-        """Synthesize text to audio using Watson TTS."""
-        url = f"{self.service_url}/v1/synthesize"
+        """Synthesize text to WAV bytes using Kokoro."""
+        if self._pipeline is None:
+            raise RuntimeError("Kokoro pipeline is not initialized")
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._synthesize_sync, text)
 
-        headers = {
-            "Accept": "audio/wav",
-            "Content-Type": "application/json",
-        }
+    def _synthesize_sync(self, text: str) -> bytes:
+        result = self._pipeline.run(text)
+        audio = np.asarray(result.audio, dtype=np.float32)
+        audio = np.clip(audio, -1.0, 1.0)
+        audio_int16 = (audio * 32767.0).astype(np.int16)
 
-        params = {
-            "voice": self.voice,
-        }
+        with io.BytesIO() as wav_io:
+            with wave.open(wav_io, "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(int(result.sample_rate))
+                wav_file.writeframes(audio_int16.tobytes())
+            return wav_io.getvalue()
 
-        payload = {
-            "text": text,
-        }
+    def close(self):
+        if self._pipeline is not None:
+            close_fn = getattr(self._pipeline, "close", None)
+            if callable(close_fn):
+                close_fn()
+            self._pipeline = None
 
-        auth = aiohttp.BasicAuth("apikey", self.api_key)
-        timeout = aiohttp.ClientTimeout(total=10.0)
+    def _emit_status(self, message: str):
+        if self.status_callback:
+            self.status_callback(message)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(
-                url,
-                headers=headers,
-                params=params,
-                json=payload,
-                auth=auth,
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"TTS API error {response.status}: {error_text}")
-
-                return await response.read()
+    def _clear_stale_locks(self, max_age_seconds: int = 1200):
+        """Remove stale Kokoro .lock files in cache dir from interrupted downloads."""
+        now = time.time()
+        for lock_file in self.cache_dir.rglob("*.lock"):
+            try:
+                age = now - lock_file.stat().st_mtime
+                if age > max_age_seconds:
+                    lock_file.unlink(missing_ok=True)
+            except Exception:
+                continue
 
 
 class TTSOutputWorker(QtCore.QThread):
     """
     TTS output worker thread for race engineer audio.
 
-    Synthesizes AI responses using IBM Watson TTS and plays them
-    through the default audio output device.
+    Synthesizes AI responses using Kokoro only and plays them through
+    the default audio output device.
 
     Signals:
         status_update(str message) - Status messages for logging
@@ -95,39 +216,42 @@ class TTSOutputWorker(QtCore.QThread):
 
     def __init__(
         self,
-        watson_api_key: str,
-        watson_url: str,
-        voice: str = "en-GB_JamesV3Voice",
-        use_streaming: bool = False,
-        use_sentence_pipelining: bool = False
+        use_sentence_pipelining: bool = False,
+        kokoro_voice_id: str = DEFAULT_KOKORO_VOICE_ID,
+        kokoro_lang: str = DEFAULT_KOKORO_LANG,
+        kokoro_speed: float = DEFAULT_KOKORO_SPEED,
+        kokoro_use_cuda: bool = False,
+        kokoro_cache_dir: str = "",
+        playback_backend: str = "auto",
     ):
         """
         Initialize TTS output worker.
 
         Args:
-            watson_api_key: IBM Watson TTS API key
-            watson_url: Watson TTS service URL
-            voice: Watson TTS voice to use (default: British male race engineer)
-            use_streaming: Use streaming playback for lower latency (default: False)
             use_sentence_pipelining: Speak sentence-by-sentence for multi-sentence
                                      responses (~500-1000ms faster). Default: False.
+            kokoro_voice_id: Kokoro voice id (e.g., "bm_lewis", "bf_emma", "af_nova").
+            kokoro_lang: Kokoro language code (default "en-gb").
+            kokoro_speed: Kokoro speaking speed multiplier.
+            kokoro_use_cuda: Use CUDA for Kokoro if available.
+            kokoro_cache_dir: Directory for Kokoro model/voice cache.
+            playback_backend: "auto", "winsound", or "pyaudio" for local playback.
         """
         super().__init__()
 
-        self.watson_api_key = watson_api_key
-        self.watson_url = watson_url
-        self.voice = voice
-        self.use_streaming = use_streaming
+        self.kokoro_voice_id = (kokoro_voice_id or DEFAULT_KOKORO_VOICE_ID).strip()
+        self.kokoro_lang = (kokoro_lang or DEFAULT_KOKORO_LANG).strip().lower()
+        self.kokoro_speed = float(kokoro_speed)
+        self.kokoro_use_cuda = kokoro_use_cuda
+        self.kokoro_cache_dir = kokoro_cache_dir.strip()
+        self.playback_backend = playback_backend
+        self.tts_backend = "kokoro"
         self.use_sentence_pipelining = use_sentence_pipelining
 
-        # Watson TTS client (batch mode)
+        # Active TTS client
         self.tts_client = None
 
-        # Streaming TTS client and player (streaming mode)
-        self._streaming_tts_client: Optional[StreamingTTSClient] = None
-        self._streaming_player: Optional[StreamingAudioPlayer] = None
-
-        # Sentence pipelining (pipelining mode)
+        # Sentence pipelining
         self._pipelined_tts: Optional[SentencePipelinedTTS] = None
 
         # Audio playback
@@ -140,8 +264,13 @@ class TTSOutputWorker(QtCore.QThread):
         # Message queue (initialized in run() after event loop is created)
         self.message_queue: Optional[asyncio.Queue] = None
 
-        mode_str = "pipelined" if use_sentence_pipelining else ("streaming" if use_streaming else "batch")
-        logger.info(f"TTSOutputWorker initialized with voice={voice}, mode={mode_str}")
+        mode_str = "pipelined" if use_sentence_pipelining else "batch"
+        logger.info(
+            "TTSOutputWorker initialized with backend=%s voice=%s mode=%s",
+            self.tts_backend,
+            self.kokoro_voice_id,
+            mode_str,
+        )
 
     def run(self):
         """Main thread execution loop."""
@@ -156,17 +285,15 @@ class TTSOutputWorker(QtCore.QThread):
             # Create message queue (must be done AFTER event loop is set)
             self.message_queue = asyncio.Queue()
 
-            # Initialize components based on mode
+            # Initialize components
             if self.use_sentence_pipelining:
-                self._initialize_tts_client()  # Need batch client for sentence TTS
+                self._initialize_tts_client()
                 self._initialize_pipelined_tts()
-            elif self.use_streaming:
-                self._initialize_streaming_client()
             else:
                 self._initialize_tts_client()
             self._initialize_audio()
 
-            mode_str = "pipelined" if self.use_sentence_pipelining else ("streaming" if self.use_streaming else "batch")
+            mode_str = "pipelined" if self.use_sentence_pipelining else "batch"
             self.status_update.emit(f"TTS output ready ({mode_str})")
 
             # Run async processing loop
@@ -176,27 +303,32 @@ class TTSOutputWorker(QtCore.QThread):
             logger.error(f"TTS output error: {e}", exc_info=True)
             self.error_occurred.emit(f"TTS output failed: {e}")
         finally:
-            if self._event_loop:
-                self._event_loop.close()
+            self._running = False
+            loop = self._event_loop
+            self._event_loop = None
+            self.message_queue = None
+            if loop:
+                loop.close()
             self._cleanup()
             self.status_update.emit("TTS output stopped")
 
     def _initialize_tts_client(self):
-        """Initialize Watson TTS client."""
+        """Initialize Kokoro TTS client."""
         try:
-            self.status_update.emit("Connecting to IBM Watson TTS...")
-
-            self.tts_client = SimpleTTSClient(
-                api_key=self.watson_api_key,
-                service_url=self.watson_url,
-                voice=self.voice
+            self.status_update.emit("Initializing Kokoro TTS...")
+            self.tts_client = KokoroTTSClient(
+                voice_id=self.kokoro_voice_id,
+                lang=self.kokoro_lang,
+                speed=self.kokoro_speed,
+                use_cuda=self.kokoro_use_cuda,
+                cache_dir=self.kokoro_cache_dir,
+                status_callback=self.status_update.emit,
             )
-
-            logger.info("Watson TTS client initialized")
-
+            self.tts_client.initialize()
+            logger.info("Kokoro TTS client initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize Watson TTS: {e}", exc_info=True)
-            raise RuntimeError(f"Watson TTS initialization failed: {e}")
+            logger.error("Failed to initialize Kokoro TTS: %s", e, exc_info=True)
+            raise RuntimeError(f"Kokoro TTS initialization failed: {e}")
 
     def _initialize_audio(self):
         """Initialize audio output."""
@@ -223,11 +355,9 @@ class TTSOutputWorker(QtCore.QThread):
 
                 logger.info(f"Synthesizing TTS for: {message[:50]}...")
 
-                # Use pipelined, streaming, or batch mode
+                # Use pipelined or batch mode.
                 if self.use_sentence_pipelining:
                     await self._synthesize_and_play_pipelined(message)
-                elif self.use_streaming:
-                    await self._synthesize_and_play_streaming(message)
                 else:
                     await self._synthesize_and_play(message)
 
@@ -247,7 +377,6 @@ class TTSOutputWorker(QtCore.QThread):
             text: Text to synthesize and play
         """
         try:
-            # Synthesize using Watson TTS
             self.status_update.emit("Synthesizing speech...")
             audio_bytes = await self.tts_client.synthesize(text)
 
@@ -285,6 +414,24 @@ class TTSOutputWorker(QtCore.QThread):
             audio_bytes: WAV audio data
         """
         try:
+            backend = self.playback_backend.lower().strip()
+            if backend not in {"auto", "winsound", "pyaudio"}:
+                backend = "auto"
+
+            should_use_winsound = (
+                platform.system().lower().startswith("win")
+                and backend in {"auto", "winsound"}
+            )
+            if should_use_winsound:
+                try:
+                    import winsound
+                    winsound.PlaySound(audio_bytes, winsound.SND_MEMORY)
+                    return
+                except Exception:
+                    if backend == "winsound":
+                        raise
+                    logger.warning("winsound playback failed, falling back to PyAudio", exc_info=True)
+
             # Parse WAV file
             with io.BytesIO(audio_bytes) as wav_io:
                 with wave.open(wav_io, 'rb') as wav_file:
@@ -325,20 +472,43 @@ class TTSOutputWorker(QtCore.QThread):
             text: Text to speak
         """
         logger.info(f"[TTS] speak() called with: {text[:50]}...")
-        logger.info(f"[TTS] _event_loop={self._event_loop}, _running={self._running}, text.strip()={bool(text.strip())}")
+        loop = self._event_loop
+        text_ok = bool(text and text.strip())
+        loop_running = bool(loop and loop.is_running() and not loop.is_closed())
+        queue_ready = self.message_queue is not None
+        thread_running = self._running and self.isRunning()
 
-        if self._event_loop and self._running and text.strip():
-            logger.info(f"[TTS] Queueing message for TTS: {text}")
-            # Thread-safe: put message in queue
+        logger.info(
+            "[TTS] thread_running=%s loop_running=%s queue_ready=%s text_ok=%s",
+            thread_running,
+            loop_running,
+            queue_ready,
+            text_ok,
+        )
+
+        if not (thread_running and loop_running and queue_ready and text_ok):
+            logger.warning("[TTS] Message NOT queued - worker not ready")
+            return
+
+        logger.info(f"[TTS] Queueing message for TTS: {text}")
+        try:
+            # Thread-safe: put message in queue.
             asyncio.run_coroutine_threadsafe(
                 self.message_queue.put(text),
-                self._event_loop
+                loop,
             )
-        else:
-            logger.warning(f"[TTS] Message NOT queued - conditions not met")
+        except RuntimeError as e:
+            # Can happen during shutdown races; do not crash caller thread.
+            logger.warning("[TTS] Failed to queue message during shutdown: %s", e)
 
     def _cleanup(self):
         """Clean up audio resources."""
+        if self.tts_client and hasattr(self.tts_client, "close"):
+            try:
+                self.tts_client.close()
+            except Exception:
+                pass
+
         if self.audio:
             try:
                 self.audio.terminate()
@@ -351,103 +521,6 @@ class TTSOutputWorker(QtCore.QThread):
         """Stop the TTS output worker."""
         logger.info("Stopping TTS output...")
         self._running = False
-
-        # Stop streaming player if active
-        if self._streaming_player and self._streaming_player.is_playing:
-            self._streaming_player.stop()
-
-    # =========================================================================
-    # STREAMING MODE METHODS
-    # =========================================================================
-
-    def _initialize_streaming_client(self):
-        """Initialize the streaming TTS client."""
-        try:
-            self.status_update.emit("Initializing streaming TTS...")
-
-            self._streaming_tts_client = StreamingTTSClient(
-                api_key=self.watson_api_key,
-                service_url=self.watson_url,
-                voice=self.voice
-            )
-
-            # Set up callbacks
-            self._streaming_tts_client.on_synthesis_start(self._on_streaming_start)
-            self._streaming_tts_client.on_audio_chunk(self._on_audio_chunk)
-            self._streaming_tts_client.on_synthesis_complete(self._on_streaming_complete)
-            self._streaming_tts_client.on_error(self._on_streaming_error)
-
-            # Initialize streaming player
-            self._streaming_player = StreamingAudioPlayer()
-
-            logger.info("Streaming TTS client initialized")
-
-        except Exception as e:
-            logger.error(f"Failed to initialize streaming TTS: {e}", exc_info=True)
-            raise RuntimeError(f"Streaming TTS initialization failed: {e}")
-
-    async def _synthesize_and_play_streaming(self, text: str):
-        """
-        Synthesize and play using streaming mode.
-
-        Starts playback as soon as first audio chunk arrives,
-        rather than waiting for full synthesis.
-
-        Args:
-            text: Text to synthesize and play
-        """
-        try:
-            self.status_update.emit("Streaming synthesis...")
-
-            # Start the streaming player (will be configured when first chunk arrives)
-            # Using Watson TTS default format: 22050Hz, mono, 16-bit
-            self._streaming_player.start(
-                sample_rate=22050,
-                channels=1,
-                sample_width=2
-            )
-
-            # Start streaming synthesis (callbacks handle playback)
-            await self._streaming_tts_client.synthesize_stream(text)
-
-        except Exception as e:
-            logger.error(f"Streaming TTS error: {e}", exc_info=True)
-            self.error_occurred.emit(f"Streaming TTS error: {e}")
-        finally:
-            # Ensure player is stopped
-            if self._streaming_player:
-                self._streaming_player.stop()
-
-    def _on_streaming_start(self):
-        """Callback when streaming synthesis starts."""
-        logger.info("[TTS Streaming] Synthesis started")
-        self.playback_started.emit()
-        self.status_update.emit("Playing (streaming)...")
-
-    def _on_audio_chunk(self, chunk: bytes):
-        """
-        Callback for each audio chunk received.
-
-        Args:
-            chunk: Audio data bytes
-        """
-        if self._streaming_player and self._streaming_player.is_playing:
-            self._streaming_player.play_chunk(chunk)
-
-    def _on_streaming_complete(self):
-        """Callback when streaming synthesis completes."""
-        logger.info("[TTS Streaming] Synthesis complete")
-        self.playback_finished.emit()
-
-    def _on_streaming_error(self, error: str):
-        """
-        Callback for streaming errors.
-
-        Args:
-            error: Error message
-        """
-        logger.error(f"[TTS Streaming] Error: {error}")
-        self.error_occurred.emit(f"Streaming TTS error: {error}")
 
     # =========================================================================
     # SENTENCE PIPELINING MODE METHODS
@@ -503,7 +576,6 @@ class TTSOutputWorker(QtCore.QThread):
             sentence: Single sentence to synthesize and play
         """
         try:
-            # Synthesize using Watson TTS
             audio_bytes = await self.tts_client.synthesize(sentence)
 
             logger.debug(f"Synthesized sentence ({len(audio_bytes)} bytes): {sentence[:30]}...")

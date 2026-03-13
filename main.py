@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-F1 Telemetry Dashboard - Main Entry Point
+Jarvis F1 Telemetry Suite - Main Entry Point
 
-Real-time telemetry visualization and AI race engineering for sim racing.
-Supports Assetto Corsa.
+Unified launcher for:
+- Jarvis Live: Real-time telemetry visualization and AI race engineering
+- Jarvis Post: Post-race session analysis with AI coaching
 
 Usage:
-    python main.py      # Opens launcher GUI for configuration
+    python main.py      # Opens unified launcher
 """
 import sys
 import os
 import logging
+import threading
 
 # Import torch BEFORE PyQt5 to avoid DLL conflict on Windows
 # (PyQt5 changes DLL search paths, breaking torch's c10.dll loading)
@@ -19,7 +21,7 @@ try:
 except ImportError:
     pass
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 
 # Configure logging FIRST - before any other imports
 logging.basicConfig(
@@ -34,7 +36,7 @@ logging.getLogger("matplotlib").setLevel(logging.ERROR)
 from dotenv import load_dotenv
 load_dotenv()
 
-logger.info("F1 Telemetry Dashboard starting")
+logger.info("Jarvis F1 Telemetry Suite starting")
 
 # Import UI
 from ui.main_window import MainWindow
@@ -90,13 +92,92 @@ except ImportError as e:
 
 logger.info("All core modules imported")
 
+_prewarm_started = False
+KOKORO_VOICE_ID = "bm_lewis"
+KOKORO_LANG = "en-gb"
+KOKORO_SPEED = 1.3
+KOKORO_USE_CUDA = False
 
-def main(settings: dict):
+
+def _should_prewarm_models() -> bool:
+    """Whether to run background model prewarm at startup."""
+    val = os.getenv("PREWARM_MODELS_ON_START", "1").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+
+def _start_background_model_prewarm(_settings: dict):
+    """Prewarm STT/TTS model caches in background while user is in launcher."""
+    global _prewarm_started
+    if _prewarm_started or not _should_prewarm_models():
+        return
+
+    _prewarm_started = True
+
+    def _worker():
+        prewarm_stt = True
+        prewarm_tts = True
+        try:
+            # Run cache checks inside the worker so launcher creation is never
+            # blocked by optional model imports (e.g., faster_whisper).
+            try:
+                from ai.model_prewarm import needs_faster_whisper_prewarm, needs_kokoro_prewarm
+
+                prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
+                prewarm_tts = needs_kokoro_prewarm()
+            except Exception as e:
+                logger.warning(
+                    "Could not inspect model cache state, falling back to full prewarm: %s",
+                    e,
+                )
+
+            if not prewarm_stt and not prewarm_tts:
+                logger.info("Background model prewarm skipped (all required caches already warm)")
+                return
+
+            from ai.model_prewarm import prewarm_faster_whisper, prewarm_kokoro
+
+            logger.info(
+                "Background model prewarm started (stt=%s, tts=%s)",
+                prewarm_stt,
+                prewarm_tts,
+            )
+
+            if prewarm_stt:
+                try:
+                    prewarm_faster_whisper(model_size="base")
+                    logger.info("Background prewarm: faster-whisper ready")
+                except Exception as e:
+                    logger.warning("Background prewarm: faster-whisper failed: %s", e)
+            else:
+                logger.info("Background prewarm: faster-whisper skipped (cache warm)")
+
+            if prewarm_tts:
+                try:
+                    prewarm_kokoro(
+                        voice_id=KOKORO_VOICE_ID,
+                        lang=KOKORO_LANG,
+                        speed=KOKORO_SPEED,
+                        use_cuda=KOKORO_USE_CUDA,
+                    )
+                    logger.info("Background prewarm: Kokoro ready")
+                except Exception as e:
+                    logger.warning("Background prewarm: Kokoro failed: %s", e)
+            else:
+                logger.info("Background prewarm: Kokoro skipped (cache warm)")
+
+            logger.info("Background model prewarm finished")
+        except Exception as e:
+            logger.warning("Background prewarm initialization failed: %s", e)
+
+    threading.Thread(target=_worker, name="model-prewarm", daemon=True).start()
+
+
+def run_jarvis_live(settings: dict):
     """
-    Entry point for the telemetry dashboard.
+    Launch Jarvis Live - real-time telemetry dashboard.
 
     Args:
-        settings: Configuration dict from the launcher (or CLI defaults).
+        settings: Configuration dict from the launcher.
     """
     game = "ac"
     enable_ai = settings.get("ai_enabled", False)
@@ -107,18 +188,13 @@ def main(settings: dict):
     credential_map = {
         "HUGGINGFACE_TOKEN": "huggingface_token",
         "HUGGINGFACE_MODEL_ID": "huggingface_model_id",
-        "WATSON_STT_API_KEY": "watson_stt_api_key",
-        "WATSON_STT_URL": "watson_stt_url",
-        "WATSON_TTS_API_KEY": "watson_tts_api_key",
-        "WATSON_TTS_URL": "watson_tts_url",
     }
     for env_key, settings_key in credential_map.items():
         val = settings.get(settings_key, "")
         if val:
             os.environ[env_key] = val
 
-    logger.info("Starting dashboard for: %s", game.upper())
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    logger.info("Starting Jarvis Live for: %s", game.upper())
 
     window = MainWindow()
 
@@ -135,9 +211,6 @@ def main(settings: dict):
     telemetry_thread.lap_completed.connect(window.handle_lap_complete)
     telemetry_thread.status_update.connect(lambda msg: logger.info("Status: %s", msg))
 
-    # Connect telemetry signals to UI (real-time, critical path)
-    # IMPORTANT: UI visualization must receive ALL samples at full 60Hz rate
-    # for smooth graphs and track map updates. Never throttle these connections.
     if hasattr(telemetry_thread, 'session_info_update'):
         telemetry_thread.session_info_update.connect(window.update_session_info)
     if hasattr(telemetry_thread, 'live_data_update'):
@@ -151,17 +224,13 @@ def main(settings: dict):
     ai_thread = None
     voice_thread = None
     tts_thread = None
+    tts_runtime = {"worker": None, "restarting": False}
+    ptt_controller = None
     if enable_ai and AI_AVAILABLE:
         logger.info("Initializing AI Race Engineer")
 
-        # Load LLM credentials from environment (Hugging Face)
-        # Prefer HUGGINGFACE_TOKEN, fall back to HUGGINGFACE_API_KEY if set
         huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HUGGINGFACE_API_KEY", "")
         huggingface_model_id = os.getenv("HUGGINGFACE_MODEL_ID", "")
-        watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
-        watson_stt_url = os.getenv("WATSON_STT_URL", "")
-        watson_tts_api_key = os.getenv("WATSON_TTS_API_KEY", "")
-        watson_tts_url = os.getenv("WATSON_TTS_URL", "")
 
         if not huggingface_token or not huggingface_model_id:
             logger.warning("AI Race Engineer requires HUGGINGFACE_TOKEN and HUGGINGFACE_MODEL_ID in .env")
@@ -175,49 +244,38 @@ def main(settings: dict):
                     verbosity="moderate"
                 )
 
-                # Connect AI signals
                 ai_thread.ai_commentary.connect(window.handle_ai_commentary)
                 ai_thread.driver_query_received.connect(window.handle_driver_query)
                 ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
 
-                # Connect telemetry to AI worker with throttling
-                # AI doesn't need 60Hz telemetry - throttle to ~5Hz to avoid delays
-                ai_sample_counter = [0]  # Mutable counter for lambda
-                AI_SAMPLE_RATE = 12  # Process every 12th sample (60Hz / 12 = 5Hz)
+                ai_sample_counter = [0]
+                AI_SAMPLE_RATE = 12
 
                 def throttled_ai_telemetry(sample):
-                    """Send telemetry to AI at reduced rate to prevent delays."""
                     ai_sample_counter[0] += 1
                     if ai_sample_counter[0] >= AI_SAMPLE_RATE:
                         ai_sample_counter[0] = 0
-                        # Process in background - never block UI thread
                         try:
                             ai_thread.process_telemetry(sample)
                         except Exception:
-                            # Silently ignore AI processing errors to not affect visualization
                             pass
 
                 if hasattr(telemetry_thread, 'realtime_sample'):
                     telemetry_thread.realtime_sample.connect(throttled_ai_telemetry)
 
-                # Keep AI informed of AC status (on track / in menu / paused)
                 if hasattr(telemetry_thread, 'live_data_update'):
                     def on_live_data_for_ai(data: dict):
-                        # AC provides ac_status; ACC does not. Treat ACC as on-track.
                         if "ac_status" in data:
                             ai_thread.update_ac_status(data.get("ac_status", 0))
                         else:
                             ai_thread.update_ac_status(2)
 
-                    telemetry_thread.live_data_update.connect(
-                        on_live_data_for_ai
-                    )
+                    telemetry_thread.live_data_update.connect(on_live_data_for_ai)
 
-                # Start AI thread
                 ai_thread.start()
                 logger.info("AI Race Engineer started")
 
-                # Initialize voice input (if available and not disabled)
+                # Initialize voice input
                 voice_mode_setting = settings.get("voice_mode", "disabled")
                 if VOICE_AVAILABLE and voice_mode_setting != "disabled":
                     voice_mode = "PTT" if enable_ptt else "VAD"
@@ -227,88 +285,114 @@ def main(settings: dict):
                             whisper_model_size="base",
                             ptt_mode=enable_ptt
                         )
-
-                        # Connect voice signals
                         voice_thread.speech_detected.connect(ai_thread.process_driver_query)
                         voice_thread.vad_state_changed.connect(window.handle_vad_state_change)
                         voice_thread.status_update.connect(lambda msg: logger.info("Voice: %s", msg))
                         voice_thread.error_occurred.connect(lambda err: logger.error("Voice: %s", err))
-
-                        # Start voice thread
                         voice_thread.start()
                         logger.info("Voice Input started (%s mode)", voice_mode)
-
                     except Exception as e:
                         logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
                         voice_thread = None
-                else:
-                    logger.warning("Voice Input module not available (missing dependencies)")
 
-                # Initialize PTT controller (if PTT mode enabled)
-                ptt_controller = None
+                # Initialize PTT controller
                 if enable_ptt and voice_thread and PTT_AVAILABLE:
-                    ptt_button_index = 11  # Default: Thrustmaster T128X RSB
+                    ptt_button_index = 11
                     logger.info("Initializing PTT Controller (button index=%d)", ptt_button_index)
                     try:
-                        ptt_controller = PTTController(
-                            joystick_button_index=ptt_button_index
-                        )
-
-                        # Connect PTT signals to voice worker
+                        ptt_controller = PTTController(joystick_button_index=ptt_button_index)
                         ptt_controller.ptt_pressed.connect(voice_thread.start_recording)
                         ptt_controller.ptt_released.connect(voice_thread.stop_recording)
                         ptt_controller.status_update.connect(lambda msg: logger.info("PTT: %s", msg))
-
-                        # Start PTT monitoring
                         ptt_controller.start()
                         logger.info("PTT Controller started")
-
                     except Exception as e:
                         logger.error("Failed to initialize PTT Controller: %s", e, exc_info=True)
                         ptt_controller = None
-                elif enable_ptt and not PTT_AVAILABLE:
-                    logger.warning("PTT requested but pynput not available. Install with: pip install pynput")
-                elif enable_ptt and not voice_thread:
-                    logger.warning("PTT requested but voice input failed to initialize")
 
-                # Initialize TTS output (if available and credentials present)
-                if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
-                    logger.info("Initializing TTS Output (sentence pipelining mode)")
+                # Initialize TTS output (Kokoro local TTS)
+                if TTS_AVAILABLE and voice_mode_setting != "disabled":
+                    logger.info(
+                        "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s, speed=%.2f)",
+                        KOKORO_VOICE_ID,
+                        KOKORO_SPEED,
+                    )
                     try:
-                        tts_thread = TTSOutputWorker(
-                            watson_api_key=watson_tts_api_key,
-                            watson_url=watson_tts_url,
-                            voice="en-GB_JamesV3Voice",  # British male race engineer
-                            use_sentence_pipelining=True  # Latency optimization: ~500-1000ms savings
-                        )
+                        def _build_tts_worker() -> TTSOutputWorker:
+                            worker = TTSOutputWorker(
+                                use_sentence_pipelining=True,
+                                kokoro_voice_id=KOKORO_VOICE_ID,
+                                kokoro_lang=KOKORO_LANG,
+                                kokoro_speed=KOKORO_SPEED,
+                                kokoro_use_cuda=KOKORO_USE_CUDA,
+                            )
+                            worker.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
+                            worker.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
+                            worker.finished.connect(lambda: logger.warning("TTS worker stopped"))
+                            if voice_thread:
+                                worker.playback_started.connect(voice_thread.pause)
+                                worker.playback_finished.connect(voice_thread.resume)
+                            return worker
 
-                        # Connect TTS signals
-                        tts_thread.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
-                        tts_thread.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
+                        def _ensure_tts_worker_running(reason: str) -> bool:
+                            if tts_runtime["restarting"]:
+                                return False
+                            worker = tts_runtime["worker"]
+                            if worker and worker.isRunning():
+                                return True
 
-                        # Connect AI commentary to TTS playback
+                            tts_runtime["restarting"] = True
+                            try:
+                                worker = _build_tts_worker()
+                                tts_runtime["worker"] = worker
+                                worker.start()
+                                logger.info("TTS worker started (%s)", reason)
+                                return True
+                            except Exception as e:
+                                logger.error("Failed to start TTS worker (%s): %s", reason, e, exc_info=True)
+                                tts_runtime["worker"] = None
+                                return False
+                            finally:
+                                tts_runtime["restarting"] = False
+
+                        def _speak_with_retry(message: str, retries_left: int = 6):
+                            worker = tts_runtime["worker"]
+                            if worker and worker.isRunning():
+                                worker.speak(message)
+                                return
+
+                            if not _ensure_tts_worker_running("auto-restart"):
+                                if retries_left <= 0:
+                                    logger.error("Dropping TTS message after failed restart: %s", message[:80])
+                                    return
+                                QtCore.QTimer.singleShot(
+                                    200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                                )
+                                return
+
+                            if retries_left <= 0:
+                                logger.error("Dropping TTS message; worker never became ready: %s", message[:80])
+                                return
+
+                            QtCore.QTimer.singleShot(
+                                200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                            )
+
                         def on_ai_commentary_for_tts(msg, trigger, priority):
-                            logger.debug("AI commentary for TTS: %s...", msg[:50])
-                            tts_thread.speak(msg)
+                            _speak_with_retry(msg)
 
                         ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
 
-                        # Pause voice input during TTS playback to prevent echo/feedback
-                        if voice_thread:
-                            tts_thread.playback_started.connect(voice_thread.pause)
-                            tts_thread.playback_finished.connect(voice_thread.resume)
-
-                        # Start TTS thread
-                        tts_thread.start()
-                        logger.info("TTS Output started")
-
+                        if _ensure_tts_worker_running("initialization"):
+                            tts_thread = tts_runtime["worker"]
+                            logger.info("TTS Output started")
+                        else:
+                            tts_thread = None
                     except Exception as e:
                         logger.error("Failed to initialize TTS Output: %s", e, exc_info=True)
                         tts_thread = None
-                elif TTS_AVAILABLE:
-                    logger.warning("TTS Output requires WATSON_TTS_API_KEY and WATSON_TTS_URL in .env")
-                else:
-                    logger.warning("TTS Output module not available (missing dependencies)")
+                elif not TTS_AVAILABLE and voice_mode_setting != "disabled":
+                    logger.warning("Voice mode enabled but TTS module is unavailable")
 
             except Exception as e:
                 logger.error("Failed to initialize AI Race Engineer: %s", e, exc_info=True)
@@ -318,57 +402,43 @@ def main(settings: dict):
 
     # Initialize session recorder (optional)
     recorder_thread = None
-    current_lap_number = [0]  # Track current lap in list (mutable for lambda)
-    session_info = {"track": "", "car": "", "player": ""}  # Store session metadata
+    current_lap_number = [0]
+    session_info = {"track": "", "car": "", "player": ""}
 
     if RECORDER_AVAILABLE:
         logger.info("Initializing Session Recorder")
         try:
             recorder_thread = SessionRecorder(db_path="data/telemetry_sessions.db")
-
-            # Connect recorder signals
             recorder_thread.status_update.connect(lambda msg: logger.info("Recorder: %s", msg))
             recorder_thread.error_occurred.connect(lambda err: logger.error("Recorder: %s", err))
-
-            # Start recorder thread
             recorder_thread.start()
 
-            # Helper to start session when we get session info
             def on_session_info(info: dict):
-                """Start recording session when we get track/car info."""
                 session_info["track"] = info.get("track", "")
-                session_info["car"] = info.get("car_model", "")  # AC sends "car_model"
-                session_info["player"] = info.get("player_name", "")  # AC sends "player_name"
-
-                # Start recording session
+                session_info["car"] = info.get("car_model", "")
+                session_info["player"] = info.get("player_name", "")
                 if recorder_thread and not recorder_thread.session_id:
                     recorder_thread.start_session(
                         game=game,
                         track_name=session_info["track"],
                         car_model=session_info["car"],
                         player_name=session_info["player"],
-                        ai_enabled=enable_ai
+                        ai_enabled=enable_ai,
+                        session_type=info.get("session_type", "")
                     )
 
-            # Connect to session info update
             if hasattr(telemetry_thread, 'session_info_update'):
                 telemetry_thread.session_info_update.connect(on_session_info)
 
-            # Record telemetry samples
             if hasattr(telemetry_thread, 'realtime_sample'):
                 telemetry_thread.realtime_sample.connect(
                     lambda sample: recorder_thread.record_telemetry_sample(sample)
                 )
 
-            # Record completed laps
             def on_lap_complete(lap_id: int, samples: list):
-                """Record lap completion with statistics."""
                 if not samples:
                     return
-
                 current_lap_number[0] = lap_id
-
-                # Calculate lap statistics
                 lap_start_t = samples[0].get("t", 0.0)
                 lap_end_t = samples[-1].get("t", 0.0)
                 lap_time = max(0.0, lap_end_t - lap_start_t)
@@ -376,11 +446,16 @@ def main(settings: dict):
                 avg_speed = sum(speeds) / len(speeds) if speeds else 0.0
                 max_speed = max(speeds) if speeds else 0.0
                 min_speed = min(speeds) if speeds else 0.0
+                fuel_start = samples[0].get("fuel", 0.0)
+                fuel_end = samples[-1].get("fuel", 0.0)
 
-                fuel_start = samples[0].get("fuel", 0.0) if samples else 0.0
-                fuel_end = samples[-1].get("fuel", 0.0) if samples else 0.0
+                # NOTE: per-sample lap_valid (based on gfx.lastTimeMs) is
+                # unreliable — lastTimeMs only updates AFTER a lap completes,
+                # so during the first lap it's always 0 making every sample
+                # "invalid".  Default to valid=True; the AC backend already
+                # logs the correct lastTimeMs at the moment of completion.
+                lap_valid = True
 
-                # Record lap
                 if recorder_thread:
                     recorder_thread.record_lap(
                         lap_number=lap_id,
@@ -390,15 +465,13 @@ def main(settings: dict):
                         avg_speed=avg_speed,
                         max_speed=max_speed,
                         min_speed=min_speed,
-                        valid=True
+                        valid=lap_valid
                     )
 
             telemetry_thread.lap_completed.connect(on_lap_complete)
 
-            # Record AI commentary (if AI enabled)
             if ai_thread:
                 def on_ai_commentary(message: str, trigger: str, priority: str):
-                    """Record AI commentary."""
                     if recorder_thread:
                         recorder_thread.record_ai_commentary(
                             message=message,
@@ -409,35 +482,28 @@ def main(settings: dict):
 
                 ai_thread.ai_commentary.connect(on_ai_commentary)
 
-            # Record voice queries (if voice enabled)
             if voice_thread and ai_thread:
-                # Track query/response pairs
-                last_query = [""]  # Mutable for lambda
+                last_query = [""]
 
                 def on_driver_query(query: str):
-                    """Store driver query for later pairing with response."""
                     last_query[0] = query
 
                 def on_query_response(message: str, trigger: str, priority: str):
-                    """Record voice query/response pair."""
                     if recorder_thread and last_query[0] and trigger == "driver_query":
                         recorder_thread.record_voice_query(
                             query_text=last_query[0],
                             response_text=message,
                             lap_number=current_lap_number[0]
                         )
-                        last_query[0] = ""  # Clear after recording
+                        last_query[0] = ""
 
                 ai_thread.driver_query_received.connect(on_driver_query)
                 ai_thread.ai_commentary.connect(on_query_response)
 
             logger.info("Session Recorder started")
-
         except Exception as e:
             logger.error("Failed to initialize Session Recorder: %s", e, exc_info=True)
             recorder_thread = None
-    else:
-        logger.warning("Session Recorder module not available")
 
     # Start telemetry thread
     logger.info("Starting telemetry worker thread")
@@ -454,22 +520,23 @@ def main(settings: dict):
     if tts_thread:
         mode_parts.append("TTS Output")
     if mode_parts:
-        logger.info("Dashboard ready — %s active", " + ".join(mode_parts))
+        logger.info("Jarvis Live ready - %s active", " + ".join(mode_parts))
     else:
-        logger.info("Dashboard ready — telemetry only")
+        logger.info("Jarvis Live ready - telemetry only")
 
     if recorder_thread:
-        logger.info("Session Recording enabled — all data saved to database")
+        logger.info("Session Recording enabled - all data saved to database")
 
-    # Run Qt event loop
-    result = app.exec_()
+    # Run Qt event loop (blocks until window is closed)
+    app = QtWidgets.QApplication.instance()
+    app.exec_()
 
     # Clean shutdown
-    logger.info("Shutting down...")
+    logger.info("Shutting down Jarvis Live...")
 
     try:
         telemetry_thread.stop()
-        telemetry_thread.wait(2000)  # 2 second timeout
+        telemetry_thread.wait(2000)
     except Exception as e:
         logger.warning("Error stopping telemetry thread: %s", e)
 
@@ -487,19 +554,17 @@ def main(settings: dict):
         except Exception as e:
             logger.warning("Error stopping voice thread: %s", e)
 
-    # Stop PTT controller (if it was initialized)
-    try:
-        if ptt_controller:
-            ptt_controller.stop()
-    except NameError:
-        pass  # ptt_controller not defined (AI not enabled)
-    except Exception as e:
-        logger.warning("Error stopping PTT controller: %s", e)
-
-    if tts_thread:
+    if ptt_controller:
         try:
-            tts_thread.stop()
-            tts_thread.wait(2000)
+            ptt_controller.stop()
+        except Exception as e:
+            logger.warning("Error stopping PTT controller: %s", e)
+
+    active_tts_worker = tts_runtime["worker"] if tts_runtime["worker"] else tts_thread
+    if active_tts_worker:
+        try:
+            active_tts_worker.stop()
+            active_tts_worker.wait(2000)
         except Exception as e:
             logger.warning("Error stopping TTS thread: %s", e)
 
@@ -510,31 +575,111 @@ def main(settings: dict):
         except Exception as e:
             logger.warning("Error stopping recorder thread: %s", e)
 
-    logger.info("Goodbye!")
-    sys.exit(result)
+    logger.info("Jarvis Live shutdown complete")
+
+
+def run_jarvis_post(session_id: int):
+    """
+    Launch Jarvis Post - post-race telemetry analysis.
+
+    Args:
+        session_id: Session ID to export and analyze.
+    """
+    from data.session_exporter import SessionExporter
+    from ui.post_race import LapViewerWindow
+
+    logger.info("Starting Jarvis Post for session %d", session_id)
+
+    # Export session from SQLite to CSV
+    exporter = SessionExporter()
+    try:
+        export_dir = exporter.export_session(session_id)
+        logger.info("Session exported to: %s", export_dir)
+    except Exception as e:
+        logger.error("Failed to export session: %s", e)
+        QtWidgets.QMessageBox.critical(
+            None, "Export Error",
+            f"Failed to export session {session_id}:\n{str(e)}"
+        )
+        return
+
+    # Launch post-race viewer
+    window = LapViewerWindow()
+    window.show()
+
+    # Load the exported session
+    window.load_session_from_file(export_dir)
+
+    # Run Qt event loop (blocks until window is closed)
+    app = QtWidgets.QApplication.instance()
+    app.exec_()
+
+    logger.info("Jarvis Post shutdown complete")
 
 
 if __name__ == "__main__":
-    # Show launcher GUI for configuration
+    from ui.unified_launcher import UnifiedLauncher
     from ui.launcher import LauncherWindow
+    from ui.session_picker import SessionPickerDialog
+    from ui.config_manager import load_config
 
-    launch_app = QtWidgets.QApplication(sys.argv)
-    launcher = LauncherWindow()
-    launcher.exec_()
+    app = QtWidgets.QApplication(sys.argv)
 
-    if not launcher.was_accepted():
-        sys.exit(0)
+    # Load custom fonts (Bebas Neue, Rajdhani) before any UI is shown
+    from ui.styles import load_fonts
+    load_fonts()
 
-    settings = launcher.get_settings()
-    logger.info(
-        "AI: %s | Voice: %s | PTT key: %s",
-        settings.get("ai_enabled"),
-        settings.get("voice_mode"),
-        settings.get("ptt_key"),
-    )
+    # Load saved settings once
+    settings = load_config()
+    _start_background_model_prewarm(settings)
 
-    try:
-        main(settings)
-    except Exception as e:
-        logger.critical("Fatal error: %s", e, exc_info=True)
-        sys.exit(1)
+    while True:
+        # Show unified launcher
+        launcher = UnifiedLauncher()
+        launcher.exec_()
+        action = launcher.get_action()
+
+        if action == UnifiedLauncher.ACTION_QUIT:
+            break
+
+        elif action == UnifiedLauncher.ACTION_LIVE:
+            # Launch Jarvis Live with current settings
+            logger.info("User chose: Start Jarvis Live")
+            try:
+                run_jarvis_live(settings)
+            except Exception as e:
+                logger.critical("Jarvis Live error: %s", e, exc_info=True)
+            # After live window closes, loop back to launcher
+
+        elif action == UnifiedLauncher.ACTION_POST:
+            # Show session picker
+            logger.info("User chose: Start Jarvis Post")
+            picker = SessionPickerDialog()
+            picker.exec_()
+
+            if picker.was_accepted():
+                session_id = picker.get_selected_session_id()
+                logger.info("Selected session: %d", session_id)
+                try:
+                    run_jarvis_post(session_id)
+                except Exception as e:
+                    logger.critical("Jarvis Post error: %s", e, exc_info=True)
+            # After post window closes (or picker cancelled), loop back to launcher
+
+        elif action == UnifiedLauncher.ACTION_SETTINGS:
+            # Show settings dialog (reuse existing LauncherWindow)
+            logger.info("User chose: Settings")
+            settings_dialog = LauncherWindow()
+            settings_dialog.exec_()
+
+            if settings_dialog.was_accepted():
+                settings = settings_dialog.get_settings()
+                logger.info(
+                    "Settings updated - AI: %s | Voice: %s",
+                    settings.get("ai_enabled"),
+                    settings.get("voice_mode"),
+                )
+            # Loop back to launcher
+
+    logger.info("Goodbye!")
+    sys.exit(0)

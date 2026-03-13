@@ -76,6 +76,50 @@ class TirePressure(BaseModel):
         return v
 
 
+class WheelSlip(BaseModel):
+    """
+    Wheel slip ratios for all four corners.
+
+    Attributes:
+        fl: Front-left wheel slip
+        fr: Front-right wheel slip
+        rl: Rear-left wheel slip
+        rr: Rear-right wheel slip
+    """
+    fl: float = Field(..., description="Front-left wheel slip ratio")
+    fr: float = Field(..., description="Front-right wheel slip ratio")
+    rl: float = Field(..., description="Rear-left wheel slip ratio")
+    rr: float = Field(..., description="Rear-right wheel slip ratio")
+
+
+class SuspensionTravel(BaseModel):
+    """
+    Suspension travel for all four corners (in meters).
+
+    Attributes:
+        fl: Front-left suspension travel
+        fr: Front-right suspension travel
+        rl: Rear-left suspension travel
+        rr: Rear-right suspension travel
+    """
+    fl: float = Field(..., description="Front-left suspension travel (m)")
+    fr: float = Field(..., description="Front-right suspension travel (m)")
+    rl: float = Field(..., description="Rear-left suspension travel (m)")
+    rr: float = Field(..., description="Rear-right suspension travel (m)")
+
+
+class RideHeight(BaseModel):
+    """
+    Ride height measurements (in meters).
+
+    Attributes:
+        front: Front ride height
+        rear: Rear ride height
+    """
+    front: float = Field(..., description="Front ride height (m)")
+    rear: float = Field(..., description="Rear ride height (m)")
+
+
 class GForces(BaseModel):
     """
     G-force measurements.
@@ -155,6 +199,11 @@ class TelemetryData(BaseModel):
         default=None,
         description="Other cars in the same session (lightweight context only)",
     )
+
+    # Suspension and chassis
+    wheel_slip: Optional[WheelSlip] = Field(default=None, description="Wheel slip ratios")
+    suspension_travel: Optional[SuspensionTravel] = Field(default=None, description="Suspension travel (m)")
+    ride_height: Optional[RideHeight] = Field(default=None, description="Ride height (m)")
 
     # Car damage (AC: 5 zones — front, rear, left, right, centre; 0.0 = no damage)
     car_damage: Optional[Dict[str, float]] = Field(default=None, description="Car damage per zone (0.0=none)")

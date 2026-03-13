@@ -1,10 +1,8 @@
 {
-  "ai_enabled": false,
-  "voice_mode": "disabled",
+  "ai_enabled": true,
+  "voice_mode": "push_to_talk",
   "ptt_key": "v",
   "remember_credentials": false,
   "huggingface_token": "",
-  "huggingface_model_id": "",
-  "watson_tts_api_key": "",
-  "watson_tts_url": ""
+  "huggingface_model_id": ""
 }

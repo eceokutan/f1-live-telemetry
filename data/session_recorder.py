@@ -166,6 +166,9 @@ class SessionRecorder(QtCore.QThread):
                     throttle REAL,
                     brake REAL,
                     fuel REAL,
+                    steer_angle REAL,
+                    g_force_lat REAL,
+                    g_force_lon REAL,
                     tyre_pressure_fl REAL,
                     tyre_pressure_fr REAL,
                     tyre_pressure_rl REAL,
@@ -174,6 +177,25 @@ class SessionRecorder(QtCore.QThread):
                     tyre_temp_fr REAL,
                     tyre_temp_rl REAL,
                     tyre_temp_rr REAL,
+                    tyre_wear_fl REAL,
+                    tyre_wear_fr REAL,
+                    tyre_wear_rl REAL,
+                    tyre_wear_rr REAL,
+                    wheel_slip_fl REAL,
+                    wheel_slip_fr REAL,
+                    wheel_slip_rl REAL,
+                    wheel_slip_rr REAL,
+                    suspension_fl REAL,
+                    suspension_fr REAL,
+                    suspension_rl REAL,
+                    suspension_rr REAL,
+                    ride_height_front REAL,
+                    ride_height_rear REAL,
+                    car_damage_front REAL,
+                    car_damage_rear REAL,
+                    car_damage_left REAL,
+                    car_damage_right REAL,
+                    car_damage_centre REAL,
                     timestamp REAL NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
@@ -213,6 +235,32 @@ class SessionRecorder(QtCore.QThread):
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_session ON ai_commentary(session_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_voice_session ON voice_queries(session_id)")
 
+                # Migration: add session_type column if it doesn't exist
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+
+                # Migration: add extended telemetry columns for existing databases
+                new_telemetry_cols = [
+                    ("steer_angle", "REAL"), ("g_force_lat", "REAL"), ("g_force_lon", "REAL"),
+                    ("tyre_wear_fl", "REAL"), ("tyre_wear_fr", "REAL"),
+                    ("tyre_wear_rl", "REAL"), ("tyre_wear_rr", "REAL"),
+                    ("wheel_slip_fl", "REAL"), ("wheel_slip_fr", "REAL"),
+                    ("wheel_slip_rl", "REAL"), ("wheel_slip_rr", "REAL"),
+                    ("suspension_fl", "REAL"), ("suspension_fr", "REAL"),
+                    ("suspension_rl", "REAL"), ("suspension_rr", "REAL"),
+                    ("ride_height_front", "REAL"), ("ride_height_rear", "REAL"),
+                    ("car_damage_front", "REAL"), ("car_damage_rear", "REAL"),
+                    ("car_damage_left", "REAL"), ("car_damage_right", "REAL"),
+                    ("car_damage_centre", "REAL"),
+                ]
+                for col_name, col_type in new_telemetry_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE telemetry ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass  # column already exists
+
                 self.db.commit()
             logger.info("Database initialized successfully")
 
@@ -226,7 +274,8 @@ class SessionRecorder(QtCore.QThread):
         track_name: str = "",
         car_model: str = "",
         player_name: str = "",
-        ai_enabled: bool = False
+        ai_enabled: bool = False,
+        session_type: str = ""
     ) -> int:
         """
         Start a new recording session.
@@ -237,6 +286,7 @@ class SessionRecorder(QtCore.QThread):
             car_model: Car model
             player_name: Player name
             ai_enabled: Whether AI race engineer is enabled
+            session_type: Game mode (e.g. "Hotlap", "Practice", "Race", "Qualify")
 
         Returns:
             Session ID
@@ -248,15 +298,16 @@ class SessionRecorder(QtCore.QThread):
                 cursor = self.db.cursor()
                 cursor.execute("""
                 INSERT INTO sessions (
-                    start_time, game, track_name, car_model, player_name, ai_enabled
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    start_time, game, track_name, car_model, player_name, ai_enabled, session_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     self.session_start_time,
                     game,
                     track_name,
                     car_model,
                     player_name,
-                    1 if ai_enabled else 0
+                    1 if ai_enabled else 0,
+                    session_type
                 ))
 
                 self.session_id = cursor.lastrowid
@@ -273,6 +324,87 @@ class SessionRecorder(QtCore.QThread):
             self.error_occurred.emit(f"Failed to start session: {e}")
             raise
 
+    def _save_incomplete_laps(self):
+        """Save lap entries for any laps that have telemetry but no laps row."""
+        if not self.session_id or not self.db:
+            return
+
+        try:
+            cursor = self.db.cursor()
+
+            # Find lap numbers in telemetry that don't have a laps entry yet
+            cursor.execute("""
+                SELECT DISTINCT t.lap_number
+                FROM telemetry t
+                LEFT JOIN laps l
+                    ON l.session_id = t.session_id AND l.lap_number = t.lap_number
+                WHERE t.session_id = ? AND l.lap_id IS NULL
+                ORDER BY t.lap_number
+            """, (self.session_id,))
+
+            incomplete_laps = [row["lap_number"] for row in cursor.fetchall()]
+
+            for lap_number in incomplete_laps:
+                cursor.execute("""
+                    SELECT
+                        MIN(elapsed_time) as t_start,
+                        MAX(elapsed_time) as t_end,
+                        AVG(speed) as avg_speed,
+                        MAX(speed) as max_speed,
+                        MIN(speed) as min_speed,
+                        COUNT(*) as sample_count
+                    FROM telemetry
+                    WHERE session_id = ? AND lap_number = ?
+                """, (self.session_id, lap_number))
+
+                stats = cursor.fetchone()
+                if not stats or stats["sample_count"] == 0:
+                    continue
+
+                lap_time = max(0.0, stats["t_end"] - stats["t_start"])
+
+                # Get fuel at start and end
+                cursor.execute("""
+                    SELECT fuel FROM telemetry
+                    WHERE session_id = ? AND lap_number = ?
+                    ORDER BY elapsed_time ASC LIMIT 1
+                """, (self.session_id, lap_number))
+                fuel_start_row = cursor.fetchone()
+                fuel_start = fuel_start_row["fuel"] if fuel_start_row else 0.0
+
+                cursor.execute("""
+                    SELECT fuel FROM telemetry
+                    WHERE session_id = ? AND lap_number = ?
+                    ORDER BY elapsed_time DESC LIMIT 1
+                """, (self.session_id, lap_number))
+                fuel_end_row = cursor.fetchone()
+                fuel_end = fuel_end_row["fuel"] if fuel_end_row else 0.0
+
+                cursor.execute("""
+                    INSERT INTO laps (
+                        session_id, lap_number, lap_time, fuel_start, fuel_end,
+                        avg_speed, max_speed, min_speed, valid, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.session_id,
+                    lap_number,
+                    lap_time,
+                    fuel_start,
+                    fuel_end,
+                    stats["avg_speed"],
+                    stats["max_speed"],
+                    stats["min_speed"],
+                    0,  # incomplete laps marked as invalid
+                    time.time()
+                ))
+
+                logger.info(f"Saved incomplete lap: lap={lap_number}, time={lap_time:.1f}s, samples={stats['sample_count']}")
+
+            self.db.commit()
+
+        except Exception as e:
+            logger.error(f"Failed to save incomplete laps: {e}", exc_info=True)
+
     def end_session(self):
         """End the current recording session."""
         if not self.session_id:
@@ -283,16 +415,19 @@ class SessionRecorder(QtCore.QThread):
                 # Flush any remaining telemetry
                 self._flush_telemetry_batch()
 
+                # Save incomplete laps before calculating totals
+                self._save_incomplete_laps()
+
                 # Update session end time
                 cursor = self.db.cursor()
 
-                # Calculate session statistics
+                # Calculate session statistics (count all laps, not just valid)
                 cursor.execute("""
                 SELECT
                     COUNT(*) as total_laps,
-                    MIN(lap_time) as best_lap_time
+                    MIN(CASE WHEN valid = 1 THEN lap_time END) as best_lap_time
                 FROM laps
-                WHERE session_id = ? AND valid = 1
+                WHERE session_id = ?
                 """, (self.session_id,))
 
                 row = cursor.fetchone()
@@ -350,6 +485,9 @@ class SessionRecorder(QtCore.QThread):
                     "throttle": sample.get("throttle", 0.0),
                     "brake": sample.get("brake", 0.0),
                     "fuel": sample.get("fuel", 0.0),
+                    "steer_angle": sample.get("steer_angle", 0.0),
+                    "g_force_lat": sample.get("g_force_lat", 0.0),
+                    "g_force_lon": sample.get("g_force_lon", 0.0),
                     "tyre_pressure_fl": sample.get("tyre_pressure_fl", 0.0),
                     "tyre_pressure_fr": sample.get("tyre_pressure_fr", 0.0),
                     "tyre_pressure_rl": sample.get("tyre_pressure_rl", 0.0),
@@ -358,6 +496,25 @@ class SessionRecorder(QtCore.QThread):
                     "tyre_temp_fr": sample.get("tyre_temp_fr", 0.0),
                     "tyre_temp_rl": sample.get("tyre_temp_rl", 0.0),
                     "tyre_temp_rr": sample.get("tyre_temp_rr", 0.0),
+                    "tyre_wear_fl": sample.get("tyre_wear_fl", 0.0),
+                    "tyre_wear_fr": sample.get("tyre_wear_fr", 0.0),
+                    "tyre_wear_rl": sample.get("tyre_wear_rl", 0.0),
+                    "tyre_wear_rr": sample.get("tyre_wear_rr", 0.0),
+                    "wheel_slip_fl": sample.get("wheel_slip_fl", 0.0),
+                    "wheel_slip_fr": sample.get("wheel_slip_fr", 0.0),
+                    "wheel_slip_rl": sample.get("wheel_slip_rl", 0.0),
+                    "wheel_slip_rr": sample.get("wheel_slip_rr", 0.0),
+                    "suspension_fl": sample.get("suspension_fl", 0.0),
+                    "suspension_fr": sample.get("suspension_fr", 0.0),
+                    "suspension_rl": sample.get("suspension_rl", 0.0),
+                    "suspension_rr": sample.get("suspension_rr", 0.0),
+                    "ride_height_front": sample.get("ride_height_front", 0.0),
+                    "ride_height_rear": sample.get("ride_height_rear", 0.0),
+                    "car_damage_front": sample.get("car_damage_front", 0.0),
+                    "car_damage_rear": sample.get("car_damage_rear", 0.0),
+                    "car_damage_left": sample.get("car_damage_left", 0.0),
+                    "car_damage_right": sample.get("car_damage_right", 0.0),
+                    "car_damage_centre": sample.get("car_damage_centre", 0.0),
                     "timestamp": time.time()
                 })
 
@@ -381,13 +538,27 @@ class SessionRecorder(QtCore.QThread):
                 INSERT INTO telemetry (
                     session_id, lap_number, elapsed_time, pos_x, pos_z, speed,
                     gear, rpm, throttle, brake, fuel,
+                    steer_angle, g_force_lat, g_force_lon,
                     tyre_pressure_fl, tyre_pressure_fr, tyre_pressure_rl, tyre_pressure_rr,
-                    tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr, timestamp
+                    tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr,
+                    tyre_wear_fl, tyre_wear_fr, tyre_wear_rl, tyre_wear_rr,
+                    wheel_slip_fl, wheel_slip_fr, wheel_slip_rl, wheel_slip_rr,
+                    suspension_fl, suspension_fr, suspension_rl, suspension_rr,
+                    ride_height_front, ride_height_rear,
+                    car_damage_front, car_damage_rear, car_damage_left, car_damage_right, car_damage_centre,
+                    timestamp
                 ) VALUES (
                     :session_id, :lap_number, :elapsed_time, :pos_x, :pos_z, :speed,
                     :gear, :rpm, :throttle, :brake, :fuel,
+                    :steer_angle, :g_force_lat, :g_force_lon,
                     :tyre_pressure_fl, :tyre_pressure_fr, :tyre_pressure_rl, :tyre_pressure_rr,
-                    :tyre_temp_fl, :tyre_temp_fr, :tyre_temp_rl, :tyre_temp_rr, :timestamp
+                    :tyre_temp_fl, :tyre_temp_fr, :tyre_temp_rl, :tyre_temp_rr,
+                    :tyre_wear_fl, :tyre_wear_fr, :tyre_wear_rl, :tyre_wear_rr,
+                    :wheel_slip_fl, :wheel_slip_fr, :wheel_slip_rl, :wheel_slip_rr,
+                    :suspension_fl, :suspension_fr, :suspension_rl, :suspension_rr,
+                    :ride_height_front, :ride_height_rear,
+                    :car_damage_front, :car_damage_rear, :car_damage_left, :car_damage_right, :car_damage_centre,
+                    :timestamp
                 )
                 """, self.telemetry_buffer)
 

@@ -5,7 +5,7 @@ ENV/
 venv_old/
 
 # Python
-__pycache__/
+__pycache__*/
 *.py[cod]
 *$py.class
 *.so
@@ -66,6 +66,11 @@ run.ps1
 # Temporary Python files
 nul
 
+# Local runtime state
+config.json
+data/kokoro_cache/
+
+# Dev docs
 docs.md
 notes.md
 ms-reduction.md

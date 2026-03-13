@@ -213,12 +213,25 @@ class AcTelemetryWorker(QtCore.QThread):
             return None
         return mm_phys, mm_graph, mm_static
 
-    def _read_session_info(self, mm_static):
-        """Read and emit static session info (track, car, driver)."""
+    # AC session type codes
+    AC_SESSION_TYPES = {0: "Practice", 1: "Qualify", 2: "Race", 3: "Hotlap"}
+
+    def _read_session_info(self, mm_static, mm_graph=None):
+        """Read and emit static session info (track, car, driver, mode)."""
         if mm_static is None:
             return
         try:
             static_data = read_static(mm_static)
+
+            # Read session type from graphics shared memory
+            session_type = ""
+            if mm_graph is not None:
+                try:
+                    gfx = read_graphics(mm_graph)
+                    session_type = self.AC_SESSION_TYPES.get(gfx.session, f"Unknown ({gfx.session})")
+                except Exception:
+                    pass
+
             session_data = {
                 "track": static_data.track,
                 "track_config": static_data.trackConfiguration,
@@ -228,11 +241,12 @@ class AcTelemetryWorker(QtCore.QThread):
                 "player_nick": static_data.playerNick,
                 "max_rpm": static_data.maxRpm,
                 "max_fuel": static_data.maxFuel,
+                "session_type": session_type,
             }
-            logger.info("Session: Track=%s (%s), Car=%s, Driver=%s %s",
+            logger.info("Session: Track=%s (%s), Car=%s, Driver=%s %s, Mode=%s",
                         session_data['track'], session_data['track_config'],
                         session_data['car_model'], session_data['player_name'],
-                        session_data['player_surname'])
+                        session_data['player_surname'], session_type)
             self.session_info_update.emit(session_data)
         except Exception as e:
             logger.warning("Could not read static info: %s", e)
@@ -259,10 +273,30 @@ class AcTelemetryWorker(QtCore.QThread):
                 continue
 
             mm_phys, mm_graph, mm_static = handles
+
+            # Verify AC is actually alive — stale shared memory from a
+            # previous session can linger after the game exits.  If status
+            # is OFF (0) for several consecutive reads, release the handles
+            # so we don't block AC from reinitializing them on next launch.
+            try:
+                gfx_check = read_graphics(mm_graph)
+                if gfx_check.status == 0:
+                    logger.info("Shared memory exists but AC status=OFF — stale region, releasing")
+                    self.status_update.emit("Waiting for Assetto Corsa...")
+                    self._close_handles(mm_phys, mm_graph, mm_static)
+                    for _ in range(RECONNECT_INTERVAL * 10):
+                        if not self.running:
+                            return
+                        time.sleep(0.1)
+                    continue
+            except Exception:
+                self._close_handles(mm_phys, mm_graph, mm_static)
+                continue
+
             logger.info("Connected to AC shared memory")
             self.status_update.emit("Connected! Start driving...")
 
-            self._read_session_info(mm_static)
+            self._read_session_info(mm_static, mm_graph)
 
             # LapBuffer with callback that emits a Qt signal
             lap_buffer = LapBuffer(
@@ -272,11 +306,17 @@ class AcTelemetryWorker(QtCore.QThread):
             t0 = time.time()
             frame_count = 0
             last_lap_id = -1
-            baseline_lap = None
             last_valid_raw_lap = None
+            stable_count = 0       # frames with a consistent completedLaps value
+            STABLE_THRESHOLD = 10  # require 10 consistent frames before trusting
+            off_count = 0          # consecutive frames with status=OFF
+            OFF_DISCONNECT = 10    # release handles after this many OFF frames
             integrated_x = 0.0
             integrated_z = 0.0
             last_time = t0
+            warmup_frames = 0      # frames since entering LIVE status
+            WARMUP_THRESHOLD = 60  # skip first ~1 second of data to avoid garbage
+            last_pos = None        # track position for settling detection
 
             logger.info("Starting telemetry loop at ~60Hz")
 
@@ -288,6 +328,20 @@ class AcTelemetryWorker(QtCore.QThread):
                     ac_status = gfx.status
                     if ac_status != 2:
                         frame_count += 1
+                        # Reset warmup so we re-settle when returning to LIVE
+                        warmup_frames = 0
+
+                        # If AC has been OFF for a while, release handles so
+                        # the game can reinitialize shared memory on restart
+                        if ac_status == 0:
+                            off_count += 1
+                            if off_count >= OFF_DISCONNECT:
+                                logger.info("AC status=OFF for %d reads, releasing handles", off_count)
+                                self.status_update.emit("Waiting for Assetto Corsa...")
+                                break  # exit to outer reconnection loop
+                        else:
+                            off_count = 0
+
                         if frame_count % 10 == 0:
                             self.live_data_update.emit({
                                 "current_lap": (last_lap_id + 1) if last_lap_id >= 0 else 1,
@@ -299,6 +353,7 @@ class AcTelemetryWorker(QtCore.QThread):
                             })
                         time.sleep(0.5)
                         continue
+                    off_count = 0  # reset when LIVE
 
                     phys = read_physics(mm_phys)
 
@@ -307,8 +362,31 @@ class AcTelemetryWorker(QtCore.QThread):
                     dt = now - last_time
                     last_time = now
 
+                    # Warmup: skip the first ~1 second of LIVE data.
+                    # AC shared memory can contain garbage/stale values
+                    # immediately after the game enters LIVE status.
+                    warmup_frames += 1
+                    if warmup_frames <= WARMUP_THRESHOLD:
+                        if warmup_frames == 1:
+                            logger.info("Warmup: skipping first %d frames to let telemetry settle", WARMUP_THRESHOLD)
+                        if warmup_frames == WARMUP_THRESHOLD:
+                            logger.info("Warmup complete, starting telemetry capture")
+                            # Reset t0 so elapsed time starts from now
+                            t0 = now
+                        time.sleep(1 / 60.0)
+                        continue
+
+                    # Re-read elapsed after warmup reset
+                    elapsed = now - t0
+
                     x = gfx.carCoordinates[0]
                     z = gfx.carCoordinates[2]
+
+                    # Check for obviously garbage position data
+                    # (huge values or NaN suggest uninitialized memory)
+                    if abs(x) > 100000 or abs(z) > 100000:
+                        time.sleep(1 / 60.0)
+                        continue
 
                     if x == 0.0 and z == 0.0 and dt > 0:
                         integrated_x += phys.velocity[0] * dt
@@ -318,19 +396,40 @@ class AcTelemetryWorker(QtCore.QThread):
 
                     raw_lap_id = gfx.completedLaps
 
-                    if last_valid_raw_lap is not None:
-                        if raw_lap_id < 0 or abs(raw_lap_id - last_valid_raw_lap) > 1:
-                            raw_lap_id = last_valid_raw_lap
-                    elif raw_lap_id < 0:
-                        raw_lap_id = 0
-                    last_valid_raw_lap = raw_lap_id
+                    # Reject clearly invalid values (negative)
+                    if raw_lap_id < 0:
+                        raw_lap_id = last_valid_raw_lap if last_valid_raw_lap is not None else 0
 
-                    if baseline_lap is None:
-                        baseline_lap = raw_lap_id
-                        logger.info("Baseline lap set to %d (normalizing to lap 0)", baseline_lap)
+                    # Wait for a stable reading before trusting the lap counter.
+                    # Shared memory can contain stale/garbage data on first connect.
+                    if last_valid_raw_lap is None:
+                        # First reading — start counting stability
+                        last_valid_raw_lap = raw_lap_id
+                        stable_count = 1
+                    elif raw_lap_id == last_valid_raw_lap:
+                        stable_count = min(stable_count + 1, STABLE_THRESHOLD + 1)
+                    elif stable_count >= STABLE_THRESHOLD:
+                        # We had a stable baseline and now the value changed —
+                        # trust it (this is a real lap completion or reset)
+                        logger.info("completedLaps changed: %d -> %d", last_valid_raw_lap, raw_lap_id)
+                        last_valid_raw_lap = raw_lap_id
+                    else:
+                        # Value changed before we had a stable baseline —
+                        # restart stability counting with the new value
+                        logger.debug("Unstable completedLaps: %d (was %d, stable_count=%d), restarting",
+                                     raw_lap_id, last_valid_raw_lap, stable_count)
+                        last_valid_raw_lap = raw_lap_id
+                        stable_count = 1
 
-                    lap_id = max(0, raw_lap_id - baseline_lap)
+                    lap_id = max(0, last_valid_raw_lap)
                     speed = phys.speedKmh
+
+                    # Reject garbage speed values (AC cars don't exceed ~400 km/h)
+                    if speed < 0 or speed > 500:
+                        speed = 0.0
+                    # Deadzone: AC reports tiny speed jitter when stationary
+                    elif speed < 1.0:
+                        speed = 0.0
 
                     raw_gear = phys.gear
                     if raw_gear == 0:
@@ -353,8 +452,13 @@ class AcTelemetryWorker(QtCore.QThread):
                     if frame_count == 300 and x == 0 and z == 0:
                         logger.warning("Car coordinates still (0,0) after 5 seconds — are you on track?")
 
+                    # Detect lap completion and read validity from AC
+                    # AC sets lastTimeMs > 0 for valid laps, 0 for invalid
+                    lap_valid = gfx.lastTimeMs > 0
+
                     if lap_id != last_lap_id and last_lap_id != -1:
-                        logger.info("Lap completed: %d -> %d", last_lap_id+1, lap_id+1)
+                        logger.info("Lap completed: %d -> %d (valid=%s, lastTimeMs=%d)",
+                                    last_lap_id+1, lap_id+1, lap_valid, gfx.lastTimeMs)
                         integrated_x = 0.0
                         integrated_z = 0.0
                     last_lap_id = lap_id
@@ -370,6 +474,9 @@ class AcTelemetryWorker(QtCore.QThread):
                         "brake": phys.brake,
                         "throttle": phys.gas,
                         "fuel": phys.fuel,
+                        "steer_angle": phys.steerAngle,
+                        "g_force_lat": phys.accG[0],
+                        "g_force_lon": phys.accG[2],
                         "tyre_pressure_fl": phys.wheelsPressure[0],
                         "tyre_pressure_fr": phys.wheelsPressure[1],
                         "tyre_pressure_rl": phys.wheelsPressure[2],
@@ -382,11 +489,23 @@ class AcTelemetryWorker(QtCore.QThread):
                         "tyre_wear_fr": phys.tyreWear[1],
                         "tyre_wear_rl": phys.tyreWear[2],
                         "tyre_wear_rr": phys.tyreWear[3],
+                        "wheel_slip_fl": phys.wheelSlip[0],
+                        "wheel_slip_fr": phys.wheelSlip[1],
+                        "wheel_slip_rl": phys.wheelSlip[2],
+                        "wheel_slip_rr": phys.wheelSlip[3],
+                        "suspension_fl": phys.suspensionTravel[0],
+                        "suspension_fr": phys.suspensionTravel[1],
+                        "suspension_rl": phys.suspensionTravel[2],
+                        "suspension_rr": phys.suspensionTravel[3],
+                        "ride_height_front": phys.rideHeight[0],
+                        "ride_height_rear": phys.rideHeight[1],
                         "car_damage_front": phys.carDamage[0],
                         "car_damage_rear": phys.carDamage[1],
                         "car_damage_left": phys.carDamage[2],
                         "car_damage_right": phys.carDamage[3],
                         "car_damage_centre": phys.carDamage[4],
+                        "tyres_out": phys.numberOfTyresOut,
+                        "lap_valid": lap_valid,
                     }
 
                     lap_buffer.add_sample(
@@ -401,6 +520,7 @@ class AcTelemetryWorker(QtCore.QThread):
                         tyre_temp_fr=phys.tyreCoreTemperature[1],
                         tyre_temp_rl=phys.tyreCoreTemperature[2],
                         tyre_temp_rr=phys.tyreCoreTemperature[3],
+                        lap_valid=lap_valid,
                     )
 
                     self.realtime_sample.emit(sample_data)

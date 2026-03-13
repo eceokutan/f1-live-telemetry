@@ -42,7 +42,7 @@ python main.py --acc --ai
 **Prerequisites:**
 - For AC: Game must be running with shared memory enabled (Windows only)
 - For ACC: Game must be running with `broadcasting.json` configured and you must be on track
-- For AI: Requires IBM WatsonX credentials in `.env` file (see `.env.example`)
+- For AI: Requires Hugging Face credentials in `.env` file (see `.env.example`)
 
 ## Architecture
 
@@ -148,10 +148,10 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 
 **[ai/tts_output.py](ai/tts_output.py)** - Text-to-Speech Output (experimental)
 - `TTSOutputWorker` - QThread for audio output of AI responses
-- Uses IBM Watson Text-to-Speech with British male voice (en-GB_JamesV3Voice)
+- Uses local Kokoro Text-to-Speech for voice output (Piper fallback override available)
 - Plays audio through default output device using PyAudio
 - Signals voice input to pause during playback to prevent feedback
-- **Environment variables required**: WATSON_TTS_API_KEY, WATSON_TTS_URL
+- **Environment variables required**: none for default Kokoro (optional `KOKORO_VOICE`)
 
 **[data/session_recorder.py](data/session_recorder.py)** - Session Recording
 - `SessionRecorder` - QThread that records all telemetry to SQLite database
