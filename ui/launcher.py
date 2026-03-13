@@ -197,9 +197,6 @@ class LauncherWindow(QtWidgets.QDialog):
         self.voice_ptt_radio.toggled.connect(self.ptt_key_widget.setVisible)
         self.ptt_key_widget.setVisible(False)
 
-        # Show/hide voice credentials based on voice mode
-        self.voice_disabled_radio.toggled.connect(self._toggle_voice_creds)
-
         layout.addWidget(self.voice_group)
 
         # ---- Buttons ----

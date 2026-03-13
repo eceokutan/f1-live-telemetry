@@ -14,6 +14,7 @@ Synthesizes AI responses and plays them through the default audio output device.
 
 import asyncio
 import io
+import html
 import logging
 import time
 import wave
