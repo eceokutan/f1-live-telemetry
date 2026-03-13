@@ -21,7 +21,7 @@ def preprocess_for_analysis(telemetry: list[dict], laps: list[dict]) -> dict:
     Returns:
         Dictionary containing aggregated statistics and patterns
     """
-    return {
+    result = {
         "sample_count": len(telemetry),
         "lap_statistics": _compute_lap_stats(telemetry, laps),
         "throttle_patterns": _analyse_throttle(telemetry),
@@ -29,6 +29,17 @@ def preprocess_for_analysis(telemetry: list[dict], laps: list[dict]) -> dict:
         "tyre_evolution": _analyse_tyres(telemetry),
         "notable_events": _detect_events(telemetry),
     }
+
+    # Add extended telemetry analysis if data is available
+    g_force_data = _analyse_g_forces(telemetry)
+    if g_force_data:
+        result["g_force_analysis"] = g_force_data
+
+    suspension_data = _analyse_suspension(telemetry)
+    if suspension_data:
+        result["suspension_analysis"] = suspension_data
+
+    return result
 
 
 def _compute_lap_stats(telemetry: list[dict], laps: list[dict]) -> dict:
@@ -380,4 +391,95 @@ def _detect_events(telemetry: list[dict]) -> list:
 
         prev_speed = speed
 
+    # Detect high G-force events
+    for sample in telemetry:
+        g_lat = sample.get("g_force_lat", 0)
+        g_lon = sample.get("g_force_lon", 0)
+        if g_lat and abs(g_lat) > 2.5:
+            events.append({
+                "type": "high_lateral_g",
+                "lap_number": sample.get("lap_number", 0),
+                "description": f"High lateral G-force: {g_lat:.2f}g",
+                "value": g_lat,
+                "elapsed_time": sample.get("elapsed_time", 0),
+            })
+        if g_lon and abs(g_lon) > 2.0:
+            events.append({
+                "type": "high_longitudinal_g",
+                "lap_number": sample.get("lap_number", 0),
+                "description": f"High longitudinal G-force: {g_lon:.2f}g",
+                "value": g_lon,
+                "elapsed_time": sample.get("elapsed_time", 0),
+            })
+
+    # Detect car damage
+    damage_keys = ["car_damage_front", "car_damage_rear", "car_damage_left",
+                    "car_damage_right", "car_damage_centre"]
+    for sample in telemetry:
+        for key in damage_keys:
+            val = sample.get(key, 0)
+            if val and val > 0:
+                zone = key.replace("car_damage_", "")
+                events.append({
+                    "type": "car_damage",
+                    "lap_number": sample.get("lap_number", 0),
+                    "description": f"Car damage detected on {zone}: {val:.1f}",
+                    "value": val,
+                    "elapsed_time": sample.get("elapsed_time", 0),
+                })
+                break  # One damage event per sample is enough
+
     return events
+
+
+def _analyse_g_forces(telemetry: list[dict]) -> dict | None:
+    """Analyse G-force data if available."""
+    lat_values = [s.get("g_force_lat") for s in telemetry if s.get("g_force_lat") is not None]
+    lon_values = [s.get("g_force_lon") for s in telemetry if s.get("g_force_lon") is not None]
+
+    if not lat_values and not lon_values:
+        return None
+
+    result = {}
+    if lat_values:
+        result["avg_lateral_g"] = mean(lat_values)
+        result["max_lateral_g"] = max(lat_values, key=abs)
+    if lon_values:
+        result["avg_longitudinal_g"] = mean(lon_values)
+        result["max_braking_g"] = min(lon_values)
+        result["max_accel_g"] = max(lon_values)
+
+    return result
+
+
+def _analyse_suspension(telemetry: list[dict]) -> dict | None:
+    """Analyse suspension travel and ride height if available."""
+    corners = ["fl", "fr", "rl", "rr"]
+    susp_keys = {c: f"suspension_{c}" for c in corners}
+
+    has_data = any(
+        s.get(susp_keys[c]) is not None
+        for s in telemetry
+        for c in corners
+    )
+    if not has_data:
+        return None
+
+    result = {"avg_travel": {}, "max_travel": {}}
+    for corner in corners:
+        values = [s.get(susp_keys[corner]) for s in telemetry if s.get(susp_keys[corner]) is not None]
+        if values:
+            result["avg_travel"][corner] = mean(values)
+            result["max_travel"][corner] = max(values)
+
+    # Ride height
+    rh_front = [s.get("ride_height_front") for s in telemetry if s.get("ride_height_front") is not None]
+    rh_rear = [s.get("ride_height_rear") for s in telemetry if s.get("ride_height_rear") is not None]
+    if rh_front:
+        result["avg_ride_height_front"] = mean(rh_front)
+        result["min_ride_height_front"] = min(rh_front)
+    if rh_rear:
+        result["avg_ride_height_rear"] = mean(rh_rear)
+        result["min_ride_height_rear"] = min(rh_rear)
+
+    return result

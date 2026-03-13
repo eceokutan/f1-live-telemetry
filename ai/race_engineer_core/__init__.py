@@ -10,10 +10,13 @@ from ai.race_engineer_core.race_engineer_agent import RaceEngineerAgent
 from ai.race_engineer_core.telemetry import (
     GForces,
     OpponentSnapshot,
+    RideHeight,
+    SuspensionTravel,
     TelemetryData,
     TirePressure,
     TireTemps,
     TireWear,
+    WheelSlip,
 )
 from ai.race_engineer_core.telemetry_agent import TelemetryAgent
 
@@ -26,10 +29,13 @@ __all__ = [
     "OpponentSnapshot",
     "Priority",
     "RaceEngineerAgent",
+    "RideHeight",
+    "SuspensionTravel",
     "TelemetryAgent",
     "TelemetryData",
     "ThresholdsConfig",
     "TirePressure",
     "TireTemps",
     "TireWear",
+    "WheelSlip",
 ]

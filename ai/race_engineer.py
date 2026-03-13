@@ -21,12 +21,15 @@ from ai.race_engineer_core import (
     LiveSessionContext,
     OpponentSnapshot,
     RaceEngineerAgent,
+    RideHeight,
+    SuspensionTravel,
     TelemetryAgent,
     TelemetryData,
     ThresholdsConfig,
     TirePressure,
     TireTemps,
     TireWear,
+    WheelSlip,
 )
 
 
@@ -336,11 +339,39 @@ class AIRaceEngineerWorker(QtCore.QThread):
             rr=data.get("tyre_pressure_rr", 28.0)
         )
 
-        # G-forces (optional)
+        # G-forces from AC shared memory
         g_forces = GForces(
-            lateral=0.0,  # AC doesn't provide this directly
-            longitudinal=0.0
+            lateral=data.get("g_force_lat", 0.0),
+            longitudinal=data.get("g_force_lon", 0.0)
         )
+
+        # Wheel slip
+        wheel_slip = None
+        if "wheel_slip_fl" in data:
+            wheel_slip = WheelSlip(
+                fl=data.get("wheel_slip_fl", 0.0),
+                fr=data.get("wheel_slip_fr", 0.0),
+                rl=data.get("wheel_slip_rl", 0.0),
+                rr=data.get("wheel_slip_rr", 0.0)
+            )
+
+        # Suspension travel
+        suspension_travel = None
+        if "suspension_fl" in data:
+            suspension_travel = SuspensionTravel(
+                fl=data.get("suspension_fl", 0.0),
+                fr=data.get("suspension_fr", 0.0),
+                rl=data.get("suspension_rl", 0.0),
+                rr=data.get("suspension_rr", 0.0)
+            )
+
+        # Ride height
+        ride_height = None
+        if "ride_height_front" in data:
+            ride_height = RideHeight(
+                front=data.get("ride_height_front", 0.0),
+                rear=data.get("ride_height_rear", 0.0)
+            )
 
         # Tire wear: AC's tyreWear = remaining life (100=fresh, decreases with wear)
         # AI context expects percent worn (0=fresh, 100=worn), so invert.
@@ -388,10 +419,15 @@ class AIRaceEngineerWorker(QtCore.QThread):
             gear=data.get("gear", 0),
             throttle=data.get("throttle", 0.0),
             brake=data.get("brake", 0.0),
+            steering_angle=data.get("steer_angle", 0.0),
             fuel=data.get("fuel", None),
             tire_temps=tire_temps,
             tire_pressure=tire_pressure,
             tire_wear=tire_wear,
+            g_forces=g_forces,
+            wheel_slip=wheel_slip,
+            suspension_travel=suspension_travel,
+            ride_height=ride_height,
             car_damage=car_damage,
             x=data.get("x", 0.0),
             z=data.get("z", 0.0),

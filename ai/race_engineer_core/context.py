@@ -71,6 +71,23 @@ class LiveSessionContext:
     gap_behind: Optional[float] = None
     opponents: List[OpponentSnapshot] = field(default_factory=list)
 
+    # Steering and physics
+    steering_angle: float = 0.0
+    g_force_lat: float = 0.0
+    g_force_lon: float = 0.0
+
+    # Wheel slip
+    wheel_slip: Dict[str, float] = field(
+        default_factory=lambda: {"fl": 0.0, "fr": 0.0, "rl": 0.0, "rr": 0.0}
+    )
+
+    # Suspension and ride height
+    suspension_travel: Dict[str, float] = field(
+        default_factory=lambda: {"fl": 0.0, "fr": 0.0, "rl": 0.0, "rr": 0.0}
+    )
+    ride_height_front: float = 0.0
+    ride_height_rear: float = 0.0
+
     # Car damage (5 zones: front, rear, left, right, centre; 0.0 = no damage)
     car_damage: Dict[str, float] = field(
         default_factory=lambda: {"front": 0.0, "rear": 0.0, "left": 0.0, "right": 0.0, "centre": 0.0}
@@ -132,6 +149,33 @@ class LiveSessionContext:
             }
         else:
             self.tire_wear = {"fl": 0.0, "fr": 0.0, "rl": 0.0, "rr": 0.0}
+
+        # Steering and physics
+        self.steering_angle = telemetry.steering_angle or 0.0
+        if telemetry.g_forces is not None:
+            self.g_force_lat = telemetry.g_forces.lateral
+            self.g_force_lon = telemetry.g_forces.longitudinal
+
+        # Wheel slip
+        if telemetry.wheel_slip is not None:
+            self.wheel_slip = {
+                "fl": telemetry.wheel_slip.fl,
+                "fr": telemetry.wheel_slip.fr,
+                "rl": telemetry.wheel_slip.rl,
+                "rr": telemetry.wheel_slip.rr,
+            }
+
+        # Suspension and ride height
+        if telemetry.suspension_travel is not None:
+            self.suspension_travel = {
+                "fl": telemetry.suspension_travel.fl,
+                "fr": telemetry.suspension_travel.fr,
+                "rl": telemetry.suspension_travel.rl,
+                "rr": telemetry.suspension_travel.rr,
+            }
+        if telemetry.ride_height is not None:
+            self.ride_height_front = telemetry.ride_height.front
+            self.ride_height_rear = telemetry.ride_height.rear
 
         # Car damage
         if telemetry.car_damage is not None:
@@ -301,15 +345,22 @@ class LiveSessionContext:
         # Format tire wear
         wear_str = f"FL:{self.tire_wear['fl']:.0f}% FR:{self.tire_wear['fr']:.0f}% RL:{self.tire_wear['rl']:.0f}% RR:{self.tire_wear['rr']:.0f}%"
 
+        # Format wheel slip (highlight if any tire is slipping significantly)
+        slip_str = f"FL:{self.wheel_slip['fl']:.2f} FR:{self.wheel_slip['fr']:.2f} RL:{self.wheel_slip['rl']:.2f} RR:{self.wheel_slip['rr']:.2f}"
+
         return f"""Track: {self.track_name}
 Lap: {self.current_lap} | Position: P{self.position}
 Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}
-Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%}
+Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%} | Steering: {self.steering_angle:.2f}
+G-Forces: Lat {self.g_force_lat:.2f}g | Lon {self.g_force_lon:.2f}g
 Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}
 Nearby Opponents: {nearby_str}
 Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)
 Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
 Tire Wear: {wear_str}
+Wheel Slip: {slip_str}
+Suspension: FL:{self.suspension_travel['fl']:.3f}m FR:{self.suspension_travel['fr']:.3f}m RL:{self.suspension_travel['rl']:.3f}m RR:{self.suspension_travel['rr']:.3f}m
+Ride Height: Front {self.ride_height_front:.3f}m | Rear {self.ride_height_rear:.3f}m
 Car Damage: {damage_str}
 Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"""
 
