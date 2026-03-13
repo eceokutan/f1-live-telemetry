@@ -319,8 +319,12 @@ def run_jarvis_live(settings: dict):
                 fuel_start = samples[0].get("fuel", 0.0)
                 fuel_end = samples[-1].get("fuel", 0.0)
 
-                # Check validity — any sample with lap_valid=False means track limits were exceeded
-                lap_valid = all(s.get("lap_valid", True) for s in samples)
+                # NOTE: per-sample lap_valid (based on gfx.lastTimeMs) is
+                # unreliable — lastTimeMs only updates AFTER a lap completes,
+                # so during the first lap it's always 0 making every sample
+                # "invalid".  Default to valid=True; the AC backend already
+                # logs the correct lastTimeMs at the moment of completion.
+                lap_valid = True
 
                 if recorder_thread:
                     recorder_thread.record_lap(

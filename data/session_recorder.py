@@ -273,6 +273,87 @@ class SessionRecorder(QtCore.QThread):
             self.error_occurred.emit(f"Failed to start session: {e}")
             raise
 
+    def _save_incomplete_laps(self):
+        """Save lap entries for any laps that have telemetry but no laps row."""
+        if not self.session_id or not self.db:
+            return
+
+        try:
+            cursor = self.db.cursor()
+
+            # Find lap numbers in telemetry that don't have a laps entry yet
+            cursor.execute("""
+                SELECT DISTINCT t.lap_number
+                FROM telemetry t
+                LEFT JOIN laps l
+                    ON l.session_id = t.session_id AND l.lap_number = t.lap_number
+                WHERE t.session_id = ? AND l.lap_id IS NULL
+                ORDER BY t.lap_number
+            """, (self.session_id,))
+
+            incomplete_laps = [row["lap_number"] for row in cursor.fetchall()]
+
+            for lap_number in incomplete_laps:
+                cursor.execute("""
+                    SELECT
+                        MIN(elapsed_time) as t_start,
+                        MAX(elapsed_time) as t_end,
+                        AVG(speed) as avg_speed,
+                        MAX(speed) as max_speed,
+                        MIN(speed) as min_speed,
+                        COUNT(*) as sample_count
+                    FROM telemetry
+                    WHERE session_id = ? AND lap_number = ?
+                """, (self.session_id, lap_number))
+
+                stats = cursor.fetchone()
+                if not stats or stats["sample_count"] == 0:
+                    continue
+
+                lap_time = max(0.0, stats["t_end"] - stats["t_start"])
+
+                # Get fuel at start and end
+                cursor.execute("""
+                    SELECT fuel FROM telemetry
+                    WHERE session_id = ? AND lap_number = ?
+                    ORDER BY elapsed_time ASC LIMIT 1
+                """, (self.session_id, lap_number))
+                fuel_start_row = cursor.fetchone()
+                fuel_start = fuel_start_row["fuel"] if fuel_start_row else 0.0
+
+                cursor.execute("""
+                    SELECT fuel FROM telemetry
+                    WHERE session_id = ? AND lap_number = ?
+                    ORDER BY elapsed_time DESC LIMIT 1
+                """, (self.session_id, lap_number))
+                fuel_end_row = cursor.fetchone()
+                fuel_end = fuel_end_row["fuel"] if fuel_end_row else 0.0
+
+                cursor.execute("""
+                    INSERT INTO laps (
+                        session_id, lap_number, lap_time, fuel_start, fuel_end,
+                        avg_speed, max_speed, min_speed, valid, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.session_id,
+                    lap_number,
+                    lap_time,
+                    fuel_start,
+                    fuel_end,
+                    stats["avg_speed"],
+                    stats["max_speed"],
+                    stats["min_speed"],
+                    0,  # incomplete laps marked as invalid
+                    time.time()
+                ))
+
+                logger.info(f"Saved incomplete lap: lap={lap_number}, time={lap_time:.1f}s, samples={stats['sample_count']}")
+
+            self.db.commit()
+
+        except Exception as e:
+            logger.error(f"Failed to save incomplete laps: {e}", exc_info=True)
+
     def end_session(self):
         """End the current recording session."""
         if not self.session_id:
@@ -283,16 +364,19 @@ class SessionRecorder(QtCore.QThread):
                 # Flush any remaining telemetry
                 self._flush_telemetry_batch()
 
+                # Save incomplete laps before calculating totals
+                self._save_incomplete_laps()
+
                 # Update session end time
                 cursor = self.db.cursor()
 
-                # Calculate session statistics
+                # Calculate session statistics (count all laps, not just valid)
                 cursor.execute("""
                 SELECT
                     COUNT(*) as total_laps,
-                    MIN(lap_time) as best_lap_time
+                    MIN(CASE WHEN valid = 1 THEN lap_time END) as best_lap_time
                 FROM laps
-                WHERE session_id = ? AND valid = 1
+                WHERE session_id = ?
                 """, (self.session_id,))
 
                 row = cursor.fetchone()

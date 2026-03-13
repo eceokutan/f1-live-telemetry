@@ -411,8 +411,9 @@ class MainWindow(QMainWindow):
         times = np.array([s["t"] for s in samples], dtype=float)
         times = times - times[0]  # Normalize to start from 0
 
-        # Check validity from sample data
-        lap_valid = all(s.get("lap_valid", True) for s in samples)
+        # Per-sample lap_valid (from gfx.lastTimeMs) is unreliable for the
+        # first lap — default to valid.
+        lap_valid = True
 
         # Update lap table
         row = min(lap_id - 1, self.lap_table.rowCount() - 1)
