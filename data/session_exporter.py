@@ -32,6 +32,13 @@ class SessionExporter:
         db.row_factory = sqlite3.Row
         cursor = db.cursor()
 
+        # Ensure session_type column exists (migration for older DBs)
+        try:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT ''")
+            db.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
         cursor.execute("""
             SELECT
                 session_id,
