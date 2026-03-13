@@ -314,6 +314,9 @@ class AcTelemetryWorker(QtCore.QThread):
             integrated_x = 0.0
             integrated_z = 0.0
             last_time = t0
+            warmup_frames = 0      # frames since entering LIVE status
+            WARMUP_THRESHOLD = 60  # skip first ~1 second of data to avoid garbage
+            last_pos = None        # track position for settling detection
 
             logger.info("Starting telemetry loop at ~60Hz")
 
@@ -325,6 +328,8 @@ class AcTelemetryWorker(QtCore.QThread):
                     ac_status = gfx.status
                     if ac_status != 2:
                         frame_count += 1
+                        # Reset warmup so we re-settle when returning to LIVE
+                        warmup_frames = 0
 
                         # If AC has been OFF for a while, release handles so
                         # the game can reinitialize shared memory on restart
@@ -357,8 +362,31 @@ class AcTelemetryWorker(QtCore.QThread):
                     dt = now - last_time
                     last_time = now
 
+                    # Warmup: skip the first ~1 second of LIVE data.
+                    # AC shared memory can contain garbage/stale values
+                    # immediately after the game enters LIVE status.
+                    warmup_frames += 1
+                    if warmup_frames <= WARMUP_THRESHOLD:
+                        if warmup_frames == 1:
+                            logger.info("Warmup: skipping first %d frames to let telemetry settle", WARMUP_THRESHOLD)
+                        if warmup_frames == WARMUP_THRESHOLD:
+                            logger.info("Warmup complete, starting telemetry capture")
+                            # Reset t0 so elapsed time starts from now
+                            t0 = now
+                        time.sleep(1 / 60.0)
+                        continue
+
+                    # Re-read elapsed after warmup reset
+                    elapsed = now - t0
+
                     x = gfx.carCoordinates[0]
                     z = gfx.carCoordinates[2]
+
+                    # Check for obviously garbage position data
+                    # (huge values or NaN suggest uninitialized memory)
+                    if abs(x) > 100000 or abs(z) > 100000:
+                        time.sleep(1 / 60.0)
+                        continue
 
                     if x == 0.0 and z == 0.0 and dt > 0:
                         integrated_x += phys.velocity[0] * dt
@@ -395,6 +423,10 @@ class AcTelemetryWorker(QtCore.QThread):
 
                     lap_id = max(0, last_valid_raw_lap)
                     speed = phys.speedKmh
+
+                    # Reject garbage speed values (AC cars don't exceed ~400 km/h)
+                    if speed < 0 or speed > 500:
+                        speed = 0.0
 
                     raw_gear = phys.gear
                     if raw_gear == 0:
