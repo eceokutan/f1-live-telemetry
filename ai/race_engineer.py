@@ -9,6 +9,7 @@ Receives telemetry samples, detects events, generates AI commentary.
 
 import asyncio
 import logging
+import math
 import re
 from typing import Optional, Dict, Any
 from PyQt5 import QtCore
@@ -90,6 +91,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         self._running = False
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._on_track = False  # True only when AC status is LIVE (2)
+        self._ready = False
 
         # Queues (initialized in run() after event loop is created)
         self.telemetry_queue: Optional[asyncio.Queue] = None
@@ -123,6 +125,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 track_name=self.track_name
             )
 
+            self._ready = True
             self.status_update.emit("AI Race Engineer ready")
 
             # Run async processing loop
@@ -132,6 +135,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             logger.error(f"AI Race Engineer error: {e}", exc_info=True)
             self.status_update.emit(f"AI Race Engineer error: {e}")
         finally:
+            self._ready = False
             if self._event_loop:
                 self._event_loop.close()
             self.status_update.emit("AI Race Engineer stopped")
@@ -139,8 +143,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
     def _initialize_agents(self):
         """Initialize TelemetryAgent and RaceEngineerAgent."""
         # Create LLM client
-        # max_tokens=75 for faster responses (~200-400ms savings over 150 tokens)
-        # Racing comms should be brief anyway
+        # Live mode targets short radio replies with low latency.
+        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "24"))
+        live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.3"))
+        local_max_time_seconds = float(os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "5.0"))
 
         # Optional: support dedicated Hugging Face Inference Endpoint
         endpoint_url = os.getenv("HUGGINGFACE_ENDPOINT_URL", None)
@@ -191,13 +197,15 @@ class AIRaceEngineerWorker(QtCore.QThread):
         llm_client = LLMClient(
             huggingface_token=self.huggingface_token,
             model_id=self.hf_model_id,
-            max_tokens=75,  # Latency optimization: shorter responses
+            max_tokens=live_max_tokens,
+            temperature=live_temperature,
             max_retries=2,
             endpoint_url=endpoint_url,
             space_url=space_url,
             space_skip_ssl_verify=space_skip_ssl,
             use_local_llm=use_local_llm,
             local_adapter_path=local_adapter_path,
+            local_max_time_seconds=local_max_time_seconds,
             force_rule_based_fallback=force_rule_based_fallback,
         )
 
@@ -317,18 +325,20 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             # Generate AI response using reactive mode
             try:
+                query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "12.0"))
                 response = await asyncio.wait_for(
                     self.race_engineer_agent.generate_reactive_response(
                         query=query,
                         context=self.context
                     ),
-                    timeout=30.0  # 30 second timeout for LLM response
+                    timeout=query_timeout_seconds,
                 )
                 logger.debug(f"LLM response received: {response[:100]}...")
             except asyncio.TimeoutError:
-                logger.error("LLM response timed out after 30 seconds")
+                logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
+                fallback = self._build_timeout_fallback_response(query)
                 self.ai_commentary.emit(
-                    "Sorry, the AI took too long to respond. Please try again.",
+                    fallback,
                     "driver_query_timeout",
                     1
                 )
@@ -498,16 +508,33 @@ class AIRaceEngineerWorker(QtCore.QThread):
             event: Detected event from TelemetryAgent
         """
         try:
-            # Generate AI response
-            response = await self.race_engineer_agent.handle_event(event, self.context)
+            # Event-triggered alerts are fully rule-based for deterministic low latency.
+            # Do not call LLM for proactive event commentary.
+            if not self.context:
+                return
 
-            if response:
-                # Clean LLM response (strip meta-commentary, references, prompt leakage)
-                response = self._clean_llm_response(response)
+            min_interval = 10.0
+            if hasattr(self.context, "config") and self.context.config:
+                min_interval = getattr(
+                    self.context.config,
+                    "min_proactive_interval_seconds",
+                    10.0,
+                )
 
-                # Emit AI commentary signal
-                self.ai_commentary.emit(response, event.type, event.priority.value)
-                logger.info(f"AI commentary generated for {event.type}: {response[:50]}...")
+            if not self.context.can_send_proactive(min_interval):
+                logger.debug("Skipping proactive message for %s - too soon", event.type)
+                return
+
+            response = self._build_event_fallback_response(event)
+            response = self._clean_llm_response(response)
+            if not response:
+                response = "Copy that. Monitoring."
+
+            self.context.mark_proactive_sent()
+            self.context.add_exchange(f"[Event: {event.type}]", response)
+
+            self.ai_commentary.emit(response, event.type, event.priority.value)
+            logger.info("Rule-based commentary for %s: %s...", event.type, response[:80])
 
         except Exception as e:
             logger.error(f"Error generating AI response for {event.type}: {e}", exc_info=True)
@@ -558,6 +585,15 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Args:
             query: Driver's question/command as text
         """
+        if not self._ready:
+            self.status_update.emit("AI still warming up local model...")
+            self.ai_commentary.emit(
+                "AI is still loading locally. Give me a few seconds and ask again.",
+                "driver_query_warmup",
+                1,
+            )
+            return
+
         if self._event_loop and self._running and self.query_queue is not None:
             # Thread-safe: put query in queue
             asyncio.run_coroutine_threadsafe(
@@ -635,6 +671,138 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 response = first_sentence[0]
 
         return response
+
+    def _build_timeout_fallback_response(self, query: str) -> str:
+        """
+        Build a fast telemetry-based fallback when LLM query response times out.
+
+        Keeps driver comms useful and concise under latency pressure.
+        """
+        if not self.context:
+            return "No quick model reply. Ask again in a second."
+
+        q = (query or "").lower()
+        c = self.context
+
+        if "wear" in q and "tire" in q:
+            return (
+                f"Tire wear is FL {c.tire_wear['fl']:.0f}, FR {c.tire_wear['fr']:.0f}, "
+                f"RL {c.tire_wear['rl']:.0f}, RR {c.tire_wear['rr']:.0f} percent."
+            )
+
+        if "temp" in q and "tire" in q:
+            return (
+                f"Tire temps are FL {c.tire_temps['fl']:.0f}, FR {c.tire_temps['fr']:.0f}, "
+                f"RL {c.tire_temps['rl']:.0f}, RR {c.tire_temps['rr']:.0f} C."
+            )
+
+        if "fuel" in q:
+            fuel_laps = c.get_fuel_laps_remaining()
+            if math.isfinite(fuel_laps):
+                return f"Fuel is {c.fuel_remaining:.1f} liters, about {fuel_laps:.1f} laps remaining."
+            return f"Fuel is {c.fuel_remaining:.1f} liters. Consumption estimate is not ready yet."
+
+        if "damage" in q:
+            total_damage = sum(c.car_damage.values())
+            if total_damage <= 0:
+                return "Car looks clean, no damage reported."
+            return f"Damage detected, total around {total_damage:.0f} percent across zones."
+
+        if "gap" in q or "ahead" in q or "behind" in q:
+            gap_ahead = f"{c.gap_ahead:.2f}s" if c.gap_ahead is not None else "N/A"
+            gap_behind = f"{c.gap_behind:.2f}s" if c.gap_behind is not None else "N/A"
+            return f"Gap ahead {gap_ahead}, gap behind {gap_behind}."
+
+        return (
+            f"Model reply timed out. You're P{c.position}, fuel {c.fuel_remaining:.1f} liters, "
+            f"speed {c.speed_kmh:.0f}."
+        )
+
+    def _build_event_fallback_response(self, event: Event) -> str:
+        """
+        Build deterministic one-line race engineer responses for proactive events.
+
+        This path intentionally avoids LLM invocation for event-triggered commentary.
+        """
+        data = event.data or {}
+        event_type = event.type
+
+        def _pos_label(code: str) -> str:
+            return {
+                "fl": "front left",
+                "fr": "front right",
+                "rl": "rear left",
+                "rr": "rear right",
+            }.get((code or "").lower(), "that tire")
+
+        if event_type == "fuel_critical":
+            laps = data.get("laps")
+            if laps is not None:
+                return f"Fuel critical, box this lap. About {laps:.1f} laps remaining."
+            return "Fuel critical, box this lap."
+
+        if event_type == "fuel_warning":
+            laps = data.get("laps")
+            if laps is not None:
+                return f"Fuel is getting low, around {laps:.1f} laps remaining. Plan the stop."
+            return "Fuel is getting low. Plan your stop."
+
+        if event_type in {"tire_critical", "tire_warning"}:
+            temp = data.get("temp")
+            pos = _pos_label(data.get("position", ""))
+            if temp is not None:
+                if event_type == "tire_critical":
+                    return f"{pos.title()} tire is critical at {temp:.0f} C. Back off and cool it now."
+                return f"{pos.title()} tire temp high at {temp:.0f} C. Manage pace to cool it."
+            return "Tire temperature warning. Manage pace and cool the tires."
+
+        if event_type == "tire_wear_critical":
+            wear = data.get("wear")
+            pos = _pos_label(data.get("position", ""))
+            if wear is not None:
+                return f"{pos.title()} wear is critical at {wear:.0f} percent. Box this lap."
+            return "Tire wear is critical. Box this lap."
+
+        if event_type in {"wheel_slip_critical", "wheel_slip_warning"}:
+            slip = data.get("slip")
+            pos = _pos_label(data.get("position", ""))
+            if slip is not None:
+                if event_type == "wheel_slip_critical":
+                    return f"Critical wheel slip on {pos}, value {slip:.2f}. Smooth throttle now."
+                return f"Wheel slip rising on {pos}, value {slip:.2f}. Be progressive on throttle."
+            return "Wheel slip detected. Smooth your inputs."
+
+        if event_type == "gap_change":
+            direction = data.get("direction", "ahead")
+            new_gap = data.get("new_gap")
+            change = data.get("change")
+            if new_gap is not None:
+                return f"Gap {direction} changed by {change:.1f}s. Current gap {new_gap:.2f}s."
+            return f"Gap {direction} changed. Adjust pace."
+
+        if event_type == "pit_window_open":
+            reason = data.get("reason", "strategy")
+            if reason == "fuel":
+                return "Pit window open for fuel. Prepare to box soon."
+            if reason == "tires":
+                return "Pit window open for tires. Prepare to box soon."
+            return "Pit window open. Prepare to box."
+
+        if event_type == "lap_complete":
+            lap = data.get("lap")
+            lap_time = data.get("time")
+            if lap is not None and lap_time is not None:
+                return f"Lap {lap} complete, {lap_time:.3f} seconds. Keep building."
+            return "Lap complete. Keep building."
+
+        if event_type == "sector_complete":
+            sector = data.get("sector")
+            sector_time = data.get("time")
+            if sector is not None and sector_time is not None:
+                return f"Sector {sector} complete in {sector_time:.3f} seconds."
+            return "Sector complete."
+
+        return "Copy that. Monitoring."
 
     def stop(self):
         """Stop the worker thread."""

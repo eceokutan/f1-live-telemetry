@@ -55,8 +55,8 @@ class LLMClient:
         self,
         huggingface_token: str,
         model_id: str,
-        max_tokens: int = 75,  # Reduced from 150 for faster responses (~200-400ms savings)
-        temperature: float = 0.7,
+        max_tokens: int = 24,
+        temperature: float = 0.3,
         max_retries: int = 3,
         min_retry_wait: float = 1.0,
         max_retry_wait: float = 5.0,
@@ -65,6 +65,7 @@ class LLMClient:
         space_skip_ssl_verify: bool = False,
         use_local_llm: bool = False,
         local_adapter_path: str = "race_engineer_llm",
+        local_max_time_seconds: float = 5.0,
         force_rule_based_fallback: bool = False,
     ):
         """
@@ -89,6 +90,7 @@ class LLMClient:
                                   requests only (use when HF Space hostname/cert mismatch).
             use_local_llm: If True, use local QLoRA-finetuned model instead of HF APIs.
             local_adapter_path: Path to QLoRA adapter directory (relative to project root).
+            local_max_time_seconds: Max generation time for local model responses.
             force_rule_based_fallback: If True, bypass all LLM backends and use
                                       rule-based fallback responses only.
         """
@@ -104,6 +106,7 @@ class LLMClient:
         self.space_skip_ssl_verify = space_skip_ssl_verify
         self.use_local_llm = use_local_llm
         self.local_adapter_path = local_adapter_path
+        self.local_max_time_seconds = local_max_time_seconds
         self.force_rule_based_fallback = force_rule_based_fallback
 
         # Initialize client instance (lazy initialization)
@@ -131,6 +134,7 @@ class LLMClient:
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 adapter_path=self.local_adapter_path,
+                max_time_seconds=self.local_max_time_seconds,
             )
             self._local_llm.load()
             self._local_llm_initialized = True

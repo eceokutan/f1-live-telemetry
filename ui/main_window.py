@@ -324,6 +324,11 @@ class MainWindow(QMainWindow):
         self.mic_status_label.setStyleSheet("color: #888888;")  # Gray when idle
         driver_layout.addWidget(self.mic_status_label)
 
+        # AI readiness/status indicator
+        self.ai_status_label = QLabel("🤖 AI: Off")
+        self.ai_status_label.setStyleSheet("color: #888888;")  # Gray by default
+        driver_layout.addWidget(self.ai_status_label)
+
         driver_layout.addStretch()
 
         # Communications transcript
@@ -768,3 +773,47 @@ class MainWindow(QMainWindow):
         else:
             self.mic_status_label.setText("🎤 Mic: Ready")
             self.mic_status_label.setStyleSheet("color: #888888;")  # Gray when idle
+
+    def handle_ai_status_update(self, status: str):
+        """
+        Handle AI worker status updates and expose clear readiness state in UI.
+
+        Args:
+            status: Status message emitted by AI worker
+        """
+        message = (status or "").strip()
+        status_lower = message.lower()
+
+        if "ready" in status_lower:
+            self.ai_status_label.setText("🤖 AI: Ready")
+            self.ai_status_label.setStyleSheet("color: #6BCB77;")
+            return
+
+        if "starting" in status_lower or "loading" in status_lower or "warming up" in status_lower:
+            self.ai_status_label.setText("🤖 AI: Loading...")
+            self.ai_status_label.setStyleSheet("color: #FFD166;")
+            return
+
+        if "processing" in status_lower:
+            self.ai_status_label.setText("🤖 AI: Processing query...")
+            self.ai_status_label.setStyleSheet("color: #6FA8FF;")
+            return
+
+        if "fallback" in status_lower:
+            self.ai_status_label.setText("🤖 AI: Rule-based fallback")
+            self.ai_status_label.setStyleSheet("color: #FFD166;")
+            return
+
+        if "error" in status_lower or "failed" in status_lower:
+            self.ai_status_label.setText("🤖 AI: Error")
+            self.ai_status_label.setStyleSheet("color: #FF6B6B;")
+            return
+
+        if "stopped" in status_lower:
+            self.ai_status_label.setText("🤖 AI: Stopped")
+            self.ai_status_label.setStyleSheet("color: #888888;")
+            return
+
+        # Generic passthrough for uncategorized statuses.
+        self.ai_status_label.setText(f"🤖 AI: {message}")
+        self.ai_status_label.setStyleSheet("color: #AAAAAA;")

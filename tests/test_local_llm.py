@@ -30,6 +30,7 @@ LOCAL_USE_GPU = _env_bool("LOCAL_LLM_USE_GPU", True)
 LOCAL_REQUIRE_CUDA = _env_bool("LOCAL_REQUIRE_CUDA", False)
 LOCAL_MAX_TOKENS = int(os.getenv("LOCAL_MAX_TOKENS", "24"))
 LOCAL_NUM_PROMPTS = max(1, int(os.getenv("LOCAL_NUM_PROMPTS", "1")))
+LOCAL_TEMPERATURE = float(os.getenv("LOCAL_TEMPERATURE", "0.0"))
 
 
 def test_local_llm_inference():
@@ -54,13 +55,14 @@ def test_local_llm_inference():
     print(f"  adapter_path  = {LOCAL_ADAPTER_PATH}")
     print(f"  use_gpu       = {LOCAL_USE_GPU}")
     print(f"  max_tokens    = {LOCAL_MAX_TOKENS}")
+    print(f"  temperature   = {LOCAL_TEMPERATURE}")
     print(f"  num_prompts   = {LOCAL_NUM_PROMPTS}")
     try:
         llm = LocalLLMInference(
             base_model_id=LOCAL_BASE_MODEL_ID,
             adapter_path=LOCAL_ADAPTER_PATH,
             max_tokens=LOCAL_MAX_TOKENS,
-            temperature=0.7,
+            temperature=LOCAL_TEMPERATURE,
             use_gpu=LOCAL_USE_GPU,
         )
         print(f"✓ Initialized (device: {llm.device})")

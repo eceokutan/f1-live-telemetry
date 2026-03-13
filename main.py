@@ -265,6 +265,7 @@ def run_jarvis_live(settings: dict):
 
                 ai_thread.ai_commentary.connect(window.handle_ai_commentary)
                 ai_thread.driver_query_received.connect(window.handle_driver_query)
+                ai_thread.status_update.connect(window.handle_ai_status_update)
                 ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
 
                 ai_sample_counter = [0]
@@ -425,6 +426,9 @@ def run_jarvis_live(settings: dict):
                 ai_thread = None
     elif enable_ai:
         logger.warning("AI requested but AIRaceEngineerWorker module not available")
+        window.handle_ai_status_update("AI module unavailable")
+    else:
+        window.handle_ai_status_update("AI disabled")
 
     # Initialize session recorder (optional)
     recorder_thread = None
