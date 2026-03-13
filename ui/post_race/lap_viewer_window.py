@@ -171,10 +171,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.left_panel)
 
         self.graph_container = self._create_graph_container()
-        layout.addWidget(self.graph_container, stretch=3)
-
-        self.analysis_panel = self._create_analysis_panel()
-        layout.addWidget(self.analysis_panel)
+        layout.addWidget(self.graph_container, stretch=1)
 
         return tab
 
@@ -231,24 +228,24 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _create_left_panel(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()
-        widget.setMinimumWidth(280)
-        widget.setMaximumWidth(320)
+        widget.setMinimumWidth(250)
+        widget.setMaximumWidth(280)
 
         layout = QtWidgets.QVBoxLayout(widget)
         layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         title = QtWidgets.QLabel("Laps")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px;")
         layout.addWidget(title)
 
         self.lap_list = QtWidgets.QListWidget()
-        self.lap_list.setMaximumHeight(180)
+        self.lap_list.setMaximumHeight(120)
         self.lap_list.itemClicked.connect(self.on_lap_selected)
         layout.addWidget(self.lap_list)
 
         track_label = QtWidgets.QLabel("Track Map")
-        track_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 5px;")
+        track_label.setStyleSheet("font-size: 13px; font-weight: bold; padding: 4px;")
         layout.addWidget(track_label)
 
         self.track_map_container = QtWidgets.QVBoxLayout()
@@ -257,6 +254,26 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         placeholder.setStyleSheet("color: #888; padding: 20px;")
         self.track_map_container.addWidget(placeholder)
         layout.addLayout(self.track_map_container)
+
+        # Lap info section (moved here from the separate right panel)
+        info_label = QtWidgets.QLabel("Lap Info")
+        info_label.setStyleSheet("font-size: 13px; font-weight: bold; padding: 4px;")
+        layout.addWidget(info_label)
+
+        self.time_label = QtWidgets.QLabel("Time: 0.00s")
+        self.time_label.setStyleSheet("font-size: 12px; padding: 2px 8px;")
+        layout.addWidget(self.time_label)
+
+        self.speed_label = QtWidgets.QLabel("Speed: -- km/h")
+        self.gear_label = QtWidgets.QLabel("Gear: --")
+        self.rpm_label = QtWidgets.QLabel("RPM: ----")
+        self.throttle_label = QtWidgets.QLabel("Throttle: --%")
+        self.brake_label = QtWidgets.QLabel("Brake: --%")
+
+        for label in [self.speed_label, self.gear_label, self.rpm_label,
+                      self.throttle_label, self.brake_label]:
+            label.setStyleSheet("padding: 1px 8px; font-size: 12px;")
+            layout.addWidget(label)
 
         layout.addStretch()
 
@@ -285,35 +302,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.graph_layout_left.addWidget(self.graph_placeholder)
 
         return container
-
-    def _create_analysis_panel(self) -> QtWidgets.QWidget:
-        widget = QtWidgets.QWidget()
-        widget.setMinimumWidth(250)
-        widget.setMaximumWidth(300)
-
-        layout = QtWidgets.QVBoxLayout(widget)
-
-        title = QtWidgets.QLabel("Lap Info")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
-        layout.addWidget(title)
-
-        self.time_label = QtWidgets.QLabel("Time: 0.00s")
-        self.time_label.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(self.time_label)
-
-        self.speed_label = QtWidgets.QLabel("Speed: -- km/h")
-        self.gear_label = QtWidgets.QLabel("Gear: --")
-        self.rpm_label = QtWidgets.QLabel("RPM: ----")
-        self.throttle_label = QtWidgets.QLabel("Throttle: --%")
-        self.brake_label = QtWidgets.QLabel("Brake: --%")
-
-        for label in [self.speed_label, self.gear_label, self.rpm_label,
-                      self.throttle_label, self.brake_label]:
-            label.setStyleSheet("padding: 5px 10px;")
-            layout.addWidget(label)
-
-        layout.addStretch()
-        return widget
 
     def _create_timeline_widget(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()

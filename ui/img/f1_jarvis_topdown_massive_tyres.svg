@@ -1,0 +1,71 @@
+<svg width="100%" viewBox="0 0 440 440" xmlns="http://www.w3.org/2000/svg">
+
+<!-- Badge — slightly smaller ring so tyres bust out more -->
+<circle cx="220" cy="220" r="158" fill="#cc0000"/>
+<circle cx="220" cy="220" r="150" fill="#111"/>
+<circle cx="220" cy="220" r="144" fill="none" stroke="#cc0000" stroke-width="1" opacity="0.35"/>
+
+<g transform="translate(220,224)">
+
+  <!-- FRONT WING -->
+  <path d="M-68,-118 L68,-118 L54,-108 L-54,-108 Z" fill="#cc0000"/>
+  <rect x="-74" y="-121" width="9" height="17" rx="2" fill="#cc0000"/>
+  <rect x="65"  y="-121" width="9" height="17" rx="2" fill="#cc0000"/>
+  <path d="M-52,-108 L52,-108 L48,-102 L-48,-102 Z" fill="#cc0000" opacity="0.5"/>
+
+  <!-- NOSE CONE -->
+  <path d="M-4,-146 L4,-146 L54,-108 L-54,-108 Z" fill="#e0e0e0"/>
+
+  <!-- FRONT TYRES — massive, tight to car -->
+  <rect x="-136" y="-108" width="72" height="80" rx="13" fill="#1a1a1a"/>
+  <rect x="64"   y="-108" width="72" height="80" rx="13" fill="#1a1a1a"/>
+  <!-- rim only, no centre dot -->
+  <rect x="-128" y="-100" width="46" height="64" rx="9" fill="#cc0000"/>
+  <rect x="82"   y="-100" width="46" height="64" rx="9" fill="#cc0000"/>
+
+  <!-- Front wishbones -->
+  <line x1="-54" y1="-84" x2="-136" y2="-78" stroke="#cc0000" stroke-width="4" stroke-linecap="round"/>
+  <line x1="54"  y1="-84" x2="136"  y2="-78" stroke="#cc0000" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- MAIN CHASSIS -->
+  <path d="M -6,-146 L 6,-146 L 26,-56 L 24,50 L 18,110 L-18,110 L-24,50 L-26,-56 Z" fill="#e0e0e0"/>
+
+  <!-- SIDEPODS -->
+  <path d="M 26,-36 L 58,-24 L 60,48 L 24,52 Z" fill="#cc0000"/>
+  <path d="M-26,-36 L-58,-24 L-60,48 L-24,52 Z" fill="#cc0000"/>
+  <path d="M 26,-36 L 42,-30 L 44,48 L 24,52 Z" fill="#aa0000"/>
+  <path d="M-26,-36 L-42,-30 L-44,48 L-24,52 Z" fill="#aa0000"/>
+
+  <!-- COCKPIT -->
+  <ellipse cx="0" cy="-16" rx="10" ry="17" fill="#111"/>
+  <path d="M-14,-30 Q0,-54 14,-30" fill="none" stroke="#cc0000" stroke-width="5.5" stroke-linecap="round"/>
+  <rect x="-3" y="-54" width="6" height="16" rx="2" fill="#cc0000"/>
+
+  <!-- Engine spine -->
+  <rect x="-3.5" y="2" width="7" height="90" rx="3" fill="#cc0000" opacity="0.45"/>
+
+  <!-- Air intake -->
+  <ellipse cx="0" cy="12" rx="10" ry="8" fill="#111" stroke="#cc0000" stroke-width="1.5"/>
+
+  <!-- REAR TYRES — comically massive, tight to car, way outside badge -->
+  <rect x="-142" y="44"  width="82" height="96" rx="15" fill="#1a1a1a"/>
+  <rect x="60"   y="44"  width="82" height="96" rx="15" fill="#1a1a1a"/>
+  <!-- rim -->
+  <rect x="-133" y="52"  width="54" height="80" rx="11" fill="#cc0000"/>
+  <rect x="79"   y="52"  width="54" height="80" rx="11" fill="#cc0000"/>
+
+  <!-- Rear wishbones -->
+  <line x1="-24" y1="80" x2="-142" y2="74" stroke="#cc0000" stroke-width="4" stroke-linecap="round"/>
+  <line x1="24"  y1="80" x2="142"  y2="74" stroke="#cc0000" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- REAR WING -->
+  <path d="M-60,112 L60,112 L54,128 L-54,128 Z" fill="#cc0000"/>
+  <rect x="-67" y="108" width="10" height="24" rx="2" fill="#cc0000"/>
+  <rect x="57"  y="108" width="10" height="24" rx="2" fill="#cc0000"/>
+  <path d="M-50,106 L50,106 L46,113 L-46,113 Z" fill="#cc0000" opacity="0.55"/>
+
+  <!-- Diffuser -->
+  <path d="M-18,110 L18,110 L14,130 L-14,130 Z" fill="#555"/>
+
+</g>
+</svg>

@@ -1,6 +1,49 @@
 """
 Styling constants and theme configuration for the dashboard UI.
 """
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Font Configuration
+# =============================================================================
+
+FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+
+# Font family names (after loading)
+FONT_HEADING = "Bebas Neue"     # All-caps headers, titles
+FONT_BODY = "Rajdhani"          # Buttons, labels, body text
+
+_fonts_loaded = False
+
+
+def load_fonts():
+    """Load custom fonts into the Qt font database. Call once at app startup."""
+    global _fonts_loaded
+    if _fonts_loaded:
+        return
+
+    try:
+        from PyQt5.QtGui import QFontDatabase
+        font_files = [
+            "BebasNeue-Regular.ttf",
+            "Rajdhani-Regular.ttf",
+            "Rajdhani-SemiBold.ttf",
+            "Rajdhani-Bold.ttf",
+        ]
+        for fname in font_files:
+            path = os.path.join(FONT_DIR, fname)
+            if os.path.exists(path):
+                font_id = QFontDatabase.addApplicationFont(path)
+                if font_id < 0:
+                    logger.warning("Failed to load font: %s", fname)
+            else:
+                logger.warning("Font file not found: %s", path)
+        _fonts_loaded = True
+    except Exception as e:
+        logger.warning("Could not load custom fonts: %s", e)
 
 # =============================================================================
 # Color Palette
@@ -16,11 +59,17 @@ BORDER_COLOR = "#555555"      # Borders
 GRID_COLOR = "#333333"        # Grid lines
 
 # Accent colors
-ACCENT_BLUE = "#6FA8FF"       # Primary accent (speed line, etc.)
+ACCENT_PRIMARY = "#E10600"    # F1 Racing Red - primary accent
 ACCENT_RED = "#FF6B6B"        # FL tire, critical alerts
 ACCENT_CYAN = "#4ECDC4"       # FR tire
 ACCENT_YELLOW = "#FFD93D"     # RL tire, warnings
 ACCENT_GREEN = "#6BCB77"      # RR tire
+
+# Graph line color (kept blue for readability on dark backgrounds)
+GRAPH_LINE_COLOR = "#6FA8FF"
+
+# Legacy alias (some files still reference ACCENT_BLUE)
+ACCENT_BLUE = ACCENT_PRIMARY
 
 # Priority colors (for AI commentary)
 PRIORITY_CRITICAL = "#FF3B30"
@@ -104,7 +153,7 @@ DARK_STYLESHEET = f"""
         border: 1px solid {BORDER_COLOR};
     }}
     QListWidget::item:selected {{
-        background-color: {ACCENT_BLUE};
+        background-color: {ACCENT_PRIMARY};
     }}
     QTabWidget::pane {{
         border: 1px solid {BORDER_COLOR};
@@ -121,7 +170,7 @@ DARK_STYLESHEET = f"""
         background-color: {BG_COLOR};
     }}
     QPushButton {{
-        background-color: {ACCENT_BLUE};
+        background-color: {ACCENT_PRIMARY};
         color: #FFFFFF;
         border: none;
         border-radius: 4px;
@@ -129,10 +178,10 @@ DARK_STYLESHEET = f"""
         font-weight: bold;
     }}
     QPushButton:hover {{
-        background-color: #5A98EF;
+        background-color: #C00500;
     }}
     QPushButton:pressed {{
-        background-color: #4A88DF;
+        background-color: #A00400;
     }}
     QMenuBar {{
         background-color: {BG_COLOR};
@@ -149,8 +198,8 @@ DARK_STYLESHEET = f"""
         margin: 2px 0;
     }}
     QSlider::handle:horizontal {{
-        background: {ACCENT_BLUE};
-        border: 1px solid {ACCENT_BLUE};
+        background: {ACCENT_PRIMARY};
+        border: 1px solid {ACCENT_PRIMARY};
         width: 18px;
         margin: -5px 0;
         border-radius: 9px;
@@ -171,7 +220,7 @@ DARK_STYLESHEET = f"""
     QComboBox QAbstractItemView {{
         background-color: {BG_COLOR_LIGHT};
         color: {TEXT_COLOR};
-        selection-background-color: {ACCENT_BLUE};
+        selection-background-color: {ACCENT_PRIMARY};
     }}
 """
 

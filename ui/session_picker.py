@@ -6,7 +6,7 @@ from PyQt5 import QtWidgets, QtCore
 from data.session_exporter import SessionExporter
 from ui.styles import (
     BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR,
-    BORDER_COLOR, ACCENT_BLUE, ACCENT_GREEN,
+    BORDER_COLOR, ACCENT_PRIMARY,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
         self.use_last_btn.setFixedHeight(40)
         self.use_last_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {ACCENT_GREEN};
+                background-color: {ACCENT_PRIMARY};
                 color: #FFFFFF;
                 border: none;
                 border-radius: 4px;
@@ -53,8 +53,8 @@ class SessionPickerDialog(QtWidgets.QDialog):
                 font-weight: bold;
                 font-size: 11pt;
             }}
-            QPushButton:hover {{ background-color: #5BBB67; }}
-            QPushButton:pressed {{ background-color: #4BAA57; }}
+            QPushButton:hover {{ background-color: #C00500; }}
+            QPushButton:pressed {{ background-color: #A00400; }}
             QPushButton:disabled {{ background-color: #555555; color: #888888; }}
         """)
         self.use_last_btn.clicked.connect(self._on_use_last)
@@ -311,7 +311,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
                 alternate-background-color: #1E1E1E;
             }}
             QTableWidget::item:selected {{
-                background-color: {ACCENT_BLUE};
+                background-color: {ACCENT_PRIMARY};
             }}
             QHeaderView::section {{
                 background-color: {BG_COLOR};

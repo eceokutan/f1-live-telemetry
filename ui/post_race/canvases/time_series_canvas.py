@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 
 from ui.styles import (
     BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR_DIM, GRID_COLOR,
-    ACCENT_BLUE, ACCENT_RED, ACCENT_CYAN, ACCENT_YELLOW, ACCENT_GREEN
+    GRAPH_LINE_COLOR, ACCENT_RED, ACCENT_CYAN, ACCENT_YELLOW, ACCENT_GREEN
 )
 
 
@@ -53,7 +53,7 @@ class TimeSeriesCanvas(FigureCanvas):
 
         self.fig.tight_layout(pad=0.5)
 
-    def plot_single_line(self, times, values, ylabel, color=ACCENT_BLUE, title=""):
+    def plot_single_line(self, times, values, ylabel, color=GRAPH_LINE_COLOR, title=""):
         """Plot a single time-series line."""
         self.times = times
         self.values = values

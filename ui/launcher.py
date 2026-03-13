@@ -309,9 +309,9 @@ class LauncherWindow(QtWidgets.QDialog):
                 font-size: 11pt;
             }}
             QPushButton:hover {{
-                background-color: #5A98EF;
+                background-color: #C00500;
             }}
             QPushButton:pressed {{
-                background-color: #4A88DF;
+                background-color: #A00400;
             }}
         """)
