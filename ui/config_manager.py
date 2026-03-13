@@ -21,6 +21,9 @@ DEFAULTS = {
     "remember_credentials": False,
     "huggingface_token": "",
     "huggingface_model_id": "",
+    "use_local_llm": False,
+    "local_adapter_path": "race_engineer_llm",
+    "local_require_cuda": True,
 }
 
 # Keys that should NOT be saved when "remember_credentials" is unchecked

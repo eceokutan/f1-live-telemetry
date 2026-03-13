@@ -183,6 +183,9 @@ def run_jarvis_live(settings: dict):
     enable_ai = settings.get("ai_enabled", False)
     enable_ptt = settings.get("voice_mode") == "push_to_talk"
     ptt_key = settings.get("ptt_key", "v")
+    use_local_llm = bool(settings.get("use_local_llm", False))
+    local_adapter_path = settings.get("local_adapter_path", "race_engineer_llm")
+    local_require_cuda = bool(settings.get("local_require_cuda", True))
 
     # Inject credentials into environment so existing code picks them up
     credential_map = {
@@ -194,7 +197,18 @@ def run_jarvis_live(settings: dict):
         if val:
             os.environ[env_key] = val
 
+    # Export local LLM controls from launcher settings.
+    os.environ["USE_LOCAL_LLM"] = "1" if use_local_llm else "0"
+    os.environ["LOCAL_ADAPTER_PATH"] = str(local_adapter_path or "race_engineer_llm")
+    os.environ["LOCAL_REQUIRE_CUDA"] = "1" if local_require_cuda else "0"
+
     logger.info("Starting Jarvis Live for: %s", game.upper())
+    logger.info(
+        "LLM settings - local=%s adapter=%s require_cuda=%s",
+        use_local_llm,
+        local_adapter_path,
+        local_require_cuda,
+    )
 
     window = MainWindow()
 
@@ -231,9 +245,14 @@ def run_jarvis_live(settings: dict):
 
         huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HUGGINGFACE_API_KEY", "")
         huggingface_model_id = os.getenv("HUGGINGFACE_MODEL_ID", "")
+        local_mode_enabled = os.getenv("USE_LOCAL_LLM", "").lower() in ("1", "true", "yes")
+        needs_remote_hf_credentials = not local_mode_enabled
 
-        if not huggingface_token or not huggingface_model_id:
-            logger.warning("AI Race Engineer requires HUGGINGFACE_TOKEN and HUGGINGFACE_MODEL_ID in .env")
+        if needs_remote_hf_credentials and (not huggingface_token or not huggingface_model_id):
+            logger.warning(
+                "AI Race Engineer remote mode requires HUGGINGFACE_TOKEN and "
+                "HUGGINGFACE_MODEL_ID in settings/.env"
+            )
         else:
             try:
                 ai_thread = AIRaceEngineerWorker(

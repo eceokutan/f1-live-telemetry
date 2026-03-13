@@ -17,6 +17,21 @@ sys.path.insert(0, str(project_root))
 os.environ.setdefault("USE_LOCAL_LLM", "true")
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+LOCAL_BASE_MODEL_ID = os.getenv("LOCAL_BASE_MODEL_ID", "ibm-granite/granite-4.0-micro")
+LOCAL_ADAPTER_PATH = os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_llm")
+LOCAL_USE_GPU = _env_bool("LOCAL_LLM_USE_GPU", True)
+LOCAL_REQUIRE_CUDA = _env_bool("LOCAL_REQUIRE_CUDA", False)
+LOCAL_MAX_TOKENS = int(os.getenv("LOCAL_MAX_TOKENS", "24"))
+LOCAL_NUM_PROMPTS = max(1, int(os.getenv("LOCAL_NUM_PROMPTS", "1")))
+
+
 def test_local_llm_inference():
     """Test local LLM loading and inference."""
     print("=" * 80)
@@ -35,15 +50,23 @@ def test_local_llm_inference():
 
     # Test 2: Initialize inference engine
     print("\n[2/4] Initializing local LLM inference engine...")
+    print(f"  base_model_id = {LOCAL_BASE_MODEL_ID}")
+    print(f"  adapter_path  = {LOCAL_ADAPTER_PATH}")
+    print(f"  use_gpu       = {LOCAL_USE_GPU}")
+    print(f"  max_tokens    = {LOCAL_MAX_TOKENS}")
+    print(f"  num_prompts   = {LOCAL_NUM_PROMPTS}")
     try:
         llm = LocalLLMInference(
-            base_model_id="ibm-granite/granite-4.0-micro",
-            adapter_path="granite_f1_finetuned_live",
-            max_tokens=75,
+            base_model_id=LOCAL_BASE_MODEL_ID,
+            adapter_path=LOCAL_ADAPTER_PATH,
+            max_tokens=LOCAL_MAX_TOKENS,
             temperature=0.7,
-            use_gpu=True,
+            use_gpu=LOCAL_USE_GPU,
         )
         print(f"✓ Initialized (device: {llm.device})")
+        if LOCAL_REQUIRE_CUDA and llm.device != "cuda":
+            print("✗ CUDA required but not selected")
+            return False
     except Exception as e:
         print(f"✗ Initialization failed: {e}")
         return False
@@ -132,8 +155,10 @@ Example alerts: "Gap closing! Focus up front." / "You're pulling away from P3, e
 Alert:""",
     ]
 
-    for i, prompt in enumerate(test_prompts, 1):
-        print(f"\n  [{i}/{len(test_prompts)}] Testing race engineer prompt...")
+    selected_prompts = test_prompts[:LOCAL_NUM_PROMPTS]
+
+    for i, prompt in enumerate(selected_prompts, 1):
+        print(f"\n  [{i}/{len(selected_prompts)}] Testing race engineer prompt...")
         start = time.time()
         try:
             response = llm.generate(prompt)
@@ -165,12 +190,13 @@ def test_llm_client():
         return False
 
     print("\n[2/2] Initializing LLMClient with local LLM enabled...")
+    print(f"  local_adapter_path = {LOCAL_ADAPTER_PATH}")
     try:
         client = LLMClient(
             huggingface_token="dummy_token",
             model_id="dummy_model",
             use_local_llm=True,
-            local_adapter_path="granite_f1_finetuned_live",
+            local_adapter_path=LOCAL_ADAPTER_PATH,
         )
         print("✓ LLMClient initialized")
         if client._local_llm is not None:
@@ -212,6 +238,20 @@ def check_dependencies():
     if not all_ok:
         print("\n⚠ Missing dependencies. Install with:")
         print("  pip install -r requirements.txt")
+
+    try:
+        import torch
+        print("\nCUDA check:")
+        print(f"  torch version: {torch.__version__}")
+        print(f"  torch cuda: {torch.version.cuda}")
+        print(f"  cuda available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"  cuda device: {torch.cuda.get_device_name(0)}")
+        if LOCAL_REQUIRE_CUDA and not torch.cuda.is_available():
+            print("✗ LOCAL_REQUIRE_CUDA=true but CUDA is unavailable")
+            return False
+    except Exception as e:
+        print(f"\n⚠ Could not run CUDA diagnostics: {e}")
 
     print()
     return all_ok

@@ -64,7 +64,8 @@ class LLMClient:
         space_url: Optional[str] = None,
         space_skip_ssl_verify: bool = False,
         use_local_llm: bool = False,
-        local_adapter_path: str = "granite_f1_finetuned_live",
+        local_adapter_path: str = "race_engineer_llm",
+        force_rule_based_fallback: bool = False,
     ):
         """
         Initialize LLM Client.
@@ -88,6 +89,8 @@ class LLMClient:
                                   requests only (use when HF Space hostname/cert mismatch).
             use_local_llm: If True, use local QLoRA-finetuned model instead of HF APIs.
             local_adapter_path: Path to QLoRA adapter directory (relative to project root).
+            force_rule_based_fallback: If True, bypass all LLM backends and use
+                                      rule-based fallback responses only.
         """
         self.huggingface_token = huggingface_token
         self.model_id = model_id
@@ -101,6 +104,7 @@ class LLMClient:
         self.space_skip_ssl_verify = space_skip_ssl_verify
         self.use_local_llm = use_local_llm
         self.local_adapter_path = local_adapter_path
+        self.force_rule_based_fallback = force_rule_based_fallback
 
         # Initialize client instance (lazy initialization)
         self._client = None
@@ -277,6 +281,10 @@ class LLMClient:
         Returns:
             Raw LLM response text
         """
+        if self.force_rule_based_fallback:
+            logger.info("LLM disabled by configuration, using rule-based fallback response")
+            return self._generate_fallback_response(prompt)
+
         # Try local LLM first
         local_llm = self._get_local_llm()
         if local_llm is not None:

@@ -2,7 +2,7 @@
 Local LLM inference using transformers + PEFT for QLoRA-finetuned models.
 
 Loads Granite-4.0-micro base model from Hugging Face Hub and applies
-the local QLoRA adapter from granite_f1_finetuned_live/.
+the local QLoRA adapter from race_engineer_llm/.
 """
 
 import logging
@@ -24,7 +24,7 @@ class LocalLLMInference:
     def __init__(
         self,
         base_model_id: str = "ibm-granite/granite-4.0-micro",
-        adapter_path: str = "granite_f1_finetuned_live",
+        adapter_path: str = "race_engineer_llm",
         max_tokens: int = 75,
         temperature: float = 0.7,
         use_gpu: bool = True,
@@ -51,6 +51,7 @@ class LocalLLMInference:
 
         # Determine device
         self.device = self._select_device()
+        self.dtype = self._select_dtype()
 
         # Lazy-loaded model and tokenizer
         self._model = None
@@ -75,6 +76,19 @@ class LocalLLMInference:
             logger.info("No GPU found, falling back to CPU")
             return "cpu"
 
+    def _select_dtype(self):
+        """Select a memory/perf-friendly dtype for the chosen device."""
+        if self.device == "cuda":
+            try:
+                if torch.cuda.is_bf16_supported():
+                    return torch.bfloat16
+            except Exception:
+                pass
+            return torch.float16
+        if self.device == "mps":
+            return torch.float16
+        return torch.float32
+
     def load(self) -> None:
         """
         Pre-load model and tokenizer.
@@ -90,11 +104,22 @@ class LocalLLMInference:
 
             logger.info(f"Loading base model {self.base_model_id}...")
             tokenizer = AutoTokenizer.from_pretrained(self.base_model_id)
-            base_model = AutoModelForCausalLM.from_pretrained(
-                self.base_model_id,
-                torch_dtype=torch.float32,
-                device_map=self.device if self.device != "cpu" else None,
-            )
+            try:
+                # Newer transformers prefers `dtype`; keep a compatibility fallback.
+                base_model = AutoModelForCausalLM.from_pretrained(
+                    self.base_model_id,
+                    dtype=self.dtype,
+                    low_cpu_mem_usage=True,
+                )
+            except TypeError:
+                base_model = AutoModelForCausalLM.from_pretrained(
+                    self.base_model_id,
+                    torch_dtype=self.dtype,
+                    low_cpu_mem_usage=True,
+                )
+
+            if self.device != "cpu":
+                base_model = base_model.to(self.device)
 
             logger.info(f"Loading QLoRA adapter from {self.adapter_path}...")
             model = PeftModel.from_pretrained(base_model, str(self.adapter_path))
@@ -126,13 +151,18 @@ class LocalLLMInference:
             raise RuntimeError("Model not loaded. Call load() first.")
 
         try:
-            # Encode prompt
-            inputs = self._tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+            # Use tokenizer(...) to get attention_mask and avoid pad/eos ambiguity warnings.
+            encoded = self._tokenizer(prompt, return_tensors="pt")
+            input_ids = encoded["input_ids"].to(self.device)
+            attention_mask = encoded.get("attention_mask")
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(self.device)
 
             # Generate
             with torch.no_grad():
                 outputs = self._model.generate(
-                    inputs,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
                     max_new_tokens=self.max_tokens,
                     temperature=self.temperature,
                     do_sample=True,
@@ -143,7 +173,7 @@ class LocalLLMInference:
 
             # Decode response (excluding the input prompt)
             response = self._tokenizer.decode(
-                outputs[0][inputs.shape[-1]:],
+                outputs[0][input_ids.shape[-1]:],
                 skip_special_tokens=True,
             )
 

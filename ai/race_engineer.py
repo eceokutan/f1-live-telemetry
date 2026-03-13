@@ -151,7 +151,42 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
         # Optional: Use local QLoRA-finetuned model (default: disabled)
         use_local_llm = os.getenv("USE_LOCAL_LLM", "").lower() in ("1", "true", "yes")
-        local_adapter_path = os.getenv("LOCAL_ADAPTER_PATH", "granite_f1_finetuned_live")
+        local_adapter_path = os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_llm")
+        local_require_cuda = os.getenv("LOCAL_REQUIRE_CUDA", "1").lower() in ("1", "true", "yes")
+
+        force_rule_based_fallback = False
+        if use_local_llm:
+            cuda_available = False
+            cuda_device = ""
+            try:
+                import torch
+
+                cuda_available = bool(torch.cuda.is_available())
+                if cuda_available:
+                    cuda_device = torch.cuda.get_device_name(0)
+            except Exception as e:
+                logger.warning("Unable to check CUDA status for local LLM: %s", e)
+
+            if cuda_available:
+                logger.info("Local LLM CUDA active: %s", cuda_device or "unknown device")
+            elif local_require_cuda:
+                logger.warning(
+                    "Local LLM requested but CUDA is unavailable; "
+                    "falling back to non-LLM rule-based responses."
+                )
+                self.status_update.emit(
+                    "CUDA unavailable for local model. Using rule-based fallback responses."
+                )
+                # Avoid any remote/API calls in this fallback mode.
+                force_rule_based_fallback = True
+                use_local_llm = False
+                space_url = None
+                endpoint_url = None
+            else:
+                logger.warning(
+                    "Local LLM requested with no CUDA; proceeding on CPU because "
+                    "LOCAL_REQUIRE_CUDA is disabled (expect high latency)."
+                )
 
         llm_client = LLMClient(
             huggingface_token=self.huggingface_token,
@@ -163,10 +198,16 @@ class AIRaceEngineerWorker(QtCore.QThread):
             space_skip_ssl_verify=space_skip_ssl,
             use_local_llm=use_local_llm,
             local_adapter_path=local_adapter_path,
+            force_rule_based_fallback=force_rule_based_fallback,
         )
 
         if use_local_llm:
             logger.info("Using local QLoRA-finetuned Granite model from: %s", local_adapter_path)
+        elif force_rule_based_fallback:
+            logger.info(
+                "Local mode fallback active (LOCAL_REQUIRE_CUDA=%s): rule-based responses only",
+                local_require_cuda,
+            )
 
         # Create race engineer agent
         self.race_engineer_agent = RaceEngineerAgent(

@@ -5,6 +5,7 @@ Lets the user configure voice mode and keyboard PTT key.
 """
 
 import logging
+import os
 from PyQt5 import QtWidgets, QtCore, QtGui
 from ui.config_manager import load_config, save_config
 from ui.styles import (
@@ -68,15 +69,17 @@ class LauncherWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Jarvis Granite - Setup & Settings")
-        self.setMinimumSize(520, 620)
+        self.setMinimumSize(560, 760)
         self.setModal(True)
 
         self.config = load_config()
         self._accepted = False
+        self._cuda_status = self._detect_cuda_status()
 
         self._build_ui()
         self._apply_theme()
         self._load_from_config()
+        self._refresh_cuda_status_label()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -179,6 +182,47 @@ class LauncherWindow(QtWidgets.QDialog):
 
         layout.addWidget(voice_group)
 
+        # ---- AI mode ----
+        ai_group = QtWidgets.QGroupBox("AI RACE ENGINEER")
+        ai_layout = QtWidgets.QVBoxLayout(ai_group)
+        ai_layout.setContentsMargins(12, 20, 12, 12)
+        ai_layout.setSpacing(8)
+
+        self.ai_enabled_checkbox = QtWidgets.QCheckBox("Enable AI Race Engineer")
+        ai_layout.addWidget(self.ai_enabled_checkbox)
+
+        self.use_local_llm_checkbox = QtWidgets.QCheckBox("Use Local Model (QLoRA adapter)")
+        ai_layout.addWidget(self.use_local_llm_checkbox)
+
+        adapter_row = QtWidgets.QHBoxLayout()
+        adapter_row.addWidget(QtWidgets.QLabel("Local Adapter Path:"))
+        self.local_adapter_path_edit = QtWidgets.QLineEdit()
+        self.local_adapter_path_edit.setPlaceholderText("race_engineer_llm")
+        adapter_row.addWidget(self.local_adapter_path_edit, 1)
+        self.local_adapter_browse_button = QtWidgets.QPushButton("Browse")
+        self.local_adapter_browse_button.setFixedWidth(90)
+        self.local_adapter_browse_button.clicked.connect(self._browse_local_adapter_path)
+        adapter_row.addWidget(self.local_adapter_browse_button)
+        ai_layout.addLayout(adapter_row)
+
+        self.local_require_cuda_checkbox = QtWidgets.QCheckBox("Require CUDA for local model")
+        ai_layout.addWidget(self.local_require_cuda_checkbox)
+
+        self.cuda_status_label = QtWidgets.QLabel("CUDA Active: checking...")
+        self.cuda_status_label.setWordWrap(True)
+        ai_layout.addWidget(self.cuda_status_label)
+
+        ai_hint = QtWidgets.QLabel(
+            "If local model is enabled and CUDA is required but unavailable, "
+            "Jarvis Live will use rule-based fallback responses."
+        )
+        ai_hint.setWordWrap(True)
+        ai_hint.setStyleSheet(f"color: {TEXT_COLOR}; font-size: 10pt;")
+        ai_layout.addWidget(ai_hint)
+
+        self.use_local_llm_checkbox.toggled.connect(self._update_local_controls_visibility)
+        layout.addWidget(ai_group)
+
         layout.addStretch()
 
         # ---- Buttons ----
@@ -211,6 +255,12 @@ class LauncherWindow(QtWidgets.QDialog):
         self.ptt_key_button.key_name = ptt_key
         self.ptt_key_button._update_text()
 
+        self.ai_enabled_checkbox.setChecked(c.get("ai_enabled", True))
+        self.use_local_llm_checkbox.setChecked(c.get("use_local_llm", False))
+        self.local_adapter_path_edit.setText(c.get("local_adapter_path", "race_engineer_llm"))
+        self.local_require_cuda_checkbox.setChecked(c.get("local_require_cuda", True))
+        self._update_local_controls_visibility()
+
     def _save_to_config(self):
         if self.voice_ptt_radio.isChecked():
             voice_mode = "push_to_talk"
@@ -220,9 +270,12 @@ class LauncherWindow(QtWidgets.QDialog):
             voice_mode = "disabled"
 
         self.config.update({
-            "ai_enabled": True,
+            "ai_enabled": self.ai_enabled_checkbox.isChecked(),
             "voice_mode": voice_mode,
             "ptt_key": self.ptt_key_button.key_name,
+            "use_local_llm": self.use_local_llm_checkbox.isChecked(),
+            "local_adapter_path": self.local_adapter_path_edit.text().strip() or "race_engineer_llm",
+            "local_require_cuda": self.local_require_cuda_checkbox.isChecked(),
         })
         save_config(self.config)
 
@@ -241,6 +294,57 @@ class LauncherWindow(QtWidgets.QDialog):
 
     def was_accepted(self) -> bool:
         return self._accepted
+
+    def _browse_local_adapter_path(self):
+        selected = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select Local Adapter Folder",
+            self.local_adapter_path_edit.text() or os.getcwd()
+        )
+        if selected:
+            self.local_adapter_path_edit.setText(selected)
+
+    def _update_local_controls_visibility(self):
+        enabled = self.use_local_llm_checkbox.isChecked()
+        self.local_adapter_path_edit.setEnabled(enabled)
+        self.local_adapter_browse_button.setEnabled(enabled)
+        self.local_require_cuda_checkbox.setEnabled(enabled)
+
+    @staticmethod
+    def _detect_cuda_status() -> dict:
+        status = {
+            "available": False,
+            "cuda_version": "",
+            "device_name": "",
+            "error": "",
+        }
+        try:
+            import torch
+
+            status["available"] = bool(torch.cuda.is_available())
+            status["cuda_version"] = str(torch.version.cuda or "")
+            if status["available"]:
+                status["device_name"] = torch.cuda.get_device_name(0)
+        except Exception as e:
+            status["error"] = str(e)
+        return status
+
+    def _refresh_cuda_status_label(self):
+        if self._cuda_status.get("available"):
+            device_name = self._cuda_status.get("device_name", "Unknown GPU")
+            cuda_version = self._cuda_status.get("cuda_version", "unknown")
+            self.cuda_status_label.setText(
+                f"CUDA Active: Yes ({device_name}, torch cuda {cuda_version})"
+            )
+            self.cuda_status_label.setStyleSheet("color: #90EE90;")
+            return
+
+        error_text = self._cuda_status.get("error")
+        if error_text:
+            self.cuda_status_label.setText(f"CUDA Active: No ({error_text})")
+        else:
+            self.cuda_status_label.setText("CUDA Active: No")
+        self.cuda_status_label.setStyleSheet("color: #FF9F9F;")
 
     # ------------------------------------------------------------------
     # Theme
