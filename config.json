@@ -4,11 +4,5 @@
   "ptt_key": "v",
   "remember_credentials": false,
   "huggingface_token": "",
-  "huggingface_model_id": "",
-  "kokoro_voice": "bm_lewis",
-  "kokoro_lang": "en-gb",
-  "kokoro_speed": 1.35,
-  "kokoro_use_cuda": false,
-  "watson_tts_api_key": "",
-  "watson_tts_url": ""
+  "huggingface_model_id": ""
 }

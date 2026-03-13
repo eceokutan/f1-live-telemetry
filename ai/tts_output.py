@@ -14,7 +14,6 @@ Synthesizes AI responses and plays them through the default audio output device.
 
 import asyncio
 import io
-import html
 import logging
 import time
 import wave
@@ -32,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_KOKORO_VOICE_ID = "bm_lewis"
 DEFAULT_KOKORO_LANG = "en-gb"
-DEFAULT_KOKORO_SPEED = 0.97
+DEFAULT_KOKORO_SPEED = 1.3
 DEFAULT_KOKORO_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "kokoro_cache"
 
 

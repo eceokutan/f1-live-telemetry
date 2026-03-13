@@ -21,10 +21,6 @@ DEFAULTS = {
     "remember_credentials": False,
     "huggingface_token": "",
     "huggingface_model_id": "",
-    "kokoro_voice": "bm_lewis",
-    "kokoro_lang": "en-gb",
-    "kokoro_speed": 0.97,
-    "kokoro_use_cuda": False,
 }
 
 # Keys that should NOT be saved when "remember_credentials" is unchecked
@@ -49,7 +45,8 @@ def load_config() -> Dict[str, Any]:
 
 def save_config(config: Dict[str, Any]) -> None:
     """Save config to disk. Omits credentials if remember_credentials is False."""
-    to_save = dict(config)
+    # Persist only recognized keys so legacy/deprecated settings are dropped.
+    to_save = {key: config.get(key, default) for key, default in DEFAULTS.items()}
     if not to_save.get("remember_credentials", False):
         for key in CREDENTIAL_KEYS:
             to_save[key] = ""

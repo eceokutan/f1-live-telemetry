@@ -93,6 +93,10 @@ except ImportError as e:
 logger.info("All core modules imported")
 
 _prewarm_started = False
+KOKORO_VOICE_ID = "bm_lewis"
+KOKORO_LANG = "en-gb"
+KOKORO_SPEED = 1.3
+KOKORO_USE_CUDA = False
 
 
 def _should_prewarm_models() -> bool:
@@ -101,40 +105,35 @@ def _should_prewarm_models() -> bool:
     return val in {"1", "true", "yes", "on"}
 
 
-def _start_background_model_prewarm(settings: dict):
+def _start_background_model_prewarm(_settings: dict):
     """Prewarm STT/TTS model caches in background while user is in launcher."""
     global _prewarm_started
     if _prewarm_started or not _should_prewarm_models():
         return
 
-    # Decide up front which warmups are still needed so we can skip no-op runs.
-    prewarm_stt = True
-    prewarm_tts = True
-    kokoro_voice = settings.get("kokoro_voice", "bm_lewis")
-    kokoro_lang = settings.get("kokoro_lang", "en-gb")
-    try:
-        kokoro_speed = float(settings.get("kokoro_speed", 0.97))
-    except (TypeError, ValueError):
-        kokoro_speed = 0.97
-    kokoro_use_cuda = str(settings.get("kokoro_use_cuda", False)).lower() in {"1", "true", "yes", "on"}
-
-    try:
-        from ai.model_prewarm import needs_faster_whisper_prewarm, needs_kokoro_prewarm
-
-        prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
-        prewarm_tts = needs_kokoro_prewarm()
-    except Exception as e:
-        logger.warning("Could not inspect model cache state, falling back to full prewarm: %s", e)
-
-    if not prewarm_stt and not prewarm_tts:
-        _prewarm_started = True
-        logger.info("Background model prewarm skipped (all required caches already warm)")
-        return
-
     _prewarm_started = True
 
     def _worker():
+        prewarm_stt = True
+        prewarm_tts = True
         try:
+            # Run cache checks inside the worker so launcher creation is never
+            # blocked by optional model imports (e.g., faster_whisper).
+            try:
+                from ai.model_prewarm import needs_faster_whisper_prewarm, needs_kokoro_prewarm
+
+                prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
+                prewarm_tts = needs_kokoro_prewarm()
+            except Exception as e:
+                logger.warning(
+                    "Could not inspect model cache state, falling back to full prewarm: %s",
+                    e,
+                )
+
+            if not prewarm_stt and not prewarm_tts:
+                logger.info("Background model prewarm skipped (all required caches already warm)")
+                return
+
             from ai.model_prewarm import prewarm_faster_whisper, prewarm_kokoro
 
             logger.info(
@@ -155,10 +154,10 @@ def _start_background_model_prewarm(settings: dict):
             if prewarm_tts:
                 try:
                     prewarm_kokoro(
-                        voice_id=kokoro_voice,
-                        lang=kokoro_lang,
-                        speed=kokoro_speed,
-                        use_cuda=kokoro_use_cuda,
+                        voice_id=KOKORO_VOICE_ID,
+                        lang=KOKORO_LANG,
+                        speed=KOKORO_SPEED,
+                        use_cuda=KOKORO_USE_CUDA,
                     )
                     logger.info("Background prewarm: Kokoro ready")
                 except Exception as e:
@@ -189,7 +188,6 @@ def run_jarvis_live(settings: dict):
     credential_map = {
         "HUGGINGFACE_TOKEN": "huggingface_token",
         "HUGGINGFACE_MODEL_ID": "huggingface_model_id",
-        "KOKORO_VOICE": "kokoro_voice",
     }
     for env_key, settings_key in credential_map.items():
         val = settings.get(settings_key, "")
@@ -233,13 +231,6 @@ def run_jarvis_live(settings: dict):
 
         huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HUGGINGFACE_API_KEY", "")
         huggingface_model_id = os.getenv("HUGGINGFACE_MODEL_ID", "")
-        kokoro_voice_id = os.getenv("KOKORO_VOICE", settings.get("kokoro_voice", "bm_lewis"))
-        kokoro_lang = settings.get("kokoro_lang", "en-gb")
-        try:
-            kokoro_speed = float(settings.get("kokoro_speed", 0.97))
-        except (TypeError, ValueError):
-            kokoro_speed = 0.97
-        kokoro_use_cuda = str(settings.get("kokoro_use_cuda", False)).lower() in {"1", "true", "yes", "on"}
 
         if not huggingface_token or not huggingface_model_id:
             logger.warning("AI Race Engineer requires HUGGINGFACE_TOKEN and HUGGINGFACE_MODEL_ID in .env")
@@ -322,17 +313,18 @@ def run_jarvis_live(settings: dict):
                 # Initialize TTS output (Kokoro local TTS)
                 if TTS_AVAILABLE and voice_mode_setting != "disabled":
                     logger.info(
-                        "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s)",
-                        kokoro_voice_id,
+                        "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s, speed=%.2f)",
+                        KOKORO_VOICE_ID,
+                        KOKORO_SPEED,
                     )
                     try:
                         def _build_tts_worker() -> TTSOutputWorker:
                             worker = TTSOutputWorker(
                                 use_sentence_pipelining=True,
-                                kokoro_voice_id=kokoro_voice_id,
-                                kokoro_lang=kokoro_lang,
-                                kokoro_speed=kokoro_speed,
-                                kokoro_use_cuda=kokoro_use_cuda,
+                                kokoro_voice_id=KOKORO_VOICE_ID,
+                                kokoro_lang=KOKORO_LANG,
+                                kokoro_speed=KOKORO_SPEED,
+                                kokoro_use_cuda=KOKORO_USE_CUDA,
                             )
                             worker.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
                             worker.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
