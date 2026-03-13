@@ -149,6 +149,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
         space_url = os.getenv("HUGGINGFACE_SPACE_URL", None)
         space_skip_ssl = os.getenv("HUGGINGFACE_SPACE_SKIP_SSL_VERIFY", "").lower() in ("1", "true", "yes")
 
+        # Optional: Use local QLoRA-finetuned model (default: disabled)
+        use_local_llm = os.getenv("USE_LOCAL_LLM", "").lower() in ("1", "true", "yes")
+        local_adapter_path = os.getenv("LOCAL_ADAPTER_PATH", "granite_f1_finetuned_live")
+
         llm_client = LLMClient(
             huggingface_token=self.huggingface_token,
             model_id=self.hf_model_id,
@@ -157,7 +161,12 @@ class AIRaceEngineerWorker(QtCore.QThread):
             endpoint_url=endpoint_url,
             space_url=space_url,
             space_skip_ssl_verify=space_skip_ssl,
+            use_local_llm=use_local_llm,
+            local_adapter_path=local_adapter_path,
         )
+
+        if use_local_llm:
+            logger.info("Using local QLoRA-finetuned Granite model from: %s", local_adapter_path)
 
         # Create race engineer agent
         self.race_engineer_agent = RaceEngineerAgent(

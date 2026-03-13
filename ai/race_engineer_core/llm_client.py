@@ -63,6 +63,8 @@ class LLMClient:
         endpoint_url: Optional[str] = None,
         space_url: Optional[str] = None,
         space_skip_ssl_verify: bool = False,
+        use_local_llm: bool = False,
+        local_adapter_path: str = "granite_f1_finetuned_live",
     ):
         """
         Initialize LLM Client.
@@ -84,6 +86,8 @@ class LLMClient:
                        over endpoint_url/model_id and will be called via HTTP POST.
             space_skip_ssl_verify: If True, skip SSL cert verification for Space
                                   requests only (use when HF Space hostname/cert mismatch).
+            use_local_llm: If True, use local QLoRA-finetuned model instead of HF APIs.
+            local_adapter_path: Path to QLoRA adapter directory (relative to project root).
         """
         self.huggingface_token = huggingface_token
         self.model_id = model_id
@@ -95,10 +99,51 @@ class LLMClient:
         self.endpoint_url = endpoint_url
         self.space_url = space_url
         self.space_skip_ssl_verify = space_skip_ssl_verify
+        self.use_local_llm = use_local_llm
+        self.local_adapter_path = local_adapter_path
 
         # Initialize client instance (lazy initialization)
         self._client = None
         self._client_initialized = False
+
+        # Local LLM inference
+        self._local_llm = None
+        self._local_llm_initialized = False
+
+        # Pre-load local LLM if enabled
+        if self.use_local_llm:
+            self._init_local_llm()
+
+    def _init_local_llm(self) -> None:
+        """Initialize local LLM inference (pre-loaded on startup)."""
+        if self._local_llm_initialized:
+            return
+
+        try:
+            from ai.local_llm_inference import LocalLLMInference
+
+            logger.info("Pre-loading local LLM (Granite-4.0-micro + QLoRA)...")
+            self._local_llm = LocalLLMInference(
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                adapter_path=self.local_adapter_path,
+            )
+            self._local_llm.load()
+            self._local_llm_initialized = True
+            logger.info("Local LLM ready")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize local LLM: {e}")
+            self._local_llm = None
+            self._local_llm_initialized = True
+
+    def _get_local_llm(self):
+        """Get local LLM instance (if available)."""
+        if not self.use_local_llm:
+            return None
+        if not self._local_llm_initialized:
+            self._init_local_llm()
+        return self._local_llm
 
     def _get_client(self):
         """
@@ -220,12 +265,29 @@ class LLMClient:
         """
         Internal method to invoke the LLM.
 
+        Priority order:
+        1. Local LLM (if enabled and loaded)
+        2. HF Space (if configured)
+        3. HF Inference Endpoint (if configured)
+        4. Generic HF Model API
+
         Args:
             prompt: Formatted prompt
 
         Returns:
             Raw LLM response text
         """
+        # Try local LLM first
+        local_llm = self._get_local_llm()
+        if local_llm is not None:
+            loop = asyncio.get_event_loop()
+            try:
+                response = await loop.run_in_executor(None, local_llm.generate, prompt)
+                return response
+            except Exception as e:
+                logger.error(f"Local LLM generation failed: {e}")
+                raise
+
         # If a custom Space backend is configured, prefer calling it directly.
         if self.space_url:
             loop = asyncio.get_event_loop()
