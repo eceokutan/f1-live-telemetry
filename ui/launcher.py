@@ -69,7 +69,8 @@ class LauncherWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Jarvis Granite - Setup & Settings")
-        self.setMinimumSize(560, 760)
+        self.setMinimumSize(780, 640)
+        self.resize(820, 680)
         self.setModal(True)
 
         self.config = load_config()
@@ -87,24 +88,34 @@ class LauncherWindow(QtWidgets.QDialog):
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(14)
-        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 16, 20, 16)
 
         # ---- Title ----
         title = QtWidgets.QLabel("SETUP & SETTINGS")
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setStyleSheet(f"""
             font-family: '{FONT_HEADING}';
-            font-size: 28px;
-            padding: 6px;
+            font-size: 26px;
+            padding: 4px;
             background-color: transparent;
         """)
         layout.addWidget(title)
 
+        # Keep content scrollable so action buttons are always reachable.
+        content_scroll = QtWidgets.QScrollArea()
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        content = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(content)
+        content_layout.setSpacing(10)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
         # ---- About ----
         about_group = QtWidgets.QGroupBox("ABOUT")
         about_layout = QtWidgets.QVBoxLayout(about_group)
-        about_layout.setContentsMargins(12, 20, 12, 12)
+        about_layout.setContentsMargins(12, 16, 12, 10)
         about_text = QtWidgets.QLabel(
             "<b>F1 Jarvis Granite</b> is a real-time telemetry visualisation "
             "tool for Assetto Corsa. It displays live lap data, track maps, "
@@ -125,20 +136,24 @@ class LauncherWindow(QtWidgets.QDialog):
         )
         about_text.setOpenExternalLinks(True)
         about_text.setWordWrap(True)
-        about_text.setMinimumHeight(200)
+        about_text.setMinimumHeight(130)
         about_text.setStyleSheet(f"""
             color: {TEXT_COLOR};
             font-family: '{FONT_BODY}';
-            font-size: 11pt;
+            font-size: 10pt;
             background-color: transparent;
         """)
         about_layout.addWidget(about_text)
-        layout.addWidget(about_group)
+        content_layout.addWidget(about_group)
+
+        # ---- Lower settings row ----
+        lower_row = QtWidgets.QHBoxLayout()
+        lower_row.setSpacing(10)
 
         # ---- Voice mode ----
         voice_group = QtWidgets.QGroupBox("VOICE INPUT")
         voice_layout = QtWidgets.QVBoxLayout(voice_group)
-        voice_layout.setContentsMargins(12, 20, 12, 12)
+        voice_layout.setContentsMargins(12, 16, 12, 10)
 
         self.voice_disabled_radio = QtWidgets.QRadioButton("Disabled")
         self.voice_ptt_radio = QtWidgets.QRadioButton("Push-to-Talk")
@@ -180,12 +195,12 @@ class LauncherWindow(QtWidgets.QDialog):
         self.voice_ptt_radio.toggled.connect(self.ptt_key_widget.setVisible)
         self.ptt_key_widget.setVisible(False)
 
-        layout.addWidget(voice_group)
+        lower_row.addWidget(voice_group, 1)
 
         # ---- AI mode ----
         ai_group = QtWidgets.QGroupBox("AI RACE ENGINEER")
         ai_layout = QtWidgets.QVBoxLayout(ai_group)
-        ai_layout.setContentsMargins(12, 20, 12, 12)
+        ai_layout.setContentsMargins(12, 16, 12, 10)
         ai_layout.setSpacing(8)
 
         self.ai_enabled_checkbox = QtWidgets.QCheckBox("Enable AI Race Engineer")
@@ -221,9 +236,12 @@ class LauncherWindow(QtWidgets.QDialog):
         ai_layout.addWidget(ai_hint)
 
         self.use_local_llm_checkbox.toggled.connect(self._update_local_controls_visibility)
-        layout.addWidget(ai_group)
+        lower_row.addWidget(ai_group, 1)
 
-        layout.addStretch()
+        content_layout.addLayout(lower_row)
+        content_layout.addStretch()
+        content_scroll.setWidget(content)
+        layout.addWidget(content_scroll, 1)
 
         # ---- Buttons ----
         btn_layout = QtWidgets.QHBoxLayout()
