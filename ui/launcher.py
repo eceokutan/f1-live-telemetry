@@ -68,7 +68,7 @@ class LauncherWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Jarvis Granite - Setup & Settings")
-        self.setMinimumSize(520, 480)
+        self.setMinimumSize(520, 620)
         self.setModal(True)
 
         self.config = load_config()
@@ -106,13 +106,23 @@ class LauncherWindow(QtWidgets.QDialog):
             "<b>F1 Jarvis Granite</b> is a real-time telemetry visualisation "
             "tool for Assetto Corsa. It displays live lap data, track maps, "
             "speed/RPM/brake graphs, and tire information as you drive.<br><br>"
-            "<b>How to use:</b><br>"
-            "1. Launch Assetto Corsa and load into a track session.<br>"
-            "2. Configure voice settings below and click <b>Start</b>.<br>"
-            "3. Drive! The dashboard updates in real time."
+            "<b>How to set up:</b><br>"
+            "1. Download <a href='https://assettocorsa.club/content-manager.html' "
+            "style='color: #6FA8FF;'>Content Manager</a> for Assetto Corsa<br>"
+            "2. In Content Manager go to Settings &gt; Assetto Corsa &gt; System "
+            "&gt; Allow Developer Apps and Settings &gt; Assetto Corsa &gt; "
+            "Python Apps &gt; Enable Python Apps and Developer Apps<br>"
+            "3. Launch Assetto Corsa and load into a track session<br>"
+            "4. Configure voice settings below and click <b>Start Jarvis Live</b> "
+            "(make sure your preferred voice input device is the default in "
+            "system settings)<br>"
+            "5. Drive! The dashboard will update in real time<br>"
+            "6. Once you are done recording a session, exit Jarvis Live and "
+            "click <b>Start Jarvis Post</b> to see your Post Race Analysis"
         )
+        about_text.setOpenExternalLinks(True)
         about_text.setWordWrap(True)
-        about_text.setMinimumHeight(100)
+        about_text.setMinimumHeight(200)
         about_text.setStyleSheet(f"""
             color: {TEXT_COLOR};
             font-family: '{FONT_BODY}';
