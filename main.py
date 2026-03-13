@@ -116,31 +116,50 @@ def _start_background_model_prewarm(_settings: dict):
     def _worker():
         prewarm_stt = True
         prewarm_tts = True
+        prewarm_llm = bool(_settings.get("use_local_llm", False))
+        local_adapter_path = _settings.get("local_adapter_path", "race_engineer_llm")
         try:
             # Run cache checks inside the worker so launcher creation is never
             # blocked by optional model imports (e.g., faster_whisper).
             try:
-                from ai.model_prewarm import needs_faster_whisper_prewarm, needs_kokoro_prewarm
+                from ai.model_prewarm import (
+                    needs_faster_whisper_prewarm,
+                    needs_kokoro_prewarm,
+                    needs_local_llm_prewarm,
+                )
 
                 prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
                 prewarm_tts = needs_kokoro_prewarm()
+                if prewarm_llm:
+                    prewarm_llm = needs_local_llm_prewarm()
             except Exception as e:
                 logger.warning(
                     "Could not inspect model cache state, falling back to full prewarm: %s",
                     e,
                 )
 
-            if not prewarm_stt and not prewarm_tts:
+            if not prewarm_stt and not prewarm_tts and not prewarm_llm:
                 logger.info("Background model prewarm skipped (all required caches already warm)")
                 return
 
-            from ai.model_prewarm import prewarm_faster_whisper, prewarm_kokoro
+            from ai.model_prewarm import prewarm_faster_whisper, prewarm_kokoro, prewarm_local_llm
 
             logger.info(
-                "Background model prewarm started (stt=%s, tts=%s)",
+                "Background model prewarm started (stt=%s, tts=%s, llm=%s)",
                 prewarm_stt,
                 prewarm_tts,
+                prewarm_llm,
             )
+
+            if prewarm_llm:
+                try:
+                    prewarm_local_llm(adapter_path=local_adapter_path)
+                    logger.info("Background prewarm: local LLM ready")
+                except Exception as e:
+                    logger.warning("Background prewarm: local LLM failed: %s", e)
+            else:
+                if _settings.get("use_local_llm", False):
+                    logger.info("Background prewarm: local LLM skipped (already loaded)")
 
             if prewarm_stt:
                 try:

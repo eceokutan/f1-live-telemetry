@@ -103,6 +103,21 @@ def _clear_stale_locks(cache_dir: Path, max_age_seconds: int = 1200) -> None:
             continue
 
 
+def needs_local_llm_prewarm() -> bool:
+    """True when the local LLM singleton is not yet loaded into GPU memory."""
+    try:
+        from ai.local_llm_inference import LocalLLMInference
+        return LocalLLMInference.get_shared_if_loaded() is None
+    except Exception:
+        return True
+
+
+def prewarm_local_llm(adapter_path: str = "race_engineer_llm") -> None:
+    """Load the local LLM into the shared singleton (downloads base model on first run)."""
+    from ai.local_llm_inference import LocalLLMInference
+    LocalLLMInference.get_shared(adapter_path=adapter_path)
+
+
 def prewarm_faster_whisper(model_size: str = "base") -> None:
     """Download/cache faster-whisper model files."""
     from faster_whisper import WhisperModel

@@ -8,11 +8,15 @@ the local QLoRA adapter from race_engineer_llm/.
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar, Optional
 
 import torch
 
 logger = logging.getLogger(__name__)
+
+# Module-level singleton so the model stays in GPU memory across restarts
+# within the same process (e.g. launcher loop → run_jarvis_live → back to launcher).
+_shared_instance: Optional["LocalLLMInference"] = None
 
 
 class LocalLLMInference:
@@ -256,3 +260,48 @@ class LocalLLMInference:
     def __call__(self, prompt: str) -> str:
         """Allow calling the inference object directly."""
         return self.generate(prompt)
+
+    # ------------------------------------------------------------------
+    # Singleton helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def get_shared(
+        cls,
+        base_model_id: str = "ibm-granite/granite-4.0-micro",
+        adapter_path: str = "race_engineer_llm",
+        max_tokens: int = 24,
+        temperature: float = 0.3,
+        max_time_seconds: float = 5.0,
+        max_prompt_tokens: int = 256,
+        use_gpu: bool = True,
+    ) -> "LocalLLMInference":
+        """
+        Return the shared singleton instance, creating and loading it on first call.
+
+        The model stays in GPU memory for the lifetime of the process so
+        subsequent Jarvis Live sessions reuse it without the ~85 s reload.
+        """
+        global _shared_instance
+        if _shared_instance is not None and _shared_instance._loaded:
+            return _shared_instance
+
+        instance = cls(
+            base_model_id=base_model_id,
+            adapter_path=adapter_path,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_time_seconds=max_time_seconds,
+            max_prompt_tokens=max_prompt_tokens,
+            use_gpu=use_gpu,
+        )
+        instance.load()
+        _shared_instance = instance
+        return instance
+
+    @classmethod
+    def get_shared_if_loaded(cls) -> Optional["LocalLLMInference"]:
+        """Return the shared instance only if it is already loaded, else None."""
+        if _shared_instance is not None and _shared_instance._loaded:
+            return _shared_instance
+        return None

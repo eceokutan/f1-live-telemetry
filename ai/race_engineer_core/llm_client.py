@@ -122,23 +122,22 @@ class LLMClient:
             self._init_local_llm()
 
     def _init_local_llm(self) -> None:
-        """Initialize local LLM inference (pre-loaded on startup)."""
+        """Initialize local LLM inference, reusing the shared singleton if available."""
         if self._local_llm_initialized:
             return
 
         try:
             from ai.local_llm_inference import LocalLLMInference
 
-            logger.info("Pre-loading local LLM (Granite-4.0-micro + QLoRA)...")
-            self._local_llm = LocalLLMInference(
+            logger.info("Acquiring shared local LLM instance (Granite-4.0-micro + QLoRA)...")
+            self._local_llm = LocalLLMInference.get_shared(
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 adapter_path=self.local_adapter_path,
                 max_time_seconds=self.local_max_time_seconds,
             )
-            self._local_llm.load()
             self._local_llm_initialized = True
-            logger.info("Local LLM ready")
+            logger.info("Local LLM ready (shared instance)")
 
         except Exception as e:
             logger.error(f"Failed to initialize local LLM: {e}")
