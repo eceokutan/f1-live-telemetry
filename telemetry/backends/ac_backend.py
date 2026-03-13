@@ -531,7 +531,7 @@ class AcTelemetryWorker(QtCore.QThread):
                         live_data = {
                             "current_lap": lap_id + 1,
                             "speed": speed,
-                            "gear": raw_gear,
+                            "gear": display_gear,
                             "rpm": phys.rpms,
                             "fuel": phys.fuel,
                             "position": gfx.position,

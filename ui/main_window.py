@@ -396,13 +396,13 @@ class MainWindow(QMainWindow):
         else:
             pit_status = "🏎️ ON TRACK"
 
-        # Format gear display
-        if gear == 0:
+        # Format gear display (display_gear: -1=R, 0=N, 1+=gear number)
+        if gear <= -1:
             gear_display = "R"
-        elif gear == 1:
+        elif gear == 0:
             gear_display = "N"
         else:
-            gear_display = str(gear - 1)
+            gear_display = str(gear)
 
         self.lap_label.setText(f"Lap: {current_lap}")
         self.position_label.setText(f"Position: P{position}")
