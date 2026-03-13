@@ -21,16 +21,16 @@ DEFAULTS = {
     "remember_credentials": False,
     "huggingface_token": "",
     "huggingface_model_id": "",
-    "watson_tts_api_key": "",
-    "watson_tts_url": "",
+    "kokoro_voice": "bm_lewis",
+    "kokoro_lang": "en-gb",
+    "kokoro_speed": 0.97,
+    "kokoro_use_cuda": False,
 }
 
 # Keys that should NOT be saved when "remember_credentials" is unchecked
 CREDENTIAL_KEYS = [
     "huggingface_token",
     "huggingface_model_id",
-    "watson_tts_api_key",
-    "watson_tts_url",
 ]
 
 

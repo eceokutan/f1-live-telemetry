@@ -24,6 +24,13 @@ A real-time telemetry visualization tool for sim racing games with AI race engin
 pip install -r requirements.txt
 ```
 
+### 1b. (Recommended) Prewarm Voice Models
+```bash
+python scripts/prewarm_models.py
+```
+This downloads/caches faster-whisper and Kokoro assets ahead of time to avoid
+first-use voice cold starts.
+
 ### 2. Run with Assetto Corsa (default)
 ```bash
 python main.py
@@ -92,12 +99,17 @@ Create `.env` file (copy from `.env.example`):
 HUGGINGFACE_TOKEN=hf_your_api_key_here
 HUGGINGFACE_MODEL_ID=your_model_id
 
-# IBM Watson TTS (voice output)
-WATSON_TTS_API_KEY=your_tts_key
-WATSON_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com
+# Kokoro TTS (local voice output)
+KOKORO_VOICE=bm_lewis
 ```
 
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed platform setup.
+
+By default, the app also starts a background model prewarm on launch while
+you are in the launcher. Disable with:
+```bash
+PREWARM_MODELS_ON_START=false
+```
 
 ---
 
@@ -276,7 +288,7 @@ driver_query signal → AI Race Engineer
 
 - Telemetry dashboard: Team 17
 - AI race engineer (`ai/race_engineer_core/`): Team 17 (integrated)
-- IBM Watson: TTS
+- Kokoro: local TTS
 - Silero VAD: Voice activity detection
 - Game APIs: AC shared memory, ACC broadcasting
 

@@ -426,8 +426,6 @@ class TestTTSOutputWorkerSentencePipelining:
         from ai.tts_output import TTSOutputWorker
 
         worker = TTSOutputWorker(
-            watson_api_key="test-key",
-            watson_url="https://api.test.com",
             use_sentence_pipelining=True
         )
 
@@ -438,10 +436,7 @@ class TestTTSOutputWorkerSentencePipelining:
         """TTSOutputWorker defaults to no sentence pipelining."""
         from ai.tts_output import TTSOutputWorker
 
-        worker = TTSOutputWorker(
-            watson_api_key="test-key",
-            watson_url="https://api.test.com"
-        )
+        worker = TTSOutputWorker()
 
         assert worker.use_sentence_pipelining is False
 
@@ -450,8 +445,6 @@ class TestTTSOutputWorkerSentencePipelining:
         from ai.tts_output import TTSOutputWorker
 
         worker = TTSOutputWorker(
-            watson_api_key="test-key",
-            watson_url="https://api.test.com",
             use_sentence_pipelining=True
         )
 
@@ -462,13 +455,24 @@ class TestTTSOutputWorkerSentencePipelining:
         from ai.tts_output import TTSOutputWorker
 
         worker = TTSOutputWorker(
-            watson_api_key="test-key",
-            watson_url="https://api.test.com",
             use_sentence_pipelining=True
         )
 
         assert hasattr(worker, '_synthesize_and_play_pipelined')
         assert callable(worker._synthesize_and_play_pipelined)
+
+    def test_tts_worker_speak_ignores_closed_event_loop(self):
+        """speak() should not raise when called during/after loop shutdown."""
+        from ai.tts_output import TTSOutputWorker
+
+        worker = TTSOutputWorker()
+        worker._running = True
+        worker.message_queue = asyncio.Queue()
+        worker._event_loop = asyncio.new_event_loop()
+        worker._event_loop.close()
+
+        with patch.object(worker, "isRunning", return_value=True):
+            worker.speak("Test message")
 
 
 # =============================================================================
