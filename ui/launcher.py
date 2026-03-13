@@ -1,7 +1,7 @@
 """
 Setup & Settings window for Jarvis Granite.
 
-Lets the user configure voice mode and PTT key.
+Lets the user configure voice mode and keyboard PTT key.
 """
 
 import logging
@@ -150,14 +150,27 @@ class LauncherWindow(QtWidgets.QDialog):
         voice_layout.addWidget(self.voice_ptt_radio)
         voice_layout.addWidget(self.voice_continuous_radio)
 
-        # PTT key selector
+        # PTT keyboard selector
         self.ptt_key_widget = QtWidgets.QWidget()
-        ptt_key_layout = QtWidgets.QHBoxLayout(self.ptt_key_widget)
+        ptt_key_layout = QtWidgets.QVBoxLayout(self.ptt_key_widget)
         ptt_key_layout.setContentsMargins(20, 4, 0, 0)
-        ptt_key_layout.addWidget(QtWidgets.QLabel("Key:"))
+        ptt_key_layout.setSpacing(4)
+
+        ptt_key_row = QtWidgets.QHBoxLayout()
+        ptt_key_row.addWidget(QtWidgets.QLabel("Keyboard Key:"))
         self.ptt_key_button = KeyCaptureButton("v")
-        ptt_key_layout.addWidget(self.ptt_key_button)
-        ptt_key_layout.addStretch()
+        ptt_key_row.addWidget(self.ptt_key_button)
+        ptt_key_row.addStretch()
+        ptt_key_layout.addLayout(ptt_key_row)
+
+        self.ptt_key_hint_label = QtWidgets.QLabel(
+            "This picker changes keyboard PTT only. "
+        )
+        self.ptt_key_hint_label.setWordWrap(True)
+        self.ptt_key_hint_label.setStyleSheet(
+            f"color: {TEXT_COLOR}; font-size: 10pt;"
+        )
+        ptt_key_layout.addWidget(self.ptt_key_hint_label)
         voice_layout.addWidget(self.ptt_key_widget)
 
         # Show/hide PTT key based on radio selection

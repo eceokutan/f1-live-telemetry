@@ -6,7 +6,7 @@ for push-to-talk activation. Works globally — captures input even when the
 game window has focus, not the dashboard.
 
 Usage:
-    controller = PTTController(joystick_button_index=9)
+    controller = PTTController(joystick_button_index=9, keyboard_key="v")
     controller.ptt_pressed.connect(voice_worker.start_recording)
     controller.ptt_released.connect(voice_worker.stop_recording)
     controller.start()
@@ -39,17 +39,21 @@ class PTTController(QtCore.QObject):
     ptt_released = QtCore.pyqtSignal()
     status_update = QtCore.pyqtSignal(str)
 
-    def __init__(self, joystick_button_index: int = 11, parent=None):
+    def __init__(self, joystick_button_index: int = 11, keyboard_key: str = "v", parent=None):
         """
         Initialize PTT controller.
 
         Args:
-            joystick_button_index: Joystick button index for PTT (default 12,
+            joystick_button_index: Joystick button index for PTT (default 11,
                                    Thrustmaster T128X RSB). Use --ptt-button to override.
+            keyboard_key: Keyboard key name captured from launcher settings
+                          (e.g. "v", "space", "f1").
         """
         super().__init__(parent)
 
         self._joystick_button_index = joystick_button_index
+        self._keyboard_key = (keyboard_key or "v").strip().lower()
+        self._keyboard_vk = self._resolve_virtual_key(self._keyboard_key)
 
         # State (protected by _lock)
         self._lock = threading.Lock()
@@ -69,9 +73,14 @@ class PTTController(QtCore.QObject):
         self._start_keyboard_listener()
         self._start_keyboard_polling_fallback()
         self._start_joystick_polling()
-        logger.info("PTT controller started (keyboard=V, joystick=button %d)",
-                     self._joystick_button_index)
-        self.status_update.emit("PTT ready (hold V key or joystick button)")
+        logger.info(
+            "PTT controller started (keyboard=%s, joystick=button %d)",
+            self._keyboard_key,
+            self._joystick_button_index,
+        )
+        self.status_update.emit(
+            f"PTT ready (hold {self._keyboard_key.upper()} key or joystick button)"
+        )
 
     def stop(self):
         """Stop monitoring PTT inputs."""
@@ -87,25 +96,20 @@ class PTTController(QtCore.QObject):
         logger.info("PTT controller stopped")
 
     def _start_keyboard_listener(self):
-        """Start global keyboard listener for V key using pynput."""
+        """Start global keyboard listener for configured key using pynput."""
         try:
             from pynput import keyboard
 
             def on_press(key):
                 try:
-                    # Check for 'v' key (works regardless of shift/caps state)
-                    if hasattr(key, 'char') and key.char and key.char.lower() == 'v':
-                        self._update_state(keyboard_held=True)
-                    elif hasattr(key, 'vk') and key.vk == 0x56:  # VK_V
+                    if self._matches_keyboard_key(key):
                         self._update_state(keyboard_held=True)
                 except Exception:
                     pass
 
             def on_release(key):
                 try:
-                    if hasattr(key, 'char') and key.char and key.char.lower() == 'v':
-                        self._update_state(keyboard_held=False)
-                    elif hasattr(key, 'vk') and key.vk == 0x56:
+                    if self._matches_keyboard_key(key):
                         self._update_state(keyboard_held=False)
                 except Exception:
                     pass
@@ -116,7 +120,7 @@ class PTTController(QtCore.QObject):
             )
             self._keyboard_listener.daemon = True
             self._keyboard_listener.start()
-            logger.info("Keyboard PTT active (V key)")
+            logger.info("Keyboard PTT active (%s key)", self._keyboard_key)
 
         except ImportError:
             logger.error("pynput not installed — keyboard PTT disabled. "
@@ -144,11 +148,17 @@ class PTTController(QtCore.QObject):
 
     def _start_keyboard_polling_fallback(self):
         """
-        Start a Windows key-state polling fallback for V key.
+        Start a Windows key-state polling fallback for the configured key.
 
         This improves reliability in scenarios where global keyboard hooks are
         throttled or intermittently blocked by game focus/state.
         """
+        if self._keyboard_vk is None:
+            logger.info(
+                "Keyboard polling fallback disabled for key '%s' (no Win32 VK mapping)",
+                self._keyboard_key,
+            )
+            return
         self._keyboard_poll_thread = threading.Thread(
             target=self._keyboard_poll_loop,
             daemon=True,
@@ -157,14 +167,13 @@ class PTTController(QtCore.QObject):
         self._keyboard_poll_thread.start()
 
     def _keyboard_poll_loop(self):
-        """Poll V key state via Win32 API as fallback."""
+        """Poll configured key state via Win32 API as fallback."""
         if not hasattr(ctypes, "windll"):
             return
 
-        VK_V = 0x56
         while self._running:
             try:
-                pressed = bool(ctypes.windll.user32.GetAsyncKeyState(VK_V) & 0x8000)
+                pressed = bool(ctypes.windll.user32.GetAsyncKeyState(self._keyboard_vk) & 0x8000)
                 self._update_state(keyboard_held=pressed)
             except Exception:
                 # Keep hook-based mode alive even if fallback polling fails.
@@ -263,3 +272,57 @@ class PTTController(QtCore.QObject):
                 else:
                     logger.info("PTT released")
                     self.ptt_released.emit()
+
+    @staticmethod
+    def _resolve_virtual_key(key_name: str):
+        """Best-effort mapping from key name to Win32 virtual-key code."""
+        if not key_name:
+            return None
+
+        if len(key_name) == 1:
+            ch = key_name.upper()
+            if "A" <= ch <= "Z" or "0" <= ch <= "9":
+                return ord(ch)
+
+        key_map = {
+            "space": 0x20,
+            "enter": 0x0D,
+            "return": 0x0D,
+            "tab": 0x09,
+            "esc": 0x1B,
+            "escape": 0x1B,
+            "backspace": 0x08,
+            "left": 0x25,
+            "up": 0x26,
+            "right": 0x27,
+            "down": 0x28,
+        }
+
+        if key_name in key_map:
+            return key_map[key_name]
+
+        if key_name.startswith("f") and key_name[1:].isdigit():
+            fn = int(key_name[1:])
+            if 1 <= fn <= 24:
+                return 0x70 + (fn - 1)
+
+        return None
+
+    def _matches_keyboard_key(self, key) -> bool:
+        """Return True when pynput key object matches configured keyboard key."""
+        try:
+            char = getattr(key, "char", None)
+            if char and char.lower() == self._keyboard_key:
+                return True
+
+            name = getattr(key, "name", None)
+            if name and name.lower() == self._keyboard_key:
+                return True
+
+            vk = getattr(key, "vk", None)
+            if vk is not None and self._keyboard_vk is not None and vk == self._keyboard_vk:
+                return True
+        except Exception:
+            return False
+
+        return False
