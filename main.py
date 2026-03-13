@@ -298,9 +298,16 @@ def run_jarvis_live(settings: dict):
                 # Initialize PTT controller
                 if enable_ptt and voice_thread and PTT_AVAILABLE:
                     ptt_button_index = 11
-                    logger.info("Initializing PTT Controller (button index=%d)", ptt_button_index)
+                    logger.info(
+                        "Initializing PTT Controller (keyboard=%s, joystick button=%d)",
+                        ptt_key,
+                        ptt_button_index,
+                    )
                     try:
-                        ptt_controller = PTTController(joystick_button_index=ptt_button_index)
+                        ptt_controller = PTTController(
+                            joystick_button_index=ptt_button_index,
+                            keyboard_key=ptt_key,
+                        )
                         ptt_controller.ptt_pressed.connect(voice_thread.start_recording)
                         ptt_controller.ptt_released.connect(voice_thread.stop_recording)
                         ptt_controller.status_update.connect(lambda msg: logger.info("PTT: %s", msg))
