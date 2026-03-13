@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ui.canvases import TrackMapCanvas, TimeSeriesCanvas, MultiLineCanvas
-from ui.styles import DARK_STYLESHEET
+from ui.styles import DARK_STYLESHEET, FONT_HEADING
 
 
 class MainWindow(QMainWindow):
@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
 
         title_label = QLabel("Live Telemetry Analysis")
         title_label.setAlignment(QtCore.Qt.AlignCenter)
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        title_label.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 18px;")
         mid_col.addWidget(title_label)
 
         # Create canvases

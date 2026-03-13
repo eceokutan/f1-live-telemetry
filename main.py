@@ -625,6 +625,10 @@ if __name__ == "__main__":
 
     app = QtWidgets.QApplication(sys.argv)
 
+    # Load custom fonts (Bebas Neue, Rajdhani) before any UI is shown
+    from ui.styles import load_fonts
+    load_fonts()
+
     # Load saved settings once
     settings = load_config()
     _start_background_model_prewarm(settings)

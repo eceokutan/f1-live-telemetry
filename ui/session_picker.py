@@ -6,7 +6,7 @@ from PyQt5 import QtWidgets, QtCore
 from data.session_exporter import SessionExporter
 from ui.styles import (
     BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR,
-    BORDER_COLOR, ACCENT_PRIMARY,
+    BORDER_COLOR, ACCENT_PRIMARY, FONT_HEADING, FONT_BODY,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,8 @@ class SessionPickerDialog(QtWidgets.QDialog):
         layout.setSpacing(12)
 
         # Title
-        title = QtWidgets.QLabel("Select a recorded session for post-race analysis")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 8px;")
+        title = QtWidgets.QLabel("SELECT A SESSION")
+        title.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 20px; padding: 8px;")
         layout.addWidget(title)
 
         # Quick action: use last recorded
@@ -299,6 +299,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
             QDialog {{
                 background-color: {BG_COLOR};
                 color: {TEXT_COLOR};
+                font-family: '{FONT_BODY}';
             }}
             QLabel {{
                 color: {TEXT_COLOR};

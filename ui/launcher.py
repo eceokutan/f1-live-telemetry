@@ -1,16 +1,15 @@
 """
-Launcher / Settings window shown before the main dashboard.
+Setup & Settings window for Jarvis Granite.
 
-Lets the user configure AI, voice mode, API credentials, and PTT key
-without needing command-line flags.
+Lets the user configure voice mode and PTT key.
 """
 
 import logging
 from PyQt5 import QtWidgets, QtCore, QtGui
 from ui.config_manager import load_config, save_config
 from ui.styles import (
-    BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR, TEXT_COLOR_DIM,
-    BORDER_COLOR, ACCENT_BLUE,
+    BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR,
+    BORDER_COLOR, ACCENT_PRIMARY, FONT_HEADING, FONT_BODY,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,12 +43,10 @@ class KeyCaptureButton(QtWidgets.QPushButton):
             return
 
         key = event.key()
-        # Ignore modifier-only presses
         if key in (QtCore.Qt.Key_Shift, QtCore.Qt.Key_Control,
                    QtCore.Qt.Key_Alt, QtCore.Qt.Key_Meta):
             return
 
-        # Map key to a readable name
         seq = QtGui.QKeySequence(key)
         name = seq.toString().lower()
         if name:
@@ -66,12 +63,12 @@ class KeyCaptureButton(QtWidgets.QPushButton):
 
 
 class LauncherWindow(QtWidgets.QDialog):
-    """Settings / launcher dialog shown on startup."""
+    """Setup & Settings dialog."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("F1 Telemetry Dashboard")
-        self.setMinimumSize(520, 620)
+        self.setWindowTitle("Jarvis Granite - Setup & Settings")
+        self.setMinimumSize(520, 480)
         self.setModal(True)
 
         self.config = load_config()
@@ -80,7 +77,6 @@ class LauncherWindow(QtWidgets.QDialog):
         self._build_ui()
         self._apply_theme()
         self._load_from_config()
-        self._toggle_ai_fields()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -88,63 +84,48 @@ class LauncherWindow(QtWidgets.QDialog):
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
+        layout.setContentsMargins(24, 20, 24, 20)
 
-        # ---- About / How to use ----
-        about_group = QtWidgets.QGroupBox("About && How to Use")
+        # ---- Title ----
+        title = QtWidgets.QLabel("SETUP & SETTINGS")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet(f"""
+            font-family: '{FONT_HEADING}';
+            font-size: 28px;
+            padding: 6px;
+            background-color: transparent;
+        """)
+        layout.addWidget(title)
+
+        # ---- About ----
+        about_group = QtWidgets.QGroupBox("ABOUT")
         about_layout = QtWidgets.QVBoxLayout(about_group)
+        about_layout.setContentsMargins(12, 20, 12, 12)
         about_text = QtWidgets.QLabel(
-            "<b>F1 Telemetry Dashboard</b> is a real-time telemetry visualisation "
+            "<b>F1 Jarvis Granite</b> is a real-time telemetry visualisation "
             "tool for Assetto Corsa. It displays live lap data, track maps, "
             "speed/RPM/brake graphs, and tire information as you drive.<br><br>"
             "<b>How to use:</b><br>"
-            "1. Install <b>Content Manager</b> for Assetto Corsa and enable "
-            "Python apps in Settings &gt; Assetto Corsa &gt; Apps.<br>"
-            "2. Launch Assetto Corsa and load into a track session.<br>"
-            "3. Configure settings below and click <b>Start</b>.<br>"
-            "4. Drive! The dashboard updates in real time.<br><br>"
-            "<b>AI Race Engineer</b> (optional): Provides live commentary and "
-            "answers voice questions about your race. Requires API credentials below. "
-            "Speech-to-text and text-to-speech both run locally. "
-            "Voice output uses Kokoro and auto-downloads a default voice on first run."
+            "1. Launch Assetto Corsa and load into a track session.<br>"
+            "2. Configure voice settings below and click <b>Start</b>.<br>"
+            "3. Drive! The dashboard updates in real time."
         )
         about_text.setWordWrap(True)
+        about_text.setMinimumHeight(100)
+        about_text.setStyleSheet(f"""
+            color: {TEXT_COLOR};
+            font-family: '{FONT_BODY}';
+            font-size: 11pt;
+            background-color: transparent;
+        """)
         about_layout.addWidget(about_text)
         layout.addWidget(about_group)
 
-        # ---- AI Race Engineer ----
-        ai_group = QtWidgets.QGroupBox("AI Race Engineer")
-        ai_layout = QtWidgets.QVBoxLayout(ai_group)
-
-        self.ai_checkbox = QtWidgets.QCheckBox("Enable AI Race Engineer")
-        self.ai_checkbox.toggled.connect(self._toggle_ai_fields)
-        ai_layout.addWidget(self.ai_checkbox)
-
-        # Credentials container (shown/hidden with AI toggle)
-        self.creds_widget = QtWidgets.QWidget()
-        creds_layout = QtWidgets.QFormLayout(self.creds_widget)
-        creds_layout.setContentsMargins(0, 4, 0, 0)
-
-        # HuggingFace
-        creds_layout.addRow(QtWidgets.QLabel("<b>HuggingFace (LLM)</b>"))
-        self.hf_token_edit = QtWidgets.QLineEdit()
-        self.hf_token_edit.setEchoMode(QtWidgets.QLineEdit.Password)
-        self.hf_token_edit.setPlaceholderText("hf_...")
-        creds_layout.addRow("Token:", self.hf_token_edit)
-
-        self.hf_model_edit = QtWidgets.QLineEdit()
-        self.hf_model_edit.setPlaceholderText("e.g. mistralai/Mistral-7B-Instruct-v0.2")
-        creds_layout.addRow("Model ID:", self.hf_model_edit)
-
-        self.remember_creds_checkbox = QtWidgets.QCheckBox("Remember credentials")
-        creds_layout.addRow(self.remember_creds_checkbox)
-
-        ai_layout.addWidget(self.creds_widget)
-        layout.addWidget(ai_group)
-
         # ---- Voice mode ----
-        self.voice_group = QtWidgets.QGroupBox("Voice Input")
-        voice_layout = QtWidgets.QVBoxLayout(self.voice_group)
+        voice_group = QtWidgets.QGroupBox("VOICE INPUT")
+        voice_layout = QtWidgets.QVBoxLayout(voice_group)
+        voice_layout.setContentsMargins(12, 20, 12, 12)
 
         self.voice_disabled_radio = QtWidgets.QRadioButton("Disabled")
         self.voice_ptt_radio = QtWidgets.QRadioButton("Push-to-Talk")
@@ -162,7 +143,7 @@ class LauncherWindow(QtWidgets.QDialog):
         # PTT key selector
         self.ptt_key_widget = QtWidgets.QWidget()
         ptt_key_layout = QtWidgets.QHBoxLayout(self.ptt_key_widget)
-        ptt_key_layout.setContentsMargins(20, 0, 0, 0)
+        ptt_key_layout.setContentsMargins(20, 4, 0, 0)
         ptt_key_layout.addWidget(QtWidgets.QLabel("Key:"))
         self.ptt_key_button = KeyCaptureButton("v")
         ptt_key_layout.addWidget(self.ptt_key_button)
@@ -173,31 +154,20 @@ class LauncherWindow(QtWidgets.QDialog):
         self.voice_ptt_radio.toggled.connect(self.ptt_key_widget.setVisible)
         self.ptt_key_widget.setVisible(False)
 
-        layout.addWidget(self.voice_group)
+        layout.addWidget(voice_group)
+
+        layout.addStretch()
 
         # ---- Buttons ----
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addStretch()
 
         self.start_button = QtWidgets.QPushButton("Start")
-        self.start_button.setFixedSize(120, 40)
+        self.start_button.setFixedSize(140, 44)
         self.start_button.clicked.connect(self._on_start)
         btn_layout.addWidget(self.start_button)
 
-        layout.addWidget(QtWidgets.QWidget())  # spacer
         layout.addLayout(btn_layout)
-
-    # ------------------------------------------------------------------
-    # Visibility toggles
-    # ------------------------------------------------------------------
-
-    def _toggle_ai_fields(self):
-        enabled = self.ai_checkbox.isChecked()
-        self.creds_widget.setVisible(enabled)
-        self.voice_group.setVisible(enabled)
-        if not enabled:
-            self.voice_disabled_radio.setChecked(True)
-        self.adjustSize()
 
     # ------------------------------------------------------------------
     # Config load / save
@@ -205,12 +175,8 @@ class LauncherWindow(QtWidgets.QDialog):
 
     def _load_from_config(self):
         c = self.config
-        self.ai_checkbox.setChecked(c.get("ai_enabled", False))
-        self.hf_token_edit.setText(c.get("huggingface_token", ""))
-        self.hf_model_edit.setText(c.get("huggingface_model_id", ""))
-        self.remember_creds_checkbox.setChecked(c.get("remember_credentials", False))
 
-        voice = c.get("voice_mode", "disabled")
+        voice = c.get("voice_mode", "push_to_talk")
         if voice == "push_to_talk":
             self.voice_ptt_radio.setChecked(True)
         elif voice == "continuous":
@@ -231,12 +197,9 @@ class LauncherWindow(QtWidgets.QDialog):
             voice_mode = "disabled"
 
         self.config.update({
-            "ai_enabled": self.ai_checkbox.isChecked(),
+            "ai_enabled": True,
             "voice_mode": voice_mode,
             "ptt_key": self.ptt_key_button.key_name,
-            "remember_credentials": self.remember_creds_checkbox.isChecked(),
-            "huggingface_token": self.hf_token_edit.text().strip(),
-            "huggingface_model_id": self.hf_model_edit.text().strip(),
         })
         save_config(self.config)
 
@@ -265,48 +228,42 @@ class LauncherWindow(QtWidgets.QDialog):
             QDialog {{
                 background-color: {BG_COLOR};
                 color: {TEXT_COLOR};
+                font-family: '{FONT_BODY}';
             }}
             QGroupBox {{
+                background-color: {BG_COLOR};
                 border: 1px solid {BORDER_COLOR};
                 border-radius: 4px;
-                margin-top: 8px;
-                padding-top: 12px;
-                font-weight: bold;
+                margin-top: 12px;
+                padding-top: 20px;
+                font-family: '{FONT_HEADING}';
+                font-size: 16pt;
                 color: {TEXT_COLOR};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 8px;
-                padding: 0 4px;
+                padding: 0 6px;
             }}
             QLabel {{
                 color: {TEXT_COLOR};
-                font-size: 10pt;
+                font-size: 11pt;
+                background-color: transparent;
             }}
             QCheckBox, QRadioButton {{
                 color: {TEXT_COLOR};
-                font-size: 10pt;
-                spacing: 6px;
-            }}
-            QLineEdit {{
-                background-color: {BG_COLOR_LIGHT};
-                color: {TEXT_COLOR};
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 4px;
-                padding: 4px 6px;
-                font-size: 10pt;
-            }}
-            QLineEdit:focus {{
-                border-color: {ACCENT_BLUE};
+                font-size: 11pt;
+                spacing: 8px;
+                background-color: transparent;
             }}
             QPushButton {{
-                background-color: {ACCENT_BLUE};
+                background-color: {ACCENT_PRIMARY};
                 color: #FFFFFF;
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 8px 16px;
                 font-weight: bold;
-                font-size: 11pt;
+                font-size: 12pt;
             }}
             QPushButton:hover {{
                 background-color: #C00500;

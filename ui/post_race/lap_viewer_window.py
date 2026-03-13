@@ -9,7 +9,7 @@ from typing import Optional
 from data import Session, Lap
 from analysis import AIPipelineBridge
 from .timeline_controller import TimelineController
-from ui.styles import DARK_STYLESHEET, TIRE_COLORS, TIRE_LABELS
+from ui.styles import DARK_STYLESHEET, TIRE_COLORS, TIRE_LABELS, FONT_HEADING
 from .canvases import TrackMapCanvas, TimeSeriesCanvas
 
 
@@ -97,6 +97,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _create_menu_bar(self) -> None:
         menu_bar = self.menuBar()
+        menu_bar.setNativeMenuBar(False)
 
         file_menu = menu_bar.addMenu("File")
 
@@ -125,7 +126,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Header label showing max limit
         header_action = QtWidgets.QWidgetAction(self)
         header_label = QtWidgets.QLabel(f"  Select up to {self.MAX_GRAPHS} graphs:")
-        header_label.setStyleSheet("color: #aaa; padding: 4px 8px; font-size: 11px;")
+        header_label.setStyleSheet("color: #aaa; padding: 6px 12px; font-size: 11pt;")
         header_action.setDefaultWidget(header_label)
         graphs_menu.addAction(header_action)
         graphs_menu.addSeparator()
@@ -235,8 +236,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(4)
 
-        title = QtWidgets.QLabel("Laps")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px;")
+        title = QtWidgets.QLabel("LAPS")
+        title.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 18px; padding: 4px;")
         layout.addWidget(title)
 
         self.lap_list = QtWidgets.QListWidget()
@@ -244,8 +245,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.lap_list.itemClicked.connect(self.on_lap_selected)
         layout.addWidget(self.lap_list)
 
-        track_label = QtWidgets.QLabel("Track Map")
-        track_label.setStyleSheet("font-size: 13px; font-weight: bold; padding: 4px;")
+        track_label = QtWidgets.QLabel("TRACK MAP")
+        track_label.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 16px; padding: 4px;")
         layout.addWidget(track_label)
 
         self.track_map_container = QtWidgets.QVBoxLayout()
@@ -256,8 +257,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         layout.addLayout(self.track_map_container)
 
         # Lap info section (moved here from the separate right panel)
-        info_label = QtWidgets.QLabel("Lap Info")
-        info_label.setStyleSheet("font-size: 13px; font-weight: bold; padding: 4px;")
+        info_label = QtWidgets.QLabel("LAP INFO")
+        info_label.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 16px; padding: 4px;")
         layout.addWidget(info_label)
 
         self.time_label = QtWidgets.QLabel("Time: 0.00s")
@@ -298,7 +299,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Placeholder (spans both columns initially)
         self.graph_placeholder = QtWidgets.QLabel("Load a session to view telemetry")
         self.graph_placeholder.setAlignment(QtCore.Qt.AlignCenter)
-        self.graph_placeholder.setStyleSheet("font-size: 14px; color: #888; padding: 50px;")
+        self.graph_placeholder.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 16px; color: #888; padding: 50px;")
         self.graph_layout_left.addWidget(self.graph_placeholder)
 
         return container

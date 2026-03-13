@@ -113,7 +113,7 @@ class UnifiedLauncher(QtWidgets.QDialog):
         layout.addWidget(self.post_btn)
 
         # Settings
-        self.settings_btn = QtWidgets.QPushButton("Settings")
+        self.settings_btn = QtWidgets.QPushButton("Setup & Settings")
         self.settings_btn.setFixedHeight(48)
         self.settings_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.settings_btn.setStyleSheet(f"""
@@ -131,7 +131,7 @@ class UnifiedLauncher(QtWidgets.QDialog):
             QPushButton:hover {{ background-color: #252525; color: {TEXT_COLOR}; }}
             QPushButton:pressed {{ background-color: #202020; }}
         """)
-        self.settings_btn.setToolTip("Configure AI Race Engineer, voice input, and API credentials")
+        self.settings_btn.setToolTip("Setup & Settings - Configure AI Race Engineer, voice input, and API credentials")
         self.settings_btn.clicked.connect(self._on_settings)
         layout.addWidget(self.settings_btn)
 

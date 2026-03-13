@@ -106,6 +106,7 @@ DARK_STYLESHEET = f"""
     QWidget {{
         background-color: {BG_COLOR};
         color: {TEXT_COLOR};
+        font-family: '{FONT_BODY}';
     }}
     QGroupBox {{
         border: 1px solid {BORDER_COLOR};
@@ -187,9 +188,32 @@ DARK_STYLESHEET = f"""
         background-color: {BG_COLOR};
         color: {TEXT_COLOR};
         border-bottom: 1px solid {BORDER_COLOR};
+        font-size: 11pt;
+        padding: 2px 0;
+    }}
+    QMenuBar::item {{
+        padding: 6px 14px;
     }}
     QMenuBar::item:selected {{
         background-color: {BG_COLOR_LIGHT};
+    }}
+    QMenu {{
+        background-color: {BG_COLOR_LIGHT};
+        color: {TEXT_COLOR};
+        border: 1px solid {BORDER_COLOR};
+        font-size: 11pt;
+        padding: 4px 0;
+    }}
+    QMenu::item {{
+        padding: 8px 24px;
+    }}
+    QMenu::item:selected {{
+        background-color: {ACCENT_PRIMARY};
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {BORDER_COLOR};
+        margin: 4px 8px;
     }}
     QSlider::groove:horizontal {{
         border: 1px solid {BORDER_COLOR};
