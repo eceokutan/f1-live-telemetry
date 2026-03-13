@@ -104,8 +104,9 @@ class LauncherWindow(QtWidgets.QDialog):
             "3. Configure settings below and click <b>Start</b>.<br>"
             "4. Drive! The dashboard updates in real time.<br><br>"
             "<b>AI Race Engineer</b> (optional): Provides live commentary and "
-            "answers voice questions about your race. Requires Hugging Face "
-            "credentials below. Speech-to-text runs locally."
+            "answers voice questions about your race. Requires API credentials below. "
+            "Speech-to-text and text-to-speech both run locally. "
+            "Voice output uses Kokoro and auto-downloads a default voice on first run."
         )
         about_text.setWordWrap(True)
         about_layout.addWidget(about_text)
@@ -134,6 +135,30 @@ class LauncherWindow(QtWidgets.QDialog):
         self.hf_model_edit = QtWidgets.QLineEdit()
         self.hf_model_edit.setPlaceholderText("e.g. mistralai/Mistral-7B-Instruct-v0.2")
         creds_layout.addRow("Model ID:", self.hf_model_edit)
+
+        # Kokoro TTS settings (shown when voice is enabled)
+        self.voice_creds_label = QtWidgets.QLabel(
+            "<b>Kokoro Text-to-Speech</b> (local voice output)"
+        )
+        creds_layout.addRow(self.voice_creds_label)
+
+        self.kokoro_voice_edit = QtWidgets.QLineEdit()
+        self.kokoro_voice_edit.setPlaceholderText("bm_lewis")
+        creds_layout.addRow("Voice ID:", self.kokoro_voice_edit)
+
+        self.kokoro_lang_edit = QtWidgets.QLineEdit()
+        self.kokoro_lang_edit.setPlaceholderText("en-gb")
+        creds_layout.addRow("Language:", self.kokoro_lang_edit)
+
+        self.kokoro_speed_spin = QtWidgets.QDoubleSpinBox()
+        self.kokoro_speed_spin.setRange(0.6, 1.4)
+        self.kokoro_speed_spin.setSingleStep(0.01)
+        self.kokoro_speed_spin.setDecimals(2)
+        self.kokoro_speed_spin.setValue(0.97)
+        creds_layout.addRow("Speed:", self.kokoro_speed_spin)
+
+        self.kokoro_cuda_checkbox = QtWidgets.QCheckBox("Use CUDA (if available)")
+        creds_layout.addRow(self.kokoro_cuda_checkbox)
 
         self.remember_creds_checkbox = QtWidgets.QCheckBox("Remember credentials")
         creds_layout.addRow(self.remember_creds_checkbox)
@@ -198,6 +223,22 @@ class LauncherWindow(QtWidgets.QDialog):
             self.voice_disabled_radio.setChecked(True)
         self.adjustSize()
 
+    def _toggle_voice_creds(self, disabled_checked):
+        """Show/hide local TTS settings based on voice mode."""
+        voice_enabled = not disabled_checked
+        self.voice_creds_label.setVisible(voice_enabled)
+        self.kokoro_voice_edit.setVisible(voice_enabled)
+        self.kokoro_lang_edit.setVisible(voice_enabled)
+        self.kokoro_speed_spin.setVisible(voice_enabled)
+        self.kokoro_cuda_checkbox.setVisible(voice_enabled)
+        # Also hide the form row labels
+        form = self.creds_widget.layout()
+        if isinstance(form, QtWidgets.QFormLayout):
+            for edit in (self.kokoro_voice_edit, self.kokoro_lang_edit, self.kokoro_speed_spin):
+                label = form.labelForField(edit)
+                if label:
+                    label.setVisible(voice_enabled)
+
     # ------------------------------------------------------------------
     # Config load / save
     # ------------------------------------------------------------------
@@ -207,6 +248,10 @@ class LauncherWindow(QtWidgets.QDialog):
         self.ai_checkbox.setChecked(c.get("ai_enabled", False))
         self.hf_token_edit.setText(c.get("huggingface_token", ""))
         self.hf_model_edit.setText(c.get("huggingface_model_id", ""))
+        self.kokoro_voice_edit.setText(c.get("kokoro_voice", "bm_lewis"))
+        self.kokoro_lang_edit.setText(c.get("kokoro_lang", "en-gb"))
+        self.kokoro_speed_spin.setValue(float(c.get("kokoro_speed", 0.97)))
+        self.kokoro_cuda_checkbox.setChecked(bool(c.get("kokoro_use_cuda", False)))
         self.remember_creds_checkbox.setChecked(c.get("remember_credentials", False))
 
         voice = c.get("voice_mode", "disabled")
@@ -236,6 +281,10 @@ class LauncherWindow(QtWidgets.QDialog):
             "remember_credentials": self.remember_creds_checkbox.isChecked(),
             "huggingface_token": self.hf_token_edit.text().strip(),
             "huggingface_model_id": self.hf_model_edit.text().strip(),
+            "kokoro_voice": self.kokoro_voice_edit.text().strip() or "bm_lewis",
+            "kokoro_lang": self.kokoro_lang_edit.text().strip() or "en-gb",
+            "kokoro_speed": float(self.kokoro_speed_spin.value()),
+            "kokoro_use_cuda": self.kokoro_cuda_checkbox.isChecked(),
         })
         save_config(self.config)
 
