@@ -74,6 +74,7 @@ data/kokoro_cache/
 docs.md
 notes.md
 ms-reduction.md
+livenotes.md
 
 # Models
 /granite_f1_finetuned_live

@@ -55,8 +55,6 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     def __init__(
         self,
-        huggingface_token: str,
-        hf_model_id: str,
         track_name: str = "Unknown Track",
         session_id: str = "ac_session_001",
         verbosity: str = "minimal",
@@ -65,8 +63,6 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Initialize AI Race Engineer.
 
         Args:
-            huggingface_token: Hugging Face access token
-            hf_model_id: Hugging Face model id for the race engineer LLM
             track_name: Name of the track
             session_id: Unique session identifier
             verbosity: AI verbosity level (minimal, moderate, verbose)
@@ -74,8 +70,6 @@ class AIRaceEngineerWorker(QtCore.QThread):
         super().__init__()
 
         # Configuration
-        self.huggingface_token = huggingface_token
-        self.hf_model_id = hf_model_id
         self.track_name = track_name
         self.session_id = session_id
         self.verbosity = verbosity
@@ -142,80 +136,53 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     def _initialize_agents(self):
         """Initialize TelemetryAgent and RaceEngineerAgent."""
-        # Create LLM client
         # Live mode targets short radio replies with low latency.
         live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "24"))
         live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.3"))
         local_max_time_seconds = float(os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "5.0"))
-
-        # Optional: support dedicated Hugging Face Inference Endpoint
-        endpoint_url = os.getenv("HUGGINGFACE_ENDPOINT_URL", None)
-
-        # Optional: support custom Hugging Face Space backend
-        space_url = os.getenv("HUGGINGFACE_SPACE_URL", None)
-        space_skip_ssl = os.getenv("HUGGINGFACE_SPACE_SKIP_SSL_VERIFY", "").lower() in ("1", "true", "yes")
-
-        # Optional: Use local QLoRA-finetuned model (default: disabled)
-        use_local_llm = os.getenv("USE_LOCAL_LLM", "").lower() in ("1", "true", "yes")
         local_adapter_path = os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_llm")
-        local_require_cuda = os.getenv("LOCAL_REQUIRE_CUDA", "1").lower() in ("1", "true", "yes")
 
+        # Check CUDA availability — local LLM requires CUDA.
+        # If CUDA is unavailable, fall back to rule-based responses only.
         force_rule_based_fallback = False
-        if use_local_llm:
-            cuda_available = False
-            cuda_device = ""
-            try:
-                import torch
+        cuda_available = False
+        cuda_device = ""
+        try:
+            import torch
 
-                cuda_available = bool(torch.cuda.is_available())
-                if cuda_available:
-                    cuda_device = torch.cuda.get_device_name(0)
-            except Exception as e:
-                logger.warning("Unable to check CUDA status for local LLM: %s", e)
-
+            cuda_available = bool(torch.cuda.is_available())
             if cuda_available:
-                logger.info("Local LLM CUDA active: %s", cuda_device or "unknown device")
-            elif local_require_cuda:
-                logger.warning(
-                    "Local LLM requested but CUDA is unavailable; "
-                    "falling back to non-LLM rule-based responses."
-                )
-                self.status_update.emit(
-                    "CUDA unavailable for local model. Using rule-based fallback responses."
-                )
-                # Avoid any remote/API calls in this fallback mode.
-                force_rule_based_fallback = True
-                use_local_llm = False
-                space_url = None
-                endpoint_url = None
-            else:
-                logger.warning(
-                    "Local LLM requested with no CUDA; proceeding on CPU because "
-                    "LOCAL_REQUIRE_CUDA is disabled (expect high latency)."
-                )
+                cuda_device = torch.cuda.get_device_name(0)
+        except Exception as e:
+            logger.warning("Unable to check CUDA status: %s", e)
+
+        if cuda_available:
+            logger.info("Local LLM CUDA active: %s", cuda_device or "unknown device")
+        else:
+            logger.warning(
+                "CUDA is unavailable; falling back to rule-based responses."
+            )
+            self.status_update.emit(
+                "CUDA unavailable. Using rule-based fallback responses."
+            )
+            force_rule_based_fallback = True
 
         llm_client = LLMClient(
-            huggingface_token=self.huggingface_token,
-            model_id=self.hf_model_id,
             max_tokens=live_max_tokens,
             temperature=live_temperature,
-            max_retries=2,
-            endpoint_url=endpoint_url,
-            space_url=space_url,
-            space_skip_ssl_verify=space_skip_ssl,
-            use_local_llm=use_local_llm,
             local_adapter_path=local_adapter_path,
             local_max_time_seconds=local_max_time_seconds,
             force_rule_based_fallback=force_rule_based_fallback,
         )
+        # Wire status callback so LLM load/generation failures surface in the UI
+        llm_client.set_status_callback(
+            lambda msg: self.status_update.emit(msg)
+        )
 
-        if use_local_llm:
+        if not force_rule_based_fallback:
             logger.info("Using local QLoRA-finetuned Granite model from: %s", local_adapter_path)
-        elif force_rule_based_fallback:
-            logger.info(
-                "Local mode fallback active (LOCAL_REQUIRE_CUDA=%s): rule-based responses only",
-                local_require_cuda,
-            )
+        else:
+            logger.info("Rule-based responses only (no CUDA)")
 
         # Create race engineer agent
         self.race_engineer_agent = RaceEngineerAgent(

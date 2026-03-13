@@ -18,19 +18,8 @@ DEFAULTS = {
     "ai_enabled": False,
     "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
     "ptt_key": "v",                 # Key name for push-to-talk
-    "remember_credentials": False,
-    "huggingface_token": "",
-    "huggingface_model_id": "",
-    "use_local_llm": False,
     "local_adapter_path": "race_engineer_llm",
-    "local_require_cuda": True,
 }
-
-# Keys that should NOT be saved when "remember_credentials" is unchecked
-CREDENTIAL_KEYS = [
-    "huggingface_token",
-    "huggingface_model_id",
-]
 
 
 def load_config() -> Dict[str, Any]:
@@ -47,12 +36,9 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: Dict[str, Any]) -> None:
-    """Save config to disk. Omits credentials if remember_credentials is False."""
+    """Save config to disk."""
     # Persist only recognized keys so legacy/deprecated settings are dropped.
     to_save = {key: config.get(key, default) for key, default in DEFAULTS.items()}
-    if not to_save.get("remember_credentials", False):
-        for key in CREDENTIAL_KEYS:
-            to_save[key] = ""
     try:
         with open(CONFIG_FILE, "w") as f:
             json.dump(to_save, f, indent=2)

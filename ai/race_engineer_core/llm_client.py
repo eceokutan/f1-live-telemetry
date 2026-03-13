@@ -1,28 +1,14 @@
 """
 LLM Client for Jarvis-Granite Live Telemetry.
 
-Provides an interface to a text generation model hosted on Hugging Face
-using the `huggingface_hub` Inference API.
-
-Features:
-- Hugging Face InferenceClient integration
-- Tenacity retry with exponential backoff
-- Async support for non-blocking calls
-- Configurable model parameters
+Provides an interface to a locally-hosted QLoRA-finetuned model.
+Falls back to deterministic rule-based responses when the local model
+is unavailable (e.g. no CUDA, adapter load failure).
 """
 
 import asyncio
 import logging
 from typing import Optional
-
-import requests
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -35,35 +21,22 @@ class LLMError(Exception):
 
 class LLMClient:
     """
-    Client for a Hugging Face-hosted LLM via `huggingface_hub.InferenceClient`.
+    Client for the local QLoRA-finetuned race engineer LLM.
 
-    This is a lightweight wrapper that handles:
-    - Connection configuration
-    - Retry logic with Tenacity
-    - Async invocation
-
-    The actual prompt formatting is handled by RaceEngineerAgent.
+    Priority order in _invoke_llm:
+    1. Force rule-based fallback (if configured, e.g. no CUDA)
+    2. Local LLM (Granite-4.0-micro + QLoRA adapter)
+    3. Rule-based fallback (if local LLM unavailable or generation fails)
 
     Attributes:
-        model_id: Hugging Face model identifier
         max_tokens: Maximum tokens for response generation
         temperature: LLM temperature for response variety
-        max_retries: Maximum retry attempts for failed requests
     """
 
     def __init__(
         self,
-        huggingface_token: str,
-        model_id: str,
         max_tokens: int = 24,
         temperature: float = 0.3,
-        max_retries: int = 3,
-        min_retry_wait: float = 1.0,
-        max_retry_wait: float = 5.0,
-        endpoint_url: Optional[str] = None,
-        space_url: Optional[str] = None,
-        space_skip_ssl_verify: bool = False,
-        use_local_llm: bool = False,
         local_adapter_path: str = "race_engineer_llm",
         local_max_time_seconds: float = 5.0,
         force_rule_based_fallback: bool = False,
@@ -72,54 +45,39 @@ class LLMClient:
         Initialize LLM Client.
 
         Args:
-            huggingface_token: Hugging Face access token (HUGGINGFACE_TOKEN / HUGGINGFACE_API_KEY)
-            model_id: Model identifier on Hugging Face (e.g. "org/custom-race-engineer").
-                      Used when no endpoint_url is provided.
-            max_tokens: Maximum response tokens (default: 75, reduced for racing brevity)
-            temperature: Response temperature (default: 0.7)
-            max_retries: Max retry attempts (default: 3)
-            min_retry_wait: Minimum wait between retries in seconds (default: 1.0)
-            max_retry_wait: Maximum wait between retries in seconds (default: 5.0)
-            endpoint_url: Optional Hugging Face Inference Endpoint URL. When set,
-                          requests will be sent to this endpoint instead of the
-                          generic model API.
-            space_url: Optional Hugging Face Space URL (FastAPI-style backend)
-                       that exposes a /chat endpoint. When set, this is preferred
-                       over endpoint_url/model_id and will be called via HTTP POST.
-            space_skip_ssl_verify: If True, skip SSL cert verification for Space
-                                  requests only (use when HF Space hostname/cert mismatch).
-            use_local_llm: If True, use local QLoRA-finetuned model instead of HF APIs.
+            max_tokens: Maximum response tokens (default: 24, short for racing brevity)
+            temperature: Response temperature (default: 0.3)
             local_adapter_path: Path to QLoRA adapter directory (relative to project root).
             local_max_time_seconds: Max generation time for local model responses.
-            force_rule_based_fallback: If True, bypass all LLM backends and use
+            force_rule_based_fallback: If True, bypass the local LLM and use
                                       rule-based fallback responses only.
         """
-        self.huggingface_token = huggingface_token
-        self.model_id = model_id
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.max_retries = max_retries
-        self.min_retry_wait = min_retry_wait
-        self.max_retry_wait = max_retry_wait
-        self.endpoint_url = endpoint_url
-        self.space_url = space_url
-        self.space_skip_ssl_verify = space_skip_ssl_verify
-        self.use_local_llm = use_local_llm
         self.local_adapter_path = local_adapter_path
         self.local_max_time_seconds = local_max_time_seconds
         self.force_rule_based_fallback = force_rule_based_fallback
 
-        # Initialize client instance (lazy initialization)
-        self._client = None
-        self._client_initialized = False
-
         # Local LLM inference
         self._local_llm = None
         self._local_llm_initialized = False
+        self._local_llm_failed = False
 
-        # Pre-load local LLM if enabled
-        if self.use_local_llm:
+        # Status callback (set by AIRaceEngineerWorker to relay UI updates)
+        self._status_callback = None
+
+        # Pre-load local LLM if not in forced-fallback mode
+        if not self.force_rule_based_fallback:
             self._init_local_llm()
+
+    def set_status_callback(self, callback):
+        """Set a callback for status updates (e.g. to emit Qt signals)."""
+        self._status_callback = callback
+
+    def _emit_status(self, message: str):
+        """Emit a status update through the callback if set."""
+        if self._status_callback:
+            self._status_callback(message)
 
     def _init_local_llm(self) -> None:
         """Initialize local LLM inference, reusing the shared singleton if available."""
@@ -143,76 +101,20 @@ class LLMClient:
             logger.error(f"Failed to initialize local LLM: {e}")
             self._local_llm = None
             self._local_llm_initialized = True
+            self._local_llm_failed = True
+            self._emit_status(
+                "Local LLM failed to load. Using rule-based fallback responses."
+            )
 
     def _get_local_llm(self):
         """Get local LLM instance (if available)."""
-        if not self.use_local_llm:
-            return None
         if not self._local_llm_initialized:
             self._init_local_llm()
         return self._local_llm
 
-    def _get_client(self):
-        """
-        Get or create the InferenceClient instance.
-
-        Uses lazy initialization to avoid import errors during testing.
-
-        Returns:
-            InferenceClient instance or None if not available
-        """
-        if self._client_initialized:
-            return self._client
-
-        try:
-            from huggingface_hub import InferenceClient
-
-            if not self.huggingface_token:
-                logger.warning(
-                    "Hugging Face token not provided. LLM calls will use fallback."
-                )
-                self._client = None
-            else:
-                # Prefer a dedicated Hugging Face Inference Endpoint if configured.
-                if self.endpoint_url:
-                    self._client = InferenceClient(
-                        base_url=self.endpoint_url,
-                        token=self.huggingface_token,
-                    )
-                    logger.info(
-                        f"Initialized Hugging Face InferenceClient with endpoint {self.endpoint_url}"
-                    )
-                else:
-                    # Fallback to generic model API using model_id.
-                    self._client = InferenceClient(
-                        model=self.model_id,
-                        token=self.huggingface_token,
-                    )
-                    logger.info(
-                        f"Initialized Hugging Face InferenceClient with model {self.model_id}"
-                    )
-
-            self._client_initialized = True
-
-        except ImportError:
-            logger.warning(
-                "huggingface_hub not installed. LLM calls will use fallback."
-            )
-            self._client = None
-            self._client_initialized = True
-
-        except Exception as e:
-            logger.error(f"Failed to initialize Hugging Face InferenceClient: {e}")
-            self._client = None
-            self._client_initialized = True
-
-        return self._client
-
     async def invoke(self, prompt: str) -> str:
         """
         Invoke the LLM with the given prompt.
-
-        Uses retry logic with exponential backoff for resilience.
 
         Args:
             prompt: The formatted prompt to send to the LLM
@@ -221,51 +123,13 @@ class LLMClient:
             Generated response text
 
         Raises:
-            LLMError: If LLM invocation fails after all retries
+            LLMError: If LLM invocation fails and no fallback is possible
         """
-        return await self._invoke_with_retry(prompt)
-
-    async def _invoke_with_retry(self, prompt: str) -> str:
-        """
-        Invoke LLM with Tenacity retry logic.
-
-        Retries on transient errors with exponential backoff.
-
-        Args:
-            prompt: The prompt to send
-
-        Returns:
-            Generated response text
-
-        Raises:
-            LLMError: If all retries are exhausted
-        """
-        # Create retry decorator dynamically to use instance config
-        retry_decorator = retry(
-            stop=stop_after_attempt(self.max_retries),
-            wait=wait_exponential(
-                multiplier=1,
-                min=self.min_retry_wait,
-                max=self.max_retry_wait,
-            ),
-            retry=retry_if_exception_type(
-                (ConnectionError, TimeoutError, Exception)
-            ),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
-            reraise=True,
-        )
-
-        @retry_decorator
-        async def _do_invoke():
-            return await self._invoke_llm(prompt)
-
         try:
-            response = await _do_invoke()
+            response = await self._invoke_llm(prompt)
             return self._clean_response(response)
         except Exception as e:
-            logger.error(
-                f"LLM invocation failed after {self.max_retries} attempts: {e}"
-            )
+            logger.error(f"LLM invocation failed: {e}")
             raise LLMError(f"Failed to invoke LLM: {e}") from e
 
     async def _invoke_llm(self, prompt: str) -> str:
@@ -273,10 +137,9 @@ class LLMClient:
         Internal method to invoke the LLM.
 
         Priority order:
-        1. Local LLM (if enabled and loaded)
-        2. HF Space (if configured)
-        3. HF Inference Endpoint (if configured)
-        4. Generic HF Model API
+        1. Force rule-based fallback (if configured)
+        2. Local LLM (if loaded)
+        3. Rule-based fallback (if local LLM unavailable or generation fails)
 
         Args:
             prompt: Formatted prompt
@@ -288,7 +151,7 @@ class LLMClient:
             logger.info("LLM disabled by configuration, using rule-based fallback response")
             return self._generate_fallback_response(prompt)
 
-        # Try local LLM first
+        # Try local LLM
         local_llm = self._get_local_llm()
         if local_llm is not None:
             loop = asyncio.get_event_loop()
@@ -297,72 +160,18 @@ class LLMClient:
                 return response
             except Exception as e:
                 logger.error(f"Local LLM generation failed: {e}")
-                raise
-
-        # If a custom Space backend is configured, prefer calling it directly.
-        if self.space_url:
-            loop = asyncio.get_event_loop()
-
-            def _call_space():
-                try:
-                    resp = requests.post(
-                        self.space_url,
-                        json={
-                            "prompt": prompt,
-                            "max_new_tokens": self.max_tokens,
-                            "temperature": self.temperature,
-                        },
-                        timeout=30,
-                        verify=not self.space_skip_ssl_verify,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    # Expecting {"response": "..."} from the Space
-                    return data.get("response", "").strip()
-                except Exception as e:
-                    logger.error(f"Error calling Hugging Face Space at {self.space_url}: {e}")
-                    raise
-
-            return await loop.run_in_executor(None, _call_space)
-
-        # Otherwise, fall back to Hugging Face model / endpoint APIs.
-        client = self._get_client()
-
-        if client is None:
-            # Fallback for testing or when LLM is not available
-            logger.warning("LLM not available, using fallback response")
-            return self._generate_fallback_response(prompt)
-
-        # Use asyncio to run the sync LLM call in a thread pool
-        loop = asyncio.get_event_loop()
-
-        def _call_hf():
-            # We intentionally keep parameters minimal so this works
-            # for both hosted inference endpoints and public models.
-            try:
-                return client.text_generation(
-                    prompt,
-                    max_new_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    do_sample=True,
+                self._emit_status(
+                    "Local LLM generation failed. Using rule-based fallback."
                 )
-            except TypeError:
-                # Older versions of huggingface_hub may not support
-                # all kwargs; retry with the bare minimum.
-                return client.text_generation(
-                    prompt,
-                    max_new_tokens=self.max_tokens,
-                )
+                return self._generate_fallback_response(prompt)
 
-        response = await loop.run_in_executor(None, _call_hf)
-
-        return response
+        # Local LLM not available — use rule-based fallback
+        logger.warning("Local LLM not available, using rule-based fallback response")
+        return self._generate_fallback_response(prompt)
 
     def _generate_fallback_response(self, prompt: str) -> str:
         """
-        Generate a fallback response when LLM is not available.
-
-        This is used for testing or when the LLM service is unavailable.
+        Generate a deterministic fallback response when LLM is not available.
 
         Args:
             prompt: The original prompt
@@ -370,7 +179,6 @@ class LLMClient:
         Returns:
             Fallback response text
         """
-        # Extract key information from prompt for contextual fallback
         prompt_lower = prompt.lower()
 
         if "fuel" in prompt_lower and "critical" in prompt_lower:
@@ -403,13 +211,10 @@ class LLMClient:
         if not response:
             return ""
 
-        # Strip whitespace and normalize
         cleaned = response.strip()
 
-        # Remove any potential prompt echoing
-        # Some models may echo parts of the prompt
+        # Remove any potential prompt echoing (e.g., "Engineer: ...")
         if ":" in cleaned and cleaned.index(":") < 20:
-            # Check if it looks like a role prefix (e.g., "Engineer:")
             potential_prefix = cleaned.split(":")[0].lower()
             if any(role in potential_prefix for role in ["engineer", "ai", "assistant", "response"]):
                 cleaned = ":".join(cleaned.split(":")[1:]).strip()

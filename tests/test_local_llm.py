@@ -14,7 +14,6 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-os.environ.setdefault("USE_LOCAL_LLM", "true")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -191,13 +190,10 @@ def test_llm_client():
         print(f"✗ Import failed: {e}")
         return False
 
-    print("\n[2/2] Initializing LLMClient with local LLM enabled...")
+    print("\n[2/2] Initializing LLMClient with local LLM...")
     print(f"  local_adapter_path = {LOCAL_ADAPTER_PATH}")
     try:
         client = LLMClient(
-            huggingface_token="dummy_token",
-            model_id="dummy_model",
-            use_local_llm=True,
             local_adapter_path=LOCAL_ADAPTER_PATH,
         )
         print("✓ LLMClient initialized")

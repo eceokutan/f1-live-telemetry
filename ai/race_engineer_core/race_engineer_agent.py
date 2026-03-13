@@ -2,16 +2,16 @@
 Race Engineer Agent for Jarvis-Granite Live Telemetry.
 
 LLM-powered agent that generates race engineer responses using
-IBM Granite via WatsonX. Handles both proactive (event-triggered)
-and reactive (query-driven) response generation.
+a local QLoRA-finetuned Granite model. Handles both proactive
+(event-triggered) and reactive (query-driven) response generation.
 
 This agent:
-- Formats prompts using LangChain templates
-- Invokes LLM via LLMClient
+- Formats prompts using templates
+- Invokes LLM via LLMClient (local model or rule-based fallback)
 - Manages conversation context
 - Respects verbosity settings
 
-Target latency: <2000ms for LLM response
+Target latency: <5000ms for local LLM response
 """
 
 import asyncio
@@ -276,34 +276,3 @@ class RaceEngineerAgent:
         return response
 
 
-def create_race_engineer_agent(
-    huggingface_token: str,
-    model_id: str,
-    verbosity: str = "moderate",
-    max_retries: int = 3,
-    endpoint_url: Optional[str] = None,
-) -> RaceEngineerAgent:
-    """
-    Factory function to create a RaceEngineerAgent with LLMClient.
-
-    Args:
-        huggingface_token: Hugging Face token
-        model_id: Model identifier
-        verbosity: Response verbosity level
-        max_retries: Maximum retry attempts
-        endpoint_url: Optional Hugging Face Inference Endpoint URL
-
-    Returns:
-        Configured RaceEngineerAgent instance
-    """
-    llm_client = LLMClient(
-        huggingface_token=huggingface_token,
-        model_id=model_id,
-        max_retries=max_retries,
-        endpoint_url=endpoint_url,
-    )
-
-    return RaceEngineerAgent(
-        llm_client=llm_client,
-        verbosity=verbosity,
-    )
