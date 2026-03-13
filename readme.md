@@ -1,304 +1,210 @@
-# F1 Live Telemetry Dashboard
+# Jarvis Granite
 
-A real-time telemetry visualization tool for sim racing games with AI race engineer capabilities. Built with PyQt5 and a local AI pipeline backed by Hugging Face inference.
-
-**Team 17 - Systems Course Project**
+An AI-enhanced motorsport telemetry analysis and live strategist platform designed to act as a real-time race engineer, strategist, and post-race performance analyst and coach
 
 ---
 
-## Features
+## What It Does
 
-- 📊 **Real-time Telemetry** - Live track maps and performance graphs updating at 12Hz
-- 🏎️ **Multi-Game Support** - Assetto Corsa (full telemetry) and ACC (limited)
-- 🤖 **AI Race Engineer** - Hugging Face-powered voice assistant with proactive alerts
-- 🎙️ **Voice Interaction** - Hands-free queries with speech-to-text/text-to-speech
-- 💾 **Session Recording** - SQLite database recording all telemetry and AI interactions
-- 📈 **Multi-Tire Analysis** - Separate graphs for FL/FR/RL/RR tire temps and pressures
+### Jarvis Live — Real-Time Telemetry Dashboard
+
+Drive with a live dashboard that updates as you race:
+
+- **Track map** with speed-colored racing line, updating ~12 times/sec
+- **Live telemetry graphs** — speed, RPM, gear, throttle, brake, tire temps (4 tires), tire pressures (4 tires)
+- **Lap times table** with delta-to-best for every completed lap
+- **Delta-to-best graph** — real-time green/red trace comparing your current lap against your session best
+- **Session info** — track, car, driver, session type displayed at a glance
+- **Automatic lap switching** — graphs and track map reset when you cross the start/finish line
+
+### AI Race Engineer (Optional)
+
+An AI co-driver that watches your telemetry and talks to you:
+
+- **Proactive alerts** — fuel warnings, tire temperature/wear alerts, excessive wheel slip, gap changes, pit window suggestions
+- **Voice interaction** — ask questions hands-free via push-to-talk or continuous listening mode (Silero VAD + faster-whisper, runs locally)
+- **Text-to-speech responses** — Kokoro local TTS with configurable voice
+- **Commentary transcript** — all AI messages displayed in a live panel
+
+### Jarvis Post — Post-Race Analysis
+
+Review and analyse completed sessions:
+
+- **Lap review with timeline scrubber** — play/pause, seek, variable speed (0.25x–4x), zoom windows (15s–full lap)
+- **Configurable graph layout** — choose up to 6 graphs at once from: speed, RPM, gear, fuel, throttle & brake, tire temps, tire pressures, tire wear, wheel slip, suspension travel, g-forces, ride height, car damage, steering angle
+- **Track map replay** — car position marker moves along the speed-colored path in sync with the timeline
+- **AI coaching** — dual-model analysis (coach + analyst) powered by Hugging Face, with detailed per-lap feedback on driving and telemetry
+- **Export/import laps** — share individual laps as `.jlap` files
+- **Export/import sessions** — share full sessions as `.jsession` files
+- **Fullscreen mode** (F11)
+
+### Session Management
+
+- **Automatic recording** — all telemetry saved to SQLite automatically, no setup needed
+- **Session browser** — view all sessions with track, car, player, duration, best lap, session type
+- **Rename sessions** for organisation
+- **Delete sessions** you no longer need
+- **Export sessions or Individual Laps** — raw telemetry, lap data, and AI commentary as CSV files
 
 ---
 
 ## Quick Start
 
-### 1. Install Dependencies
+### Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 1b. (Recommended) Prewarm Voice Models
+### Run the app
 ```bash
-python scripts/prewarm_models.py
-```
-This downloads/caches faster-whisper and Kokoro assets ahead of time to avoid
-first-use voice cold starts.
-
-### 2. Run with Assetto Corsa (default)
-```bash
-python main.py
+python main.py          # Launch Jarvis (launcher opens first)
+python main.py --ai     # Launch with AI race engineer enabled
+python main.py --acc    # Launch with ACC backend
+python main.py --acc --ai  # ACC with AI
 ```
 
-### 3. Run with AI Race Engineer (experimental)
-```bash
-python main.py --ai
-```
+### Environment variables (for AI features)
 
-Combine with game selection:
-```bash
-python main.py --acc --ai    # ACC with AI features
-```
-
-**Prerequisites:**
-- **AC:** Windows only, shared memory enabled in game settings
-- **ACC:** `broadcasting.json` configured (see [SETUP_GUIDE.md](SETUP_GUIDE.md))
-- **AI:** Hugging Face credentials in `.env` file (see `.env.example`)
-
----
-
-## Project Structure
-
-```
-f1-live-telemetry/
-├── main.py                     # Entry point
-├── requirements.txt            # Dependencies
-├── .env.example                # Environment template
-│
-├── ui/                         # PyQt5 interface
-│   ├── main_window.py          # Main window
-│   ├── styles.py               # Dark theme
-│   └── canvases/               # Matplotlib graphs
-│
-├── telemetry/                  # Game backends
-│   ├── lap_buffer.py           # Lap detection
-│   └── backends/
-│       ├── ac_backend.py       # AC shared memory
-│       └── acc_backend.py      # ACC UDP
-│
-├── ai/                         # AI features
-│   ├── race_engineer.py        # AI worker
-│   ├── voice_input.py          # Voice queries
-│   └── tts_output.py           # Voice output
-│
-│   └── race_engineer_core/     # AI core (models, context, agents, prompts, LLM)
-│
-├── data/                       # Recording
-│   ├── session_recorder.py     # SQLite recorder
-│   ├── session_viewer.py       # CLI viewer
-│   └── telemetry_sessions.db   # Database
-│
-├── CLAUDE.md                   # Technical docs
-└── SETUP_GUIDE.md              # Setup instructions
-```
-
----
-
-## Environment Variables
-
-Create `.env` file (copy from `.env.example`):
+Copy `.env.example` to `.env` and fill in:
 
 ```bash
-# Hugging Face (AI race engineer LLM)
+# Hugging Face (AI race engineer)
 HUGGINGFACE_TOKEN=hf_your_api_key_here
 HUGGINGFACE_MODEL_ID=your_model_id
 
-# Kokoro TTS (local voice output)
+# Post-race AI (Hugging Face Space)
+POSTRACE_HF_API_TOKEN=your_token
+POSTRACE_HF_SPACE_URL=https://your-space.hf.space
+
+# Kokoro TTS voice (optional)
 KOKORO_VOICE=bm_lewis
 ```
 
-See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed platform setup.
-
-By default, the app also starts a background model prewarm on launch while
-you are in the launcher. Disable with:
-```bash
-PREWARM_MODELS_ON_START=false
-```
+AI features are optional — the app works without them for pure telemetry.
 
 ---
 
-## Session Recording
-
-All telemetry is automatically recorded to `data/telemetry_sessions.db`:
-
-**View recorded sessions:**
-```bash
-python -m data.session_viewer list               # List all
-python -m data.session_viewer info <session_id>  # Details
-python -m data.session_viewer laps <session_id>  # Lap times
-python -m data.session_viewer export <session_id> # Export CSV
-```
-
-**Database tables:**
-- `sessions` - Track, car, player, timestamps
-- `laps` - Lap times, fuel usage, speed stats
-- `telemetry` - High-frequency samples (~60Hz)
-- `ai_commentary` - AI messages with timestamps
-- `voice_queries` - Driver questions and responses
-
----
-
-## How It Works
-
-### Data Flow
+## Architecture Overview
 
 ```
 Game (AC/ACC)
-    ↓
+    |
 Telemetry Worker (QThread @ 60Hz)
-    ↓ emits signals:
-    ├─→ realtime_sample  → UI + SessionRecorder
-    ├─→ lap_completed    → UI lap table + SessionRecorder
-    ├─→ session_info     → UI info panel
-    └─→ live_data        → UI live stats
-
+    |--- realtime_sample --> Live UI + Session Recorder
+    |--- lap_completed   --> Lap table + Session Recorder
+    |--- live_data       --> Live stats panel
+    |--- session_info    --> Session info panel
+    |
 AI Race Engineer (optional)
-    ↓
-Receives telemetry
-    ↓
-TelemetryAgent detects events
-(fuel warnings, tire issues, gap changes)
-    ↓
-RaceEngineerAgent generates response
-(Hugging Face LLM call ~2s)
-    ↓
-ai_commentary signal → UI + SessionRecorder
-
-Voice Input (optional)
-    ↓
-Silero VAD detects speech
-    ↓
-faster-whisper transcribes
-    ↓
-driver_query signal → AI Race Engineer
+    |--- TelemetryAgent (rule-based event detection, <50ms)
+    |--- RaceEngineerAgent (LLM response generation, ~2s)
+    |--- ai_commentary --> UI transcript + Session Recorder
+    |
+Voice (optional)
+    |--- Silero VAD + faster-whisper --> driver queries
+    |--- Kokoro TTS --> spoken responses
+    |
+Session Recorder (automatic)
+    |--- SQLite database (telemetry_sessions.db)
+    |--- Batch inserts for performance
 ```
 
-### Core Components
+### Project Structure
 
-**[telemetry/backends/ac_backend.py](telemetry/backends/ac_backend.py)**
-- Reads AC's Windows shared memory (`acpmf_static`, `acpmf_physics`, `acpmf_graphics`)
-- Full telemetry: RPM, throttle, brake, tire pressure/temp for all 4 tires
-- Windows only
-
-**[telemetry/backends/acc_backend.py](telemetry/backends/acc_backend.py)**
-- Connects via UDP broadcasting protocol
-- Limited telemetry: position, speed, gear, lap times (no RPM, brake, throttle, fuel)
-- Cross-platform
-
-**[ai/race_engineer.py](ai/race_engineer.py)**
-- QThread integrating local AI core with telemetry
-- Converts dict → Pydantic models → TelemetryAgent → RaceEngineerAgent
-- Emits AI commentary via Qt signals
-
-**[ai/race_engineer_core/](ai/race_engineer_core/)**
-- Local AI race engineer core (models, context, prompts, LLM client, agents)
-- Event detection (<50ms), LLM generation (~2000ms)
-- Configuration-based thresholds and verbosity
-
-**[data/session_recorder.py](data/session_recorder.py)**
-- QThread recording all telemetry to SQLite
-- Batch inserts (60 samples) for performance
-- Runs automatically, no flags needed
-
----
-
-## Game Setup
-
-### Assetto Corsa (AC)
-
-**Windows only** - Uses shared memory
-
-1. **Enable in AC settings:**
-   - Options → General → UI Modules
-   - Shared Memory = ON
-   - Shared Memory Layout = 1
-
-2. **Start session and get on track**
-   - Practice/hotlap/race mode
-   - Wait for car to fully load
-
-3. **Run as same user (no admin mismatch)**
-
-### Assetto Corsa Competizione (ACC)
-
-**Cross-platform** - Uses UDP broadcasting
-
-1. **Configure broadcasting:**
-   - Edit `Documents\Assetto Corsa Competizione\Config\broadcasting.json`:
-   ```json
-   {
-     "updListenerPort": 9232,
-     "connectionPassword": "",
-     "commandPassword": ""
-   }
-   ```
-
-2. **Start ACC BEFORE running script**
-
-3. **Get on track** (broadcasting only active during sessions)
-
-**Limitations:** No RPM, throttle, brake, or fuel data (broadcasting API)
+```
+jarvis-granite/
+├── main.py                         # Entry point
+├── ui/
+│   ├── launcher.py                 # Launcher with settings
+│   ├── main_window.py              # Jarvis Live dashboard
+│   ├── session_picker.py           # Session browser
+│   ├── canvases/                   # Matplotlib graph widgets
+│   └── post_race/
+│       └── lap_viewer_window.py    # Jarvis Post viewer
+│
+├── telemetry/
+│   ├── lap_buffer.py               # Lap detection logic
+│   └── backends/
+│       ├── ac_backend.py           # Assetto Corsa (shared memory)
+│       └── acc_backend.py          # ACC (UDP broadcasting)
+│
+├── ai/
+│   ├── race_engineer.py            # Live AI worker thread
+│   ├── voice_input.py              # Speech-to-text (local)
+│   ├── tts_output.py               # Text-to-speech (local)
+│   └── race_engineer_core/         # AI core: models, agents, prompts, LLM client
+│
+├── analysis/
+│   └── ai_pipeline_bridge.py       # Post-race AI analysis bridge
+│
+├── data/
+│   ├── session_recorder.py         # SQLite recording
+│   ├── session_exporter.py         # Export/import sessions
+│   └── session_viewer.py           # CLI session viewer
+│
+└── CLAUDE.md                       # Detailed technical docs
+```
 
 ---
 
-## Troubleshooting
+## File Formats
 
-### AC Issues
-
-**"Could not open shared memory":**
-- AC must be running with session started
-- Run Python as same user (no admin mismatch)
-- Verify shared memory enabled in settings
-
-### ACC Issues
-
-**"Connection failed":**
-- Start ACC BEFORE Python script
-- Must be on track (not in menus)
-- Check `broadcasting.json` port matches code (default 9232)
-- Firewall may block UDP traffic
-
-**"RPM/brake/throttle showing zeros":**
-- Expected - ACC broadcasting doesn't provide this data
-- Only position, speed, gear, lap timing available
-
-### AI Issues
-
-**"AI not responding":**
-- Check `.env` has correct Hugging Face credentials
-- Verify internet connection (API calls require network)
-- Check console for error messages
-
-**"Microphone not working":**
-- Check system microphone permissions
-- Verify microphone device is available to Python/PyAudio
-- Look for microphone indicator when speaking
+| Format | Extension | Contents |
+|--------|-----------|----------|
+| Lap file | `.jlap` | Single lap telemetry + metadata (JSON) |
+| Session file | `.jsession` | Full session: all laps, telemetry, AI commentary (JSON) |
+| CSV export | `.csv` | Raw telemetry, lap summaries, AI commentary |
+| Database | `.db` | SQLite with all recorded sessions |
 
 ---
 
-## Known Limitations
+## Telemetry Data Collected
 
-- **AC:** Windows-only (shared memory limitation)
-- **ACC:** Limited telemetry via broadcasting (no RPM, brake, throttle, fuel)
-- **AI:** Requires internet (~2s latency for LLM responses)
-- **UI:** No overlay mode (separate window)
-- **Replay:** No playback UI (use CLI viewer)
+When using Assetto Corsa, the following data is captured at ~60Hz:
+
+- Position (X, Z coordinates), speed, gear, RPM
+- Throttle, brake, steering angle
+- Fuel remaining
+- Tire temperatures (FL, FR, RL, RR)
+- Tire pressures (FL, FR, RL, RR)
+- Tire wear (FL, FR, RL, RR)
+- Wheel slip (FL, FR, RL, RR)
+- Suspension travel (FL, FR, RL, RR)
+- Ride height (front, rear)
+- G-forces (lateral, longitudinal)
+- Car damage (front, rear, left, right, centre)
+
+---
+
+## AI Event Detection
+
+The live AI race engineer monitors telemetry and triggers alerts:
+
+| Event | Threshold | Priority |
+|-------|-----------|----------|
+| Fuel critical | < 2 laps remaining | CRITICAL |
+| Fuel warning | < 5 laps remaining | HIGH |
+| Tire temp critical | > 110 C | CRITICAL |
+| Tire temp warning | > 100 C | MEDIUM |
+| Tire wear critical | > 85% | HIGH |
+| Wheel slip critical | > 10.0 | HIGH |
+| Wheel slip warning | > 5.0 | MEDIUM |
+| Gap change | > 1.0s | MEDIUM |
+| Pit window | Fuel or tire at warning | HIGH |
+
+All thresholds are configurable.
 
 ---
 
 ## Credits
 
-**Team 17 Systems Course Project**
+**Team 17 — Systems Course Project**
 
-- Telemetry dashboard: Team 17
-- AI race engineer (`ai/race_engineer_core/`): Team 17 (integrated)
-- Kokoro: local TTS
-- Silero VAD: Voice activity detection
-- Game APIs: AC shared memory, ACC broadcasting
-
----
-
-## Documentation
-
-- **[CLAUDE.md](CLAUDE.md)** - Detailed technical architecture for AI assistant
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Step-by-step installation and configuration
-- **[.env.example](.env.example)** - Environment variable template
+- Kokoro — local text-to-speech
+- Silero VAD — voice activity detection
+- faster-whisper — speech-to-text
+- Hugging Face — LLM inference
+- Game APIs — AC shared memory, ACC UDP broadcasting
 
 ---
 

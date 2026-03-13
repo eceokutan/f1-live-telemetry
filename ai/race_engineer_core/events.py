@@ -216,6 +216,44 @@ def create_sector_complete_event(
     )
 
 
+def create_wheel_slip_warning_event(slip: float, position: str) -> Event:
+    """
+    Create a wheel slip warning event.
+
+    Args:
+        slip: Wheel slip ratio value
+        position: Tire position (fl, fr, rl, rr)
+
+    Returns:
+        Event with MEDIUM priority
+    """
+    return Event(
+        type="wheel_slip_warning",
+        priority=Priority.MEDIUM,
+        data={"slip": slip, "position": position},
+        timestamp=time.time()
+    )
+
+
+def create_wheel_slip_critical_event(slip: float, position: str) -> Event:
+    """
+    Create a wheel slip critical event.
+
+    Args:
+        slip: Wheel slip ratio value
+        position: Tire position (fl, fr, rl, rr)
+
+    Returns:
+        Event with HIGH priority
+    """
+    return Event(
+        type="wheel_slip_critical",
+        priority=Priority.HIGH,
+        data={"slip": slip, "position": position},
+        timestamp=time.time()
+    )
+
+
 def create_pit_window_event(
     reason: str,
     recommended_lap: Optional[int] = None

@@ -15,6 +15,8 @@ Event Types:
 - tire_critical: Tire temperature > 110C (CRITICAL)
 - tire_warning: Tire temperature > 100C (MEDIUM)
 - tire_wear_critical: Tire wear > 85% (HIGH)
+- wheel_slip_critical: Wheel slip > 10.0 (HIGH)
+- wheel_slip_warning: Wheel slip > 5.0 (MEDIUM)
 - gap_change: Gap changes > 1s (MEDIUM)
 - lap_complete: Lap number increased (MEDIUM)
 - sector_complete: Sector changed (LOW)
@@ -36,6 +38,8 @@ from ai.race_engineer_core.events import (
     create_lap_complete_event,
     create_sector_complete_event,
     create_pit_window_event,
+    create_wheel_slip_warning_event,
+    create_wheel_slip_critical_event,
 )
 from ai.race_engineer_core.telemetry import TelemetryData
 from ai.race_engineer_core.config import ThresholdsConfig
@@ -92,6 +96,10 @@ class TelemetryAgent:
         # Check tire wear events
         tire_wear_events = self._check_tire_wear_events(telemetry)
         events.extend(tire_wear_events)
+
+        # Check wheel slip events
+        wheel_slip_events = self._check_wheel_slip_events(telemetry)
+        events.extend(wheel_slip_events)
 
         # Check gap change events
         gap_events = self._check_gap_events(telemetry, context)
@@ -192,6 +200,33 @@ class TelemetryAgent:
                     data={"wear": wear, "position": position},
                     timestamp=time.time()
                 ))
+
+        return events
+
+    def _check_wheel_slip_events(self, telemetry: TelemetryData) -> List[Event]:
+        """
+        Check for excessive wheel slip events.
+
+        Returns:
+            List of wheel slip events (critical or warning per tire)
+        """
+        events = []
+
+        if telemetry.wheel_slip is None:
+            return events
+
+        slip_positions = {
+            "fl": abs(telemetry.wheel_slip.fl),
+            "fr": abs(telemetry.wheel_slip.fr),
+            "rl": abs(telemetry.wheel_slip.rl),
+            "rr": abs(telemetry.wheel_slip.rr),
+        }
+
+        for position, slip in slip_positions.items():
+            if slip >= self.thresholds.wheel_slip_critical:
+                events.append(create_wheel_slip_critical_event(slip, position))
+            elif slip >= self.thresholds.wheel_slip_warning:
+                events.append(create_wheel_slip_warning_event(slip, position))
 
         return events
 

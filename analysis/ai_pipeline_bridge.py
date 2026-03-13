@@ -551,6 +551,48 @@ class AIPipelineBridge:
             ("tyre_pressure_fl", "tyre_pressure_fr", "tyre_pressure_rl", "tyre_pressure_rr"),
         )
 
+        # G-forces
+        avg_g_lat = self._safe_mean(df, "g_force_lat")
+        max_g_lat = self._safe_max(df, "g_force_lat")
+        avg_g_lon = self._safe_mean(df, "g_force_lon")
+        max_g_lon = self._safe_max(df, "g_force_lon")
+
+        # Wheel slip — count samples where any tire exceeds threshold
+        slip_cols = ("wheel_slip_fl", "wheel_slip_fr", "wheel_slip_rl", "wheel_slip_rr")
+        excessive_slip_samples = 0
+        max_slip = 0.0
+        for col in slip_cols:
+            if col in df.columns:
+                excessive_slip_samples += int((df[col].abs() > 5.0).sum())
+                col_max = float(df[col].abs().max())
+                if col_max > max_slip:
+                    max_slip = col_max
+
+        # Suspension travel
+        avg_susp = self._mean_columns(
+            df,
+            ("suspension_fl", "suspension_fr", "suspension_rl", "suspension_rr"),
+        )
+
+        # Ride height
+        avg_ride_front = self._safe_mean(df, "ride_height_front")
+        avg_ride_rear = self._safe_mean(df, "ride_height_rear")
+
+        # Car damage
+        damage_cols = ("car_damage_front", "car_damage_rear", "car_damage_left",
+                       "car_damage_right", "car_damage_centre")
+        max_damage = 0.0
+        damage_zones = []
+        for col in damage_cols:
+            if col in df.columns:
+                zone_max = float(df[col].max())
+                if zone_max > 0:
+                    zone_name = col.replace("car_damage_", "")
+                    damage_zones.append(f"{zone_name}: {zone_max:.0f}%")
+                if zone_max > max_damage:
+                    max_damage = zone_max
+        damage_str = ", ".join(damage_zones) if damage_zones else "No damage"
+
         fastest_lap = session.get_fastest_lap()
         if fastest_lap and fastest_lap.lap_number != lap.lap_number:
             delta = lap.lap_time - fastest_lap.lap_time
@@ -558,21 +600,49 @@ class AIPipelineBridge:
         else:
             lap_delta = "Current lap is session fastest or only valid lap."
 
-        coach = (
-            f"Lap {lap.lap_number} coaching focus:\n"
-            f"- Smooth brake release into apex; heavy-brake samples: {heavy_brake_samples}.\n"
-            f"- Balance throttle pickup after apex; mean throttle is {throttle_mean:.1f}%.\n"
-            f"- Keep tire temps in working range (avg {avg_tire_temp:.1f} C).\n"
-            f"- Fuel used this lap: {summary.fuel_used:.2f} L."
-        )
+        # Build coaching lines
+        coach_lines = [
+            f"Lap {lap.lap_number} coaching focus:",
+            f"- Smooth brake release into apex; heavy-brake samples: {heavy_brake_samples}.",
+            f"- Balance throttle pickup after apex; mean throttle is {throttle_mean:.1f}%.",
+            f"- Keep tire temps in working range (avg {avg_tire_temp:.1f} C).",
+            f"- Fuel used this lap: {summary.fuel_used:.2f} L.",
+        ]
+        if excessive_slip_samples > 0:
+            coach_lines.append(
+                f"- Excessive wheel slip detected in {excessive_slip_samples} samples "
+                f"(max slip: {max_slip:.1f}). Smooth inputs on throttle/brake to reduce wheelspin."
+            )
+        if max_damage > 0:
+            coach_lines.append(f"- Car damage present ({damage_str}). Drive cautiously.")
+        coach = "\n".join(coach_lines)
 
-        analyst = (
-            f"Lap {lap.lap_number} telemetry summary:\n"
-            f"- Lap time: {lap.lap_time:.3f}s ({lap_delta})\n"
-            f"- Speed: avg {summary.avg_speed:.1f} km/h, max {summary.max_speed:.1f} km/h, min {summary.min_speed:.1f} km/h.\n"
-            f"- Inputs: mean throttle {throttle_mean:.1f}%, mean brake {brake_mean:.1f}%.\n"
-            f"- Tires: avg temperature {avg_tire_temp:.1f} C, avg pressure {avg_tire_pressure:.2f} PSI."
-        )
+        # Build analyst lines
+        analyst_lines = [
+            f"Lap {lap.lap_number} telemetry summary:",
+            f"- Lap time: {lap.lap_time:.3f}s ({lap_delta})",
+            f"- Speed: avg {summary.avg_speed:.1f} km/h, max {summary.max_speed:.1f} km/h, min {summary.min_speed:.1f} km/h.",
+            f"- Inputs: mean throttle {throttle_mean:.1f}%, mean brake {brake_mean:.1f}%.",
+            f"- Tires: avg temperature {avg_tire_temp:.1f} C, avg pressure {avg_tire_pressure:.2f} PSI.",
+        ]
+        if avg_g_lat is not None:
+            analyst_lines.append(
+                f"- G-Forces: lateral avg {avg_g_lat:.2f}G (max {max_g_lat:.2f}G), "
+                f"longitudinal avg {avg_g_lon:.2f}G (max {max_g_lon:.2f}G)."
+            )
+        if max_slip > 0:
+            analyst_lines.append(
+                f"- Wheel slip: max {max_slip:.1f}, excessive slip samples: {excessive_slip_samples}."
+            )
+        if avg_susp > 0:
+            analyst_lines.append(f"- Suspension travel: avg {avg_susp:.4f} m.")
+        if avg_ride_front is not None:
+            analyst_lines.append(
+                f"- Ride height: front avg {avg_ride_front:.4f} m, rear avg {avg_ride_rear:.4f} m."
+            )
+        if max_damage > 0:
+            analyst_lines.append(f"- Car damage: {damage_str}.")
+        analyst = "\n".join(analyst_lines)
 
         return AIAnalysisResult(
             coach=coach,
@@ -608,6 +678,12 @@ class AIPipelineBridge:
             "speed", "gear", "rpm", "throttle", "brake", "drs", "fuel",
             "tyre_pressure_fl", "tyre_pressure_fr", "tyre_pressure_rl", "tyre_pressure_rr",
             "tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr",
+            "g_force_lat", "g_force_lon", "steer_angle",
+            "wheel_slip_fl", "wheel_slip_fr", "wheel_slip_rl", "wheel_slip_rr",
+            "suspension_fl", "suspension_fr", "suspension_rl", "suspension_rr",
+            "ride_height_front", "ride_height_rear",
+            "car_damage_front", "car_damage_rear", "car_damage_left",
+            "car_damage_right", "car_damage_centre",
         ]
 
         lap_df = lap.telemetry
@@ -736,3 +812,13 @@ class AIPipelineBridge:
         if column not in df.columns:
             return 0.0
         return float(df[column].mean()) * 100.0
+
+    def _safe_mean(self, df: pd.DataFrame, column: str) -> Optional[float]:
+        if column not in df.columns:
+            return None
+        return float(df[column].mean())
+
+    def _safe_max(self, df: pd.DataFrame, column: str) -> Optional[float]:
+        if column not in df.columns:
+            return None
+        return float(df[column].abs().max())
