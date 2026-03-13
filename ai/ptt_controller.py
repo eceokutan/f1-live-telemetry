@@ -96,7 +96,24 @@ class PTTController(QtCore.QObject):
         logger.info("PTT controller stopped")
 
     def _start_keyboard_listener(self):
-        """Start global keyboard listener for configured key using pynput."""
+        """Start global keyboard listener for configured key using pynput.
+
+        On macOS, pynput requires Accessibility permissions and may crash the
+        process with SIGTRAP if not granted.  We detect macOS and skip pynput
+        entirely, relying on the Qt key-event fallback instead.
+        """
+        import sys
+
+        if sys.platform == "darwin":
+            logger.info(
+                "macOS detected — skipping pynput global keyboard hook "
+                "(use Qt key events instead)"
+            )
+            self.status_update.emit(
+                f"PTT ready (press {self._keyboard_key.upper()} key while dashboard is focused)"
+            )
+            return
+
         try:
             from pynput import keyboard
 
@@ -307,6 +324,22 @@ class PTTController(QtCore.QObject):
                 return 0x70 + (fn - 1)
 
         return None
+
+    def handle_key_press(self, qt_key_text: str):
+        """Handle a key press from Qt key events (macOS fallback).
+
+        Called by MainWindow.keyPressEvent when PTT is active on macOS.
+        """
+        if qt_key_text.lower() == self._keyboard_key:
+            self._update_state(keyboard_held=True)
+
+    def handle_key_release(self, qt_key_text: str):
+        """Handle a key release from Qt key events (macOS fallback).
+
+        Called by MainWindow.keyReleaseEvent when PTT is active on macOS.
+        """
+        if qt_key_text.lower() == self._keyboard_key:
+            self._update_state(keyboard_held=False)
 
     def _matches_keyboard_key(self, key) -> bool:
         """Return True when pynput key object matches configured keyboard key."""

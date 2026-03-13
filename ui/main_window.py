@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("F1 Telemetry Dashboard")
+        self.setWindowTitle("Jarvis Live - F1 Telemetry Dashboard")
         self.resize(1600, 900)
 
         # Real-time data buffers for current lap
@@ -167,13 +167,16 @@ class MainWindow(QMainWindow):
         self._best_lap_distances = None  # cumulative distance array
         self._best_lap_times = None      # elapsed time array (from t=0)
 
+        # Menu bar
+        self._create_menu_bar()
+
         # Create central widget and root layout
         central = QWidget()
         self.setCentralWidget(central)
 
         # Root layout: horizontal split into left / middle / right
         root_layout = QHBoxLayout()
-        root_layout.setContentsMargins(8, 24, 8, 8)
+        root_layout.setContentsMargins(8, 8, 8, 8)
         root_layout.setSpacing(10)
         central.setLayout(root_layout)
 
@@ -189,6 +192,25 @@ class MainWindow(QMainWindow):
 
         # Apply dark theme
         self.setStyleSheet(DARK_STYLESHEET)
+
+    def _create_menu_bar(self):
+        """Create menu bar with File menu."""
+        menu_bar = self.menuBar()
+        menu_bar.setNativeMenuBar(False)
+
+        file_menu = menu_bar.addMenu("File")
+
+        back_action = QtWidgets.QAction("Back to Launcher", self)
+        back_action.setShortcut("Ctrl+W")
+        back_action.triggered.connect(self.close)
+        file_menu.addAction(back_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QtWidgets.QAction("Exit Application", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(QtWidgets.QApplication.quit)
+        file_menu.addAction(exit_action)
 
     def _build_left_column(self):
         """Build left column: track map + lap times table."""
@@ -754,6 +776,27 @@ class MainWindow(QMainWindow):
         self.comms_text.ensureCursorVisible()
 
         logger.info("Driver Query: %s", query)
+
+    def set_ptt_controller(self, controller):
+        """Set PTT controller reference for Qt key-event forwarding (macOS).
+
+        Installs an application-level event filter so key events are captured
+        regardless of which child widget has focus.
+        """
+        self._ptt_controller = controller
+        QtWidgets.QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Application-level event filter to forward key events to PTT controller."""
+        ctrl = getattr(self, "_ptt_controller", None)
+        if ctrl:
+            if event.type() == QtCore.QEvent.KeyPress and not event.isAutoRepeat():
+                if event.text():
+                    ctrl.handle_key_press(event.text())
+            elif event.type() == QtCore.QEvent.KeyRelease and not event.isAutoRepeat():
+                if event.text():
+                    ctrl.handle_key_release(event.text())
+        return super().eventFilter(obj, event)
 
     def handle_vad_state_change(self, is_speaking: bool):
         """

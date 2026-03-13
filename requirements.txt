@@ -28,14 +28,12 @@ tenacity>=8.2.0
 python-dotenv>=1.0.0
 
 # =============================================================================
-# Voice Input/Output (Silero VAD + faster-whisper + Kokoro TTS)
+# Voice Input/Output (webrtcvad + faster-whisper + Kokoro TTS)
 # =============================================================================
 pyaudio>=0.2.13
-torch>=2.0.0
-torchaudio>=2.0.0
+webrtcvad>=2.0.10
 faster-whisper>=1.0.0
 pykokoro>=0.6.5
-# Note: Silero VAD is loaded via torch.hub, no separate install needed
 
 # =============================================================================
 # Push-to-Talk (hold V key or joystick button to talk)

@@ -132,9 +132,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         file_menu.addSeparator()
 
-        exit_action = QtWidgets.QAction("Exit", self)
+        back_action = QtWidgets.QAction("Back to Launcher", self)
+        back_action.setShortcut("Ctrl+W")
+        back_action.triggered.connect(self.close)
+        file_menu.addAction(back_action)
+
+        exit_action = QtWidgets.QAction("Exit Application", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(QtWidgets.QApplication.quit)
         file_menu.addAction(exit_action)
 
         view_menu = menu_bar.addMenu("View")

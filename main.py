@@ -14,13 +14,6 @@ import os
 import logging
 import threading
 
-# Import torch BEFORE PyQt5 to avoid DLL conflict on Windows
-# (PyQt5 changes DLL search paths, breaking torch's c10.dll loading)
-try:
-    import torch
-except ImportError:
-    pass
-
 from PyQt5 import QtWidgets, QtCore
 
 # Configure logging FIRST - before any other imports
@@ -312,6 +305,7 @@ def run_jarvis_live(settings: dict):
                         ptt_controller.ptt_released.connect(voice_thread.stop_recording)
                         ptt_controller.status_update.connect(lambda msg: logger.info("PTT: %s", msg))
                         ptt_controller.start()
+                        window.set_ptt_controller(ptt_controller)
                         logger.info("PTT Controller started")
                     except Exception as e:
                         logger.error("Failed to initialize PTT Controller: %s", e, exc_info=True)

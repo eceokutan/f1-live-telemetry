@@ -185,7 +185,25 @@ class LauncherWindow(QtWidgets.QDialog):
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addStretch()
 
-        self.start_button = QtWidgets.QPushButton("Start")
+        self.cancel_button = QtWidgets.QPushButton("Cancel")
+        self.cancel_button.setFixedSize(140, 44)
+        self.cancel_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 12pt;
+            }}
+            QPushButton:hover {{ background-color: #333333; }}
+            QPushButton:pressed {{ background-color: #2a2a2a; }}
+        """)
+        self.cancel_button.clicked.connect(self.reject)
+        btn_layout.addWidget(self.cancel_button)
+
+        self.start_button = QtWidgets.QPushButton("Save")
         self.start_button.setFixedSize(140, 44)
         self.start_button.clicked.connect(self._on_start)
         btn_layout.addWidget(self.start_button)
