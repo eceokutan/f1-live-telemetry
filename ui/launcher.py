@@ -104,9 +104,8 @@ class LauncherWindow(QtWidgets.QDialog):
             "3. Configure settings below and click <b>Start</b>.<br>"
             "4. Drive! The dashboard updates in real time.<br><br>"
             "<b>AI Race Engineer</b> (optional): Provides live commentary and "
-            "answers voice questions about your race. Requires API credentials below. "
-            "Speech-to-text runs locally (no API key needed), but text-to-speech "
-            "requires IBM Watson TTS credentials."
+            "answers voice questions about your race. Requires Hugging Face "
+            "credentials below. Speech-to-text runs locally."
         )
         about_text.setWordWrap(True)
         about_layout.addWidget(about_text)
@@ -135,20 +134,6 @@ class LauncherWindow(QtWidgets.QDialog):
         self.hf_model_edit = QtWidgets.QLineEdit()
         self.hf_model_edit.setPlaceholderText("e.g. mistralai/Mistral-7B-Instruct-v0.2")
         creds_layout.addRow("Model ID:", self.hf_model_edit)
-
-        # Watson TTS credentials (shown when voice is enabled)
-        self.voice_creds_label = QtWidgets.QLabel(
-            "<b>Watson Text-to-Speech</b> (for spoken responses)"
-        )
-        creds_layout.addRow(self.voice_creds_label)
-
-        self.tts_key_edit = QtWidgets.QLineEdit()
-        self.tts_key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
-        creds_layout.addRow("TTS API Key:", self.tts_key_edit)
-
-        self.tts_url_edit = QtWidgets.QLineEdit()
-        self.tts_url_edit.setPlaceholderText("https://api.eu-gb.text-to-speech...")
-        creds_layout.addRow("TTS URL:", self.tts_url_edit)
 
         self.remember_creds_checkbox = QtWidgets.QCheckBox("Remember credentials")
         creds_layout.addRow(self.remember_creds_checkbox)
@@ -187,9 +172,6 @@ class LauncherWindow(QtWidgets.QDialog):
         self.voice_ptt_radio.toggled.connect(self.ptt_key_widget.setVisible)
         self.ptt_key_widget.setVisible(False)
 
-        # Show/hide voice credentials based on voice mode
-        self.voice_disabled_radio.toggled.connect(self._toggle_voice_creds)
-
         layout.addWidget(self.voice_group)
 
         # ---- Buttons ----
@@ -216,20 +198,6 @@ class LauncherWindow(QtWidgets.QDialog):
             self.voice_disabled_radio.setChecked(True)
         self.adjustSize()
 
-    def _toggle_voice_creds(self, disabled_checked):
-        """Show/hide Watson TTS credential fields based on voice mode."""
-        voice_enabled = not disabled_checked
-        self.voice_creds_label.setVisible(voice_enabled)
-        self.tts_key_edit.setVisible(voice_enabled)
-        self.tts_url_edit.setVisible(voice_enabled)
-        # Also hide the form row labels
-        form = self.creds_widget.layout()
-        if isinstance(form, QtWidgets.QFormLayout):
-            for edit in (self.tts_key_edit, self.tts_url_edit):
-                label = form.labelForField(edit)
-                if label:
-                    label.setVisible(voice_enabled)
-
     # ------------------------------------------------------------------
     # Config load / save
     # ------------------------------------------------------------------
@@ -239,8 +207,6 @@ class LauncherWindow(QtWidgets.QDialog):
         self.ai_checkbox.setChecked(c.get("ai_enabled", False))
         self.hf_token_edit.setText(c.get("huggingface_token", ""))
         self.hf_model_edit.setText(c.get("huggingface_model_id", ""))
-        self.tts_key_edit.setText(c.get("watson_tts_api_key", ""))
-        self.tts_url_edit.setText(c.get("watson_tts_url", ""))
         self.remember_creds_checkbox.setChecked(c.get("remember_credentials", False))
 
         voice = c.get("voice_mode", "disabled")
@@ -270,8 +236,6 @@ class LauncherWindow(QtWidgets.QDialog):
             "remember_credentials": self.remember_creds_checkbox.isChecked(),
             "huggingface_token": self.hf_token_edit.text().strip(),
             "huggingface_model_id": self.hf_model_edit.text().strip(),
-            "watson_tts_api_key": self.tts_key_edit.text().strip(),
-            "watson_tts_url": self.tts_url_edit.text().strip(),
         })
         save_config(self.config)
 

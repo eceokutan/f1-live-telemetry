@@ -110,8 +110,6 @@ def run_jarvis_live(settings: dict):
         "HUGGINGFACE_MODEL_ID": "huggingface_model_id",
         "WATSON_STT_API_KEY": "watson_stt_api_key",
         "WATSON_STT_URL": "watson_stt_url",
-        "WATSON_TTS_API_KEY": "watson_tts_api_key",
-        "WATSON_TTS_URL": "watson_tts_url",
     }
     for env_key, settings_key in credential_map.items():
         val = settings.get(settings_key, "")
@@ -239,12 +237,14 @@ def run_jarvis_live(settings: dict):
 
                 # Initialize TTS output
                 if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
-                    logger.info("Initializing TTS Output (sentence pipelining mode)")
+                    logger.info("Initializing TTS Output (voice=bm_lewis, speed=1.3x)")
                     try:
+                        # LOCKED KOKORO CONFIG
                         tts_thread = TTSOutputWorker(
                             watson_api_key=watson_tts_api_key,
                             watson_url=watson_tts_url,
-                            voice="en-GB_JamesV3Voice",
+                            voice="bm_lewis",
+                            speech_rate=1.3,
                             use_sentence_pipelining=True
                         )
                         tts_thread.status_update.connect(lambda msg: logger.info("TTS: %s", msg))

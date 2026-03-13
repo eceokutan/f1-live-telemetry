@@ -15,6 +15,7 @@ Synthesizes AI responses and plays them through the default audio output device.
 
 import asyncio
 import io
+import html
 import logging
 import wave
 from typing import Optional
@@ -34,10 +35,26 @@ logger = logging.getLogger(__name__)
 class SimpleTTSClient:
     """Simple Watson TTS client with minimal dependencies."""
 
-    def __init__(self, api_key: str, service_url: str, voice: str = "en-GB_JamesV3Voice"):
+    def __init__(
+        self,
+        api_key: str,
+        service_url: str,
+        voice: str = "en-GB_JamesV3Voice",
+        speech_rate: float = 1.0,
+    ):
         self.api_key = api_key
         self.service_url = service_url.rstrip("/")
         self.voice = voice
+        self.speech_rate = speech_rate if speech_rate > 0 else 1.0
+
+    def _apply_speech_rate(self, text: str) -> str:
+        """Wrap plain text in SSML prosody when a non-default speech rate is requested."""
+        if abs(self.speech_rate - 1.0) < 1e-3:
+            return text
+
+        rate_percent = int(round(self.speech_rate * 100))
+        escaped = html.escape(text)
+        return f'<speak><prosody rate="{rate_percent}%">{escaped}</prosody></speak>'
 
     async def synthesize(self, text: str) -> bytes:
         """Synthesize text to audio using Watson TTS."""
@@ -52,9 +69,7 @@ class SimpleTTSClient:
             "voice": self.voice,
         }
 
-        payload = {
-            "text": text,
-        }
+        payload = {"text": self._apply_speech_rate(text)}
 
         auth = aiohttp.BasicAuth("apikey", self.api_key)
         timeout = aiohttp.ClientTimeout(total=10.0)
@@ -98,6 +113,7 @@ class TTSOutputWorker(QtCore.QThread):
         watson_api_key: str,
         watson_url: str,
         voice: str = "en-GB_JamesV3Voice",
+        speech_rate: float = 1.0,
         use_streaming: bool = False,
         use_sentence_pipelining: bool = False
     ):
@@ -108,6 +124,7 @@ class TTSOutputWorker(QtCore.QThread):
             watson_api_key: IBM Watson TTS API key
             watson_url: Watson TTS service URL
             voice: Watson TTS voice to use (default: British male race engineer)
+            speech_rate: Speech speed multiplier (1.0 = normal, 1.3 = 30% faster)
             use_streaming: Use streaming playback for lower latency (default: False)
             use_sentence_pipelining: Speak sentence-by-sentence for multi-sentence
                                      responses (~500-1000ms faster). Default: False.
@@ -117,6 +134,7 @@ class TTSOutputWorker(QtCore.QThread):
         self.watson_api_key = watson_api_key
         self.watson_url = watson_url
         self.voice = voice
+        self.speech_rate = speech_rate if speech_rate > 0 else 1.0
         self.use_streaming = use_streaming
         self.use_sentence_pipelining = use_sentence_pipelining
 
@@ -141,7 +159,12 @@ class TTSOutputWorker(QtCore.QThread):
         self.message_queue: Optional[asyncio.Queue] = None
 
         mode_str = "pipelined" if use_sentence_pipelining else ("streaming" if use_streaming else "batch")
-        logger.info(f"TTSOutputWorker initialized with voice={voice}, mode={mode_str}")
+        logger.info(
+            "TTSOutputWorker initialized with voice=%s, speed=%.2f, mode=%s",
+            voice,
+            self.speech_rate,
+            mode_str,
+        )
 
     def run(self):
         """Main thread execution loop."""
@@ -189,7 +212,8 @@ class TTSOutputWorker(QtCore.QThread):
             self.tts_client = SimpleTTSClient(
                 api_key=self.watson_api_key,
                 service_url=self.watson_url,
-                voice=self.voice
+                voice=self.voice,
+                speech_rate=self.speech_rate,
             )
 
             logger.info("Watson TTS client initialized")
@@ -402,7 +426,7 @@ class TTSOutputWorker(QtCore.QThread):
             # Start the streaming player (will be configured when first chunk arrives)
             # Using Watson TTS default format: 22050Hz, mono, 16-bit
             self._streaming_player.start(
-                sample_rate=22050,
+                sample_rate=max(8000, int(22050 * self.speech_rate)),
                 channels=1,
                 sample_width=2
             )
