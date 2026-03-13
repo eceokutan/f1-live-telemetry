@@ -12,6 +12,7 @@ Usage:
 import sys
 import os
 import logging
+import threading
 
 # Import torch BEFORE PyQt5 to avoid DLL conflict on Windows
 # (PyQt5 changes DLL search paths, breaking torch's c10.dll loading)
@@ -20,7 +21,7 @@ try:
 except ImportError:
     pass
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 
 # Configure logging FIRST - before any other imports
 logging.basicConfig(
@@ -91,6 +92,86 @@ except ImportError as e:
 
 logger.info("All core modules imported")
 
+_prewarm_started = False
+
+
+def _should_prewarm_models() -> bool:
+    """Whether to run background model prewarm at startup."""
+    val = os.getenv("PREWARM_MODELS_ON_START", "1").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+
+def _start_background_model_prewarm(settings: dict):
+    """Prewarm STT/TTS model caches in background while user is in launcher."""
+    global _prewarm_started
+    if _prewarm_started or not _should_prewarm_models():
+        return
+
+    # Decide up front which warmups are still needed so we can skip no-op runs.
+    prewarm_stt = True
+    prewarm_tts = True
+    kokoro_voice = settings.get("kokoro_voice", "bm_lewis")
+    kokoro_lang = settings.get("kokoro_lang", "en-gb")
+    try:
+        kokoro_speed = float(settings.get("kokoro_speed", 0.97))
+    except (TypeError, ValueError):
+        kokoro_speed = 0.97
+    kokoro_use_cuda = str(settings.get("kokoro_use_cuda", False)).lower() in {"1", "true", "yes", "on"}
+
+    try:
+        from ai.model_prewarm import needs_faster_whisper_prewarm, needs_kokoro_prewarm
+
+        prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
+        prewarm_tts = needs_kokoro_prewarm()
+    except Exception as e:
+        logger.warning("Could not inspect model cache state, falling back to full prewarm: %s", e)
+
+    if not prewarm_stt and not prewarm_tts:
+        _prewarm_started = True
+        logger.info("Background model prewarm skipped (all required caches already warm)")
+        return
+
+    _prewarm_started = True
+
+    def _worker():
+        try:
+            from ai.model_prewarm import prewarm_faster_whisper, prewarm_kokoro
+
+            logger.info(
+                "Background model prewarm started (stt=%s, tts=%s)",
+                prewarm_stt,
+                prewarm_tts,
+            )
+
+            if prewarm_stt:
+                try:
+                    prewarm_faster_whisper(model_size="base")
+                    logger.info("Background prewarm: faster-whisper ready")
+                except Exception as e:
+                    logger.warning("Background prewarm: faster-whisper failed: %s", e)
+            else:
+                logger.info("Background prewarm: faster-whisper skipped (cache warm)")
+
+            if prewarm_tts:
+                try:
+                    prewarm_kokoro(
+                        voice_id=kokoro_voice,
+                        lang=kokoro_lang,
+                        speed=kokoro_speed,
+                        use_cuda=kokoro_use_cuda,
+                    )
+                    logger.info("Background prewarm: Kokoro ready")
+                except Exception as e:
+                    logger.warning("Background prewarm: Kokoro failed: %s", e)
+            else:
+                logger.info("Background prewarm: Kokoro skipped (cache warm)")
+
+            logger.info("Background model prewarm finished")
+        except Exception as e:
+            logger.warning("Background prewarm initialization failed: %s", e)
+
+    threading.Thread(target=_worker, name="model-prewarm", daemon=True).start()
+
 
 def run_jarvis_live(settings: dict):
     """
@@ -108,10 +189,7 @@ def run_jarvis_live(settings: dict):
     credential_map = {
         "HUGGINGFACE_TOKEN": "huggingface_token",
         "HUGGINGFACE_MODEL_ID": "huggingface_model_id",
-        "WATSON_STT_API_KEY": "watson_stt_api_key",
-        "WATSON_STT_URL": "watson_stt_url",
-        "WATSON_TTS_API_KEY": "watson_tts_api_key",
-        "WATSON_TTS_URL": "watson_tts_url",
+        "KOKORO_VOICE": "kokoro_voice",
     }
     for env_key, settings_key in credential_map.items():
         val = settings.get(settings_key, "")
@@ -148,16 +226,20 @@ def run_jarvis_live(settings: dict):
     ai_thread = None
     voice_thread = None
     tts_thread = None
+    tts_runtime = {"worker": None, "restarting": False}
     ptt_controller = None
     if enable_ai and AI_AVAILABLE:
         logger.info("Initializing AI Race Engineer")
 
         huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HUGGINGFACE_API_KEY", "")
         huggingface_model_id = os.getenv("HUGGINGFACE_MODEL_ID", "")
-        watson_stt_api_key = os.getenv("WATSON_STT_API_KEY", "")
-        watson_stt_url = os.getenv("WATSON_STT_URL", "")
-        watson_tts_api_key = os.getenv("WATSON_TTS_API_KEY", "")
-        watson_tts_url = os.getenv("WATSON_TTS_URL", "")
+        kokoro_voice_id = os.getenv("KOKORO_VOICE", settings.get("kokoro_voice", "bm_lewis"))
+        kokoro_lang = settings.get("kokoro_lang", "en-gb")
+        try:
+            kokoro_speed = float(settings.get("kokoro_speed", 0.97))
+        except (TypeError, ValueError):
+            kokoro_speed = 0.97
+        kokoro_use_cuda = str(settings.get("kokoro_use_cuda", False)).lower() in {"1", "true", "yes", "on"}
 
         if not huggingface_token or not huggingface_model_id:
             logger.warning("AI Race Engineer requires HUGGINGFACE_TOKEN and HUGGINGFACE_MODEL_ID in .env")
@@ -237,33 +319,88 @@ def run_jarvis_live(settings: dict):
                         logger.error("Failed to initialize PTT Controller: %s", e, exc_info=True)
                         ptt_controller = None
 
-                # Initialize TTS output
-                if TTS_AVAILABLE and watson_tts_api_key and watson_tts_url:
-                    logger.info("Initializing TTS Output (sentence pipelining mode)")
+                # Initialize TTS output (Kokoro local TTS)
+                if TTS_AVAILABLE and voice_mode_setting != "disabled":
+                    logger.info(
+                        "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s)",
+                        kokoro_voice_id,
+                    )
                     try:
-                        tts_thread = TTSOutputWorker(
-                            watson_api_key=watson_tts_api_key,
-                            watson_url=watson_tts_url,
-                            voice="en-GB_JamesV3Voice",
-                            use_sentence_pipelining=True
-                        )
-                        tts_thread.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
-                        tts_thread.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
+                        def _build_tts_worker() -> TTSOutputWorker:
+                            worker = TTSOutputWorker(
+                                use_sentence_pipelining=True,
+                                kokoro_voice_id=kokoro_voice_id,
+                                kokoro_lang=kokoro_lang,
+                                kokoro_speed=kokoro_speed,
+                                kokoro_use_cuda=kokoro_use_cuda,
+                            )
+                            worker.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
+                            worker.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
+                            worker.finished.connect(lambda: logger.warning("TTS worker stopped"))
+                            if voice_thread:
+                                worker.playback_started.connect(voice_thread.pause)
+                                worker.playback_finished.connect(voice_thread.resume)
+                            return worker
+
+                        def _ensure_tts_worker_running(reason: str) -> bool:
+                            if tts_runtime["restarting"]:
+                                return False
+                            worker = tts_runtime["worker"]
+                            if worker and worker.isRunning():
+                                return True
+
+                            tts_runtime["restarting"] = True
+                            try:
+                                worker = _build_tts_worker()
+                                tts_runtime["worker"] = worker
+                                worker.start()
+                                logger.info("TTS worker started (%s)", reason)
+                                return True
+                            except Exception as e:
+                                logger.error("Failed to start TTS worker (%s): %s", reason, e, exc_info=True)
+                                tts_runtime["worker"] = None
+                                return False
+                            finally:
+                                tts_runtime["restarting"] = False
+
+                        def _speak_with_retry(message: str, retries_left: int = 6):
+                            worker = tts_runtime["worker"]
+                            if worker and worker.isRunning():
+                                worker.speak(message)
+                                return
+
+                            if not _ensure_tts_worker_running("auto-restart"):
+                                if retries_left <= 0:
+                                    logger.error("Dropping TTS message after failed restart: %s", message[:80])
+                                    return
+                                QtCore.QTimer.singleShot(
+                                    200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                                )
+                                return
+
+                            if retries_left <= 0:
+                                logger.error("Dropping TTS message; worker never became ready: %s", message[:80])
+                                return
+
+                            QtCore.QTimer.singleShot(
+                                200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                            )
 
                         def on_ai_commentary_for_tts(msg, trigger, priority):
-                            tts_thread.speak(msg)
+                            _speak_with_retry(msg)
 
                         ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
 
-                        if voice_thread:
-                            tts_thread.playback_started.connect(voice_thread.pause)
-                            tts_thread.playback_finished.connect(voice_thread.resume)
-
-                        tts_thread.start()
-                        logger.info("TTS Output started")
+                        if _ensure_tts_worker_running("initialization"):
+                            tts_thread = tts_runtime["worker"]
+                            logger.info("TTS Output started")
+                        else:
+                            tts_thread = None
                     except Exception as e:
                         logger.error("Failed to initialize TTS Output: %s", e, exc_info=True)
                         tts_thread = None
+                elif not TTS_AVAILABLE and voice_mode_setting != "disabled":
+                    logger.warning("Voice mode enabled but TTS module is unavailable")
 
             except Exception as e:
                 logger.error("Failed to initialize AI Race Engineer: %s", e, exc_info=True)
@@ -423,10 +560,11 @@ def run_jarvis_live(settings: dict):
         except Exception as e:
             logger.warning("Error stopping PTT controller: %s", e)
 
-    if tts_thread:
+    active_tts_worker = tts_runtime["worker"] if tts_runtime["worker"] else tts_thread
+    if active_tts_worker:
         try:
-            tts_thread.stop()
-            tts_thread.wait(2000)
+            active_tts_worker.stop()
+            active_tts_worker.wait(2000)
         except Exception as e:
             logger.warning("Error stopping TTS thread: %s", e)
 
@@ -489,6 +627,7 @@ if __name__ == "__main__":
 
     # Load saved settings once
     settings = load_config()
+    _start_background_model_prewarm(settings)
 
     while True:
         # Show unified launcher
