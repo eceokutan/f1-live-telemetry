@@ -21,8 +21,118 @@ from PyQt5.QtWidgets import (
     QTextEdit,
 )
 
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib.collections import LineCollection
+
 from ui.canvases import TrackMapCanvas, TimeSeriesCanvas, MultiLineCanvas
 from ui.styles import DARK_STYLESHEET, FONT_HEADING
+
+
+class DeltaCanvas(FigureCanvas):
+    """
+    Live delta-to-best-lap canvas.
+
+    Shows time delta vs distance: green = ahead of best, red = behind.
+    Zero line marks the best lap reference.
+    """
+
+    def __init__(self, parent=None, width=4, height=1.5, dpi=100):
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        self.ax = self.fig.add_subplot(111)
+        super().__init__(self.fig)
+        self.setParent(parent)
+
+        bg = "#111111"
+        ax_bg = "#181818"
+        self.fig.patch.set_facecolor(bg)
+        self.ax.set_facecolor(ax_bg)
+
+        for spine in self.ax.spines.values():
+            spine.set_color("#CCCCCC")
+        self.ax.tick_params(colors="#CCCCCC", labelsize=7)
+        self.ax.xaxis.label.set_color("#CCCCCC")
+        self.ax.yaxis.label.set_color("#CCCCCC")
+        self.ax.title.set_color("#FFFFFF")
+
+        self.ax.set_title("Delta to Best", fontsize=8)
+        self.ax.set_xlabel("Distance [m]", fontsize=7)
+        self.ax.set_ylabel("Delta [s]", fontsize=7)
+        self.ax.axhline(0, color="#555555", linewidth=1, linestyle="-")
+        self.ax.grid(True, color="#333333", alpha=0.6)
+
+        self._line_collection = None
+        self._delta_label = self.ax.text(
+            0.98, 0.92, "", transform=self.ax.transAxes,
+            ha="right", va="top", fontsize=12, fontweight="bold",
+            color="#FFFFFF",
+        )
+
+        self.fig.tight_layout(pad=0.5)
+
+    def update_delta(self, distances, deltas):
+        """
+        Update delta trace with green/red coloring.
+
+        Args:
+            distances: cumulative distance array (meters)
+            deltas: time delta array (seconds, negative = ahead)
+        """
+        if len(distances) < 2:
+            return
+
+        try:
+            # Remove old line collection
+            if self._line_collection is not None:
+                try:
+                    self._line_collection.remove()
+                except Exception:
+                    pass
+
+            # Build colored segments
+            points = np.column_stack([distances, deltas])
+            segments = np.array([points[:-1], points[1:]]).transpose(1, 0, 2)
+
+            # Color: green if delta < 0 (ahead), red if delta > 0 (behind)
+            colors = []
+            for i in range(len(segments)):
+                avg_delta = (deltas[i] + deltas[i + 1]) / 2
+                if avg_delta <= 0:
+                    colors.append((0.42, 0.80, 0.47, 1.0))  # green
+                else:
+                    colors.append((1.0, 0.42, 0.42, 1.0))   # red
+
+            lc = LineCollection(segments, colors=colors, linewidths=2)
+            self._line_collection = self.ax.add_collection(lc)
+
+            self.ax.set_xlim(0, distances[-1])
+
+            y_max = max(abs(deltas.min()), abs(deltas.max()), 0.5)
+            self.ax.set_ylim(-y_max * 1.2, y_max * 1.2)
+
+            # Update delta label
+            current_delta = deltas[-1]
+            if current_delta <= 0:
+                self._delta_label.set_text(f"{current_delta:+.3f}s")
+                self._delta_label.set_color("#6BCB77")
+            else:
+                self._delta_label.set_text(f"+{current_delta:.3f}s")
+                self._delta_label.set_color("#FF6B6B")
+
+            self.draw_idle()
+        except Exception:
+            pass
+
+    def clear_delta(self):
+        """Clear the delta trace."""
+        if self._line_collection is not None:
+            try:
+                self._line_collection.remove()
+            except Exception:
+                pass
+            self._line_collection = None
+        self._delta_label.set_text("")
+        self.draw_idle()
 
 
 class MainWindow(QMainWindow):
@@ -46,6 +156,16 @@ class MainWindow(QMainWindow):
         # Real-time data buffers for current lap
         self.current_lap_samples = []
         self.current_lap_id = None
+
+        # Lap time tracking
+        self._lap_times_ms = []       # list of lap times in ms, index = lap-1
+        self._best_time_ms = 0        # best lap time in ms
+        self._last_completed_laps = 0 # last seen completedLaps value
+
+        # Best lap reference for delta calculation
+        self._best_lap_samples = None  # list of sample dicts from best lap
+        self._best_lap_distances = None  # cumulative distance array
+        self._best_lap_times = None      # elapsed time array (from t=0)
 
         # Create central widget and root layout
         central = QWidget()
@@ -87,7 +207,7 @@ class MainWindow(QMainWindow):
         lap_layout = QVBoxLayout()
         lap_group.setLayout(lap_layout)
 
-        self.lap_table = QTableWidget(8, 2)
+        self.lap_table = QTableWidget(0, 2)
         self.lap_table.setHorizontalHeaderLabels(["Lap Time", "Delta"])
         self.lap_table.verticalHeader().setVisible(True)
         self.lap_table.horizontalHeader().setStretchLastSection(True)
@@ -95,17 +215,19 @@ class MainWindow(QMainWindow):
         self.lap_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
         self.lap_table.setColumnWidth(0, 100)
 
-        # Initialize empty rows
-        for i in range(8):
-            lap_label = QTableWidgetItem(f"{i+1}.")
-            self.lap_table.setVerticalHeaderItem(i, lap_label)
-            self.lap_table.setItem(i, 0, QTableWidgetItem("--:--:---"))
-            self.lap_table.setItem(i, 1, QTableWidgetItem("----"))
-
+        self.lap_table.setMaximumHeight(150)
         lap_layout.addWidget(self.lap_table)
 
         left_col.addWidget(track_group)
         left_col.addWidget(lap_group)
+
+        # Delta to best lap graph
+        delta_group = QGroupBox("Delta to Best Lap")
+        delta_layout = QVBoxLayout()
+        delta_group.setLayout(delta_layout)
+        self.delta_canvas = DeltaCanvas(self, width=4, height=1.5, dpi=100)
+        delta_layout.addWidget(self.delta_canvas)
+        left_col.addWidget(delta_group)
 
         return left_col
 
@@ -292,6 +414,24 @@ class MainWindow(QMainWindow):
         self.last_lap_label.setText(f"Last: {last_time if last_time else '--:--:---'}")
         self.best_lap_label.setText(f"Best: {best_time if best_time else '--:--:---'}")
 
+        # Detect lap completion from AC's completedLaps counter
+        completed_laps = live_data.get("completed_laps", 0)
+        last_time_ms = live_data.get("last_time_ms", 0)
+        best_time_ms = live_data.get("best_time_ms", 0)
+
+        if completed_laps > self._last_completed_laps and last_time_ms > 0:
+            self._last_completed_laps = completed_laps
+
+            # Check if this lap set a new best — save its samples as reference
+            is_new_best = (best_time_ms != self._best_time_ms and best_time_ms > 0
+                           and (self._best_time_ms == 0 or best_time_ms <= self._best_time_ms))
+            self._best_time_ms = best_time_ms
+
+            if is_new_best and self.current_lap_samples:
+                self._save_best_lap_reference(list(self.current_lap_samples))
+
+            self._add_lap_to_table(completed_laps, last_time_ms)
+
     def handle_realtime_sample(self, sample):
         """
         Handle real-time telemetry sample for live visualization.
@@ -308,6 +448,7 @@ class MainWindow(QMainWindow):
             # Reset track map initialization flag so it redraws properly
             if hasattr(self.track_canvas, '_initialized'):
                 del self.track_canvas._initialized
+            self.delta_canvas.clear_delta()
             logger.info("UI: New lap %d started", lap_id)
 
         # Detect large position jumps (hotlap teleport or lap reset)
@@ -392,8 +533,136 @@ class MainWindow(QMainWindow):
                 tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
             ])
 
+            # Update delta to best lap
+            if self._best_lap_distances is not None:
+                eval_dist, deltas = self._compute_delta(self.current_lap_samples)
+                if eval_dist is not None and deltas is not None:
+                    self.delta_canvas.update_delta(eval_dist, deltas)
+
         except Exception as e:
             logger.error("Visualization update error: %s", e)
+
+    def _add_lap_to_table(self, lap_number: int, lap_time_ms: int):
+        """Add a completed lap to the table with proper delta calculation."""
+        from PyQt5.QtGui import QColor
+
+        self._lap_times_ms.append(lap_time_ms)
+
+        row = self.lap_table.rowCount()
+        self.lap_table.insertRow(row)
+        self.lap_table.setVerticalHeaderItem(row, QTableWidgetItem(f"{lap_number}"))
+
+        # Lap time
+        time_str = self._format_time_ms(lap_time_ms)
+        time_item = QTableWidgetItem(time_str)
+
+        # Highlight best lap in green
+        if lap_time_ms == self._best_time_ms:
+            time_item.setForeground(QColor(107, 203, 119))  # green
+
+        self.lap_table.setItem(row, 0, time_item)
+
+        # Delta vs best lap
+        if self._best_time_ms > 0 and len(self._lap_times_ms) > 1:
+            delta_ms = lap_time_ms - self._best_time_ms
+            if delta_ms == 0:
+                delta_str = "BEST"
+                delta_item = QTableWidgetItem(delta_str)
+                delta_item.setForeground(QColor(107, 203, 119))  # green
+            else:
+                delta_seconds = delta_ms / 1000.0
+                delta_str = f"+{delta_seconds:.3f}"
+                delta_item = QTableWidgetItem(delta_str)
+                delta_item.setForeground(QColor(255, 107, 107))  # red
+        else:
+            delta_item = QTableWidgetItem("--")
+
+        self.lap_table.setItem(row, 1, delta_item)
+
+        # Scroll to the new row
+        self.lap_table.scrollToBottom()
+
+        # If best time changed, update all previous deltas
+        if lap_time_ms == self._best_time_ms and len(self._lap_times_ms) > 1:
+            self._refresh_deltas()
+
+    def _refresh_deltas(self):
+        """Refresh all delta values in the table after a new best lap."""
+        from PyQt5.QtGui import QColor
+        for i, t_ms in enumerate(self._lap_times_ms):
+            delta_ms = t_ms - self._best_time_ms
+            if delta_ms == 0:
+                delta_item = QTableWidgetItem("BEST")
+                delta_item.setForeground(QColor(107, 203, 119))
+            else:
+                delta_item = QTableWidgetItem(f"+{delta_ms / 1000.0:.3f}")
+                delta_item.setForeground(QColor(255, 107, 107))
+            self.lap_table.setItem(i, 1, delta_item)
+
+    @staticmethod
+    def _format_time_ms(ms: int) -> str:
+        """Format milliseconds as M:SS.mmm"""
+        total_seconds = ms / 1000.0
+        minutes = int(total_seconds // 60)
+        seconds = total_seconds % 60
+        return f"{minutes}:{seconds:06.3f}"
+
+    def _save_best_lap_reference(self, samples):
+        """Save a completed lap's samples as the best-lap reference for delta calculation."""
+        if len(samples) < 2:
+            return
+
+        self._best_lap_samples = samples
+
+        xs = np.array([s["x"] for s in samples], dtype=float)
+        zs = np.array([s["z"] for s in samples], dtype=float)
+        ts = np.array([s["t"] for s in samples], dtype=float)
+        ts = ts - ts[0]  # normalize to start from 0
+
+        # Compute cumulative distance
+        dx = np.diff(xs)
+        dz = np.diff(zs)
+        seg_dist = np.sqrt(dx ** 2 + dz ** 2)
+        self._best_lap_distances = np.concatenate([[0], np.cumsum(seg_dist)])
+        self._best_lap_times = ts
+
+        logger.info("Saved best lap reference: %.1fm total, %.3fs",
+                     self._best_lap_distances[-1], ts[-1])
+
+    def _compute_delta(self, current_samples):
+        """Compute time delta between current lap and best lap at each distance point."""
+        if (self._best_lap_distances is None or self._best_lap_times is None
+                or len(current_samples) < 2):
+            return None, None
+
+        xs = np.array([s["x"] for s in current_samples], dtype=float)
+        zs = np.array([s["z"] for s in current_samples], dtype=float)
+        ts = np.array([s["t"] for s in current_samples], dtype=float)
+        ts = ts - ts[0]
+
+        # Cumulative distance for current lap
+        dx = np.diff(xs)
+        dz = np.diff(zs)
+        seg_dist = np.sqrt(dx ** 2 + dz ** 2)
+        curr_distances = np.concatenate([[0], np.cumsum(seg_dist)])
+
+        # Only compare up to the shorter of current distance or best lap distance
+        max_dist = min(curr_distances[-1], self._best_lap_distances[-1])
+        if max_dist < 10:  # need at least 10m of data
+            return None, None
+
+        # Sample at regular distance intervals for smooth comparison
+        n_points = min(200, len(curr_distances))
+        eval_distances = np.linspace(0, max_dist, n_points)
+
+        # Interpolate: time at each distance for both laps
+        curr_time_at_dist = np.interp(eval_distances, curr_distances, ts)
+        best_time_at_dist = np.interp(eval_distances, self._best_lap_distances, self._best_lap_times)
+
+        # Delta = current time - best time (positive = slower, negative = faster)
+        deltas = curr_time_at_dist - best_time_at_dist
+
+        return eval_distances, deltas
 
     def handle_lap_complete(self, lap_id, samples):
         """
@@ -405,35 +674,7 @@ class MainWindow(QMainWindow):
         """
         if not samples:
             return
-
         logger.info("Lap %d completed with %d samples", lap_id, len(samples))
-
-        times = np.array([s["t"] for s in samples], dtype=float)
-        times = times - times[0]  # Normalize to start from 0
-
-        # Per-sample lap_valid (from gfx.lastTimeMs) is unreliable for the
-        # first lap — default to valid.
-        lap_valid = True
-
-        # Update lap table
-        row = min(lap_id - 1, self.lap_table.rowCount() - 1)
-        if row >= 0 and len(times) > 0:
-            lap_time_seconds = times[-1]
-            minutes = int(lap_time_seconds // 60)
-            seconds = lap_time_seconds % 60
-            lap_time = f"{minutes}:{seconds:06.3f}"
-
-            time_item = QTableWidgetItem(lap_time)
-            valid_item = QTableWidgetItem("Valid" if lap_valid else "Invalid")
-
-            if not lap_valid:
-                from PyQt5.QtGui import QColor
-                invalid_color = QColor(255, 80, 80)  # red tint
-                time_item.setForeground(invalid_color)
-                valid_item.setForeground(invalid_color)
-
-            self.lap_table.setItem(row, 0, time_item)
-            self.lap_table.setItem(row, 1, valid_item)
 
     def handle_ai_commentary(self, message: str, trigger: str, priority: int):
         """

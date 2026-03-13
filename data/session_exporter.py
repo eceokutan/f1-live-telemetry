@@ -3,6 +3,7 @@ Programmatic session exporter - exports SQLite session data to CSV files
 for consumption by the post-race telemetry analyzer.
 """
 import csv
+import json
 import sqlite3
 import logging
 from pathlib import Path
@@ -51,7 +52,8 @@ class SessionExporter:
                 total_laps,
                 best_lap_time,
                 ai_enabled,
-                COALESCE(session_type, '') as session_type
+                COALESCE(session_type, '') as session_type,
+                COALESCE(notes, '') as notes
             FROM sessions
             WHERE total_laps > 0
             ORDER BY start_time DESC
@@ -85,6 +87,7 @@ class SessionExporter:
                 "best_lap_time": row["best_lap_time"],
                 "ai_enabled": bool(row["ai_enabled"]),
                 "session_type": row["session_type"] or "",
+                "notes": row["notes"] or "",
             })
 
         db.close()
@@ -211,6 +214,180 @@ class SessionExporter:
                     row["lap_number"], row["lap_time"], row["fuel_start"], row["fuel_end"],
                     row["avg_speed"], row["max_speed"], row["valid"]
                 ])
+
+    def rename_session(self, session_id: int, new_name: str) -> None:
+        """Rename a session by setting its notes field."""
+        if not Path(self.db_path).exists():
+            return
+        db = sqlite3.connect(self.db_path)
+        cursor = db.cursor()
+        cursor.execute("UPDATE sessions SET notes = ? WHERE session_id = ?", (new_name, session_id))
+        db.commit()
+        db.close()
+        logger.info("Session %d renamed to '%s'", session_id, new_name)
+
+    def export_session_bundle(self, session_id: int, output_file: str) -> None:
+        """
+        Export a full session (all laps + metadata) to a .jsession file for sharing.
+
+        Args:
+            session_id: Session to export
+            output_file: Path for the .jsession file
+        """
+        if not Path(self.db_path).exists():
+            raise FileNotFoundError(f"Database not found: {self.db_path}")
+
+        db = sqlite3.connect(self.db_path)
+        db.row_factory = sqlite3.Row
+        cursor = db.cursor()
+
+        # Session metadata
+        cursor.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,))
+        session_row = cursor.fetchone()
+        if not session_row:
+            db.close()
+            raise ValueError(f"Session {session_id} not found")
+
+        bundle = {
+            "version": 1,
+            "metadata": {
+                "game": session_row["game"],
+                "track_name": session_row["track_name"],
+                "car_model": session_row["car_model"],
+                "player_name": session_row["player_name"],
+                "total_laps": session_row["total_laps"],
+                "best_lap_time": session_row["best_lap_time"],
+                "notes": session_row["notes"] or "",
+            },
+        }
+
+        # Laps
+        cursor.execute("""
+            SELECT lap_number, lap_time, fuel_start, fuel_end, avg_speed, max_speed, min_speed, valid
+            FROM laps WHERE session_id = ? ORDER BY lap_number
+        """, (session_id,))
+        bundle["laps"] = [dict(row) for row in cursor.fetchall()]
+
+        # Telemetry
+        cursor.execute("SELECT * FROM telemetry WHERE session_id = ? ORDER BY lap_number, elapsed_time", (session_id,))
+        rows = cursor.fetchall()
+        if rows:
+            skip_cols = {"telemetry_id", "session_id", "timestamp"}
+            col_names = [k for k in rows[0].keys() if k not in skip_cols]
+            bundle["telemetry"] = {col: [row[col] for row in rows] for col in col_names}
+        else:
+            bundle["telemetry"] = {}
+
+        # AI commentary
+        cursor.execute("""
+            SELECT timestamp, message, trigger, priority, lap_number
+            FROM ai_commentary WHERE session_id = ? ORDER BY timestamp
+        """, (session_id,))
+        ai_rows = cursor.fetchall()
+        bundle["ai_commentary"] = [dict(row) for row in ai_rows]
+
+        db.close()
+
+        with open(output_file, 'w') as f:
+            json.dump(bundle, f)
+
+        logger.info("Session %d exported to %s", session_id, output_file)
+
+    def import_session_bundle(self, input_file: str) -> int:
+        """
+        Import a .jsession file into the database.
+
+        Args:
+            input_file: Path to the .jsession file
+
+        Returns:
+            The new session_id assigned to the imported session
+        """
+        with open(input_file, 'r') as f:
+            bundle = json.load(f)
+
+        meta = bundle["metadata"]
+        import time as _time
+
+        db = sqlite3.connect(self.db_path)
+        cursor = db.cursor()
+
+        # Ensure tables exist (in case DB is fresh)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start_time REAL NOT NULL,
+                end_time REAL,
+                game TEXT NOT NULL,
+                track_name TEXT,
+                car_model TEXT,
+                player_name TEXT,
+                total_laps INTEGER DEFAULT 0,
+                best_lap_time REAL,
+                total_distance REAL DEFAULT 0.0,
+                ai_enabled INTEGER DEFAULT 0,
+                notes TEXT
+            )
+        """)
+
+        # Insert session
+        now = _time.time()
+        cursor.execute("""
+            INSERT INTO sessions (start_time, game, track_name, car_model, player_name,
+                                  total_laps, best_lap_time, ai_enabled, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        """, (
+            now, meta.get("game", "unknown"), meta.get("track_name", ""),
+            meta.get("car_model", ""), meta.get("player_name", ""),
+            meta.get("total_laps", 0), meta.get("best_lap_time"),
+            meta.get("notes", f"Imported from {Path(input_file).name}"),
+        ))
+        session_id = cursor.lastrowid
+
+        # Insert laps
+        for lap in bundle.get("laps", []):
+            cursor.execute("""
+                INSERT INTO laps (session_id, lap_number, lap_time, fuel_start, fuel_end,
+                                  avg_speed, max_speed, min_speed, valid, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id, lap["lap_number"], lap.get("lap_time"),
+                lap.get("fuel_start"), lap.get("fuel_end"),
+                lap.get("avg_speed"), lap.get("max_speed"), lap.get("min_speed", 0),
+                lap.get("valid", 1), now,
+            ))
+
+        # Insert telemetry
+        telem = bundle.get("telemetry", {})
+        if telem:
+            col_names = list(telem.keys())
+            num_rows = len(telem[col_names[0]]) if col_names else 0
+            for i in range(num_rows):
+                row_vals = {col: telem[col][i] for col in col_names}
+                row_vals["session_id"] = session_id
+                row_vals["timestamp"] = now
+                cols = list(row_vals.keys())
+                placeholders = ", ".join(["?"] * len(cols))
+                cursor.execute(
+                    f"INSERT INTO telemetry ({', '.join(cols)}) VALUES ({placeholders})",
+                    [row_vals[c] for c in cols]
+                )
+
+        # Insert AI commentary
+        for comment in bundle.get("ai_commentary", []):
+            cursor.execute("""
+                INSERT INTO ai_commentary (session_id, timestamp, message, trigger, priority, lap_number)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                session_id, comment.get("timestamp", now), comment.get("message", ""),
+                comment.get("trigger", ""), comment.get("priority", 2),
+                comment.get("lap_number", 0),
+            ))
+
+        db.commit()
+        db.close()
+        logger.info("Imported session from %s as session_id=%d", input_file, session_id)
+        return session_id
 
     def _export_ai_commentary(self, db: sqlite3.Connection, session_id: int, output_path: Path) -> None:
         """Export AI commentary to CSV (if any exists)."""

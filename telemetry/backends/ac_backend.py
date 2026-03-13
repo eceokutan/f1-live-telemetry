@@ -350,6 +350,8 @@ class AcTelemetryWorker(QtCore.QThread):
                                 "ac_status": ac_status,
                                 "current_time": gfx.currentTime,
                                 "last_time": gfx.lastTime, "best_time": gfx.bestTime,
+                                "last_time_ms": gfx.lastTimeMs, "best_time_ms": gfx.bestTimeMs,
+                                "completed_laps": gfx.completedLaps,
                             })
                         time.sleep(0.5)
                         continue
@@ -538,6 +540,9 @@ class AcTelemetryWorker(QtCore.QThread):
                             "current_time": gfx.currentTime,
                             "last_time": gfx.lastTime,
                             "best_time": gfx.bestTime,
+                            "last_time_ms": gfx.lastTimeMs,
+                            "best_time_ms": gfx.bestTimeMs,
+                            "completed_laps": gfx.completedLaps,
                         }
                         self.live_data_update.emit(live_data)
 

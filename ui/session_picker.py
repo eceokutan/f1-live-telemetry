@@ -1,6 +1,7 @@
 """
 Session picker dialog - lets the user select a recorded session for post-race analysis.
 """
+import os
 import logging
 from PyQt5 import QtWidgets, QtCore
 from data.session_exporter import SessionExporter
@@ -18,7 +19,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select Session - Jarvis Post")
-        self.setMinimumSize(800, 500)
+        self.setMinimumSize(900, 500)
         self.setModal(True)
 
         self._selected_session_id = None
@@ -73,9 +74,9 @@ class SessionPickerDialog(QtWidgets.QDialog):
 
         # Session table
         self.table = QtWidgets.QTableWidget()
-        self.table.setColumnCount(9)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Date", "Track", "Car", "Mode", "Duration", "Laps", "Best Lap", "AI"
+            "ID", "Name", "Date", "Track", "Car", "Mode", "Duration", "Laps", "Best Lap", "AI"
         ])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -87,23 +88,38 @@ class SessionPickerDialog(QtWidgets.QDialog):
 
         # Set column widths
         header = self.table.horizontalHeader()
-        header.resizeSection(0, 40)   # ID
-        header.resizeSection(1, 130)  # Date
-        header.resizeSection(2, 120)  # Track
-        header.resizeSection(3, 100)  # Car
-        header.resizeSection(4, 70)   # Mode
-        header.resizeSection(5, 70)   # Duration
-        header.resizeSection(6, 45)   # Laps
-        header.resizeSection(7, 80)   # Best Lap
-        header.resizeSection(8, 35)   # AI
+        header.resizeSection(0, 35)   # ID
+        header.resizeSection(1, 120)  # Name
+        header.resizeSection(2, 120)  # Date
+        header.resizeSection(3, 110)  # Track
+        header.resizeSection(4, 90)   # Car
+        header.resizeSection(5, 60)   # Mode
+        header.resizeSection(6, 60)   # Duration
+        header.resizeSection(7, 40)   # Laps
+        header.resizeSection(8, 75)   # Best Lap
+        header.resizeSection(9, 30)   # AI
 
         layout.addWidget(self.table)
 
         # Buttons
         btn_layout = QtWidgets.QHBoxLayout()
 
-        self.delete_btn = QtWidgets.QPushButton("Delete Session")
-        self.delete_btn.setFixedSize(130, 36)
+        # Destructive / session management buttons (left side)
+        action_btn_style = f"""
+            QPushButton {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 4px;
+                font-size: 10pt;
+            }}
+            QPushButton:hover {{ background-color: #282828; }}
+            QPushButton:pressed {{ background-color: #202020; }}
+            QPushButton:disabled {{ background-color: #333333; color: #666666; }}
+        """
+
+        self.delete_btn = QtWidgets.QPushButton("Delete")
+        self.delete_btn.setFixedSize(90, 36)
         self.delete_btn.setEnabled(False)
         self.delete_btn.setStyleSheet(f"""
             QPushButton {{
@@ -119,6 +135,26 @@ class SessionPickerDialog(QtWidgets.QDialog):
         """)
         self.delete_btn.clicked.connect(self._on_delete)
         btn_layout.addWidget(self.delete_btn)
+
+        self.rename_btn = QtWidgets.QPushButton("Rename")
+        self.rename_btn.setFixedSize(90, 36)
+        self.rename_btn.setEnabled(False)
+        self.rename_btn.setStyleSheet(action_btn_style)
+        self.rename_btn.clicked.connect(self._on_rename)
+        btn_layout.addWidget(self.rename_btn)
+
+        self.export_session_btn = QtWidgets.QPushButton("Export Session")
+        self.export_session_btn.setFixedSize(120, 36)
+        self.export_session_btn.setEnabled(False)
+        self.export_session_btn.setStyleSheet(action_btn_style)
+        self.export_session_btn.clicked.connect(self._on_export_session)
+        btn_layout.addWidget(self.export_session_btn)
+
+        self.import_session_btn = QtWidgets.QPushButton("Import Session")
+        self.import_session_btn.setFixedSize(120, 36)
+        self.import_session_btn.setStyleSheet(action_btn_style)
+        self.import_session_btn.clicked.connect(self._on_import_session)
+        btn_layout.addWidget(self.import_session_btn)
 
         btn_layout.addStretch()
 
@@ -158,7 +194,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
             no_data = QtWidgets.QTableWidgetItem("No recorded sessions found")
             no_data.setTextAlignment(QtCore.Qt.AlignCenter)
             self.table.setItem(0, 0, no_data)
-            self.table.setSpan(0, 0, 1, 9)
+            self.table.setSpan(0, 0, 1, 10)
             return
 
         self.table.setRowCount(len(sessions))
@@ -170,22 +206,26 @@ class SessionPickerDialog(QtWidgets.QDialog):
             id_item.setTextAlignment(QtCore.Qt.AlignCenter)
             self.table.setItem(row_idx, 0, id_item)
 
+            # Name (from notes field)
+            name_str = session.get("notes", "") or ""
+            self.table.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(name_str))
+
             # Date
             date_str = ""
             if session["start_time"]:
                 date_str = session["start_time"].strftime("%Y-%m-%d %H:%M")
-            self.table.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(date_str))
+            self.table.setItem(row_idx, 2, QtWidgets.QTableWidgetItem(date_str))
 
             # Track
-            self.table.setItem(row_idx, 2, QtWidgets.QTableWidgetItem(session["track_name"]))
+            self.table.setItem(row_idx, 3, QtWidgets.QTableWidgetItem(session["track_name"]))
 
             # Car
-            self.table.setItem(row_idx, 3, QtWidgets.QTableWidgetItem(session["car_model"]))
+            self.table.setItem(row_idx, 4, QtWidgets.QTableWidgetItem(session["car_model"]))
 
             # Mode
             mode_item = QtWidgets.QTableWidgetItem(session.get("session_type", "") or "")
             mode_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 4, mode_item)
+            self.table.setItem(row_idx, 5, mode_item)
 
             # Duration
             duration_str = ""
@@ -200,12 +240,12 @@ class SessionPickerDialog(QtWidgets.QDialog):
                     duration_str = f"{total_secs}s"
             duration_item = QtWidgets.QTableWidgetItem(duration_str)
             duration_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 5, duration_item)
+            self.table.setItem(row_idx, 6, duration_item)
 
             # Laps
             laps_item = QtWidgets.QTableWidgetItem(str(session["total_laps"]))
             laps_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 6, laps_item)
+            self.table.setItem(row_idx, 7, laps_item)
 
             # Best Lap
             best_str = ""
@@ -213,19 +253,21 @@ class SessionPickerDialog(QtWidgets.QDialog):
                 best_str = f"{session['best_lap_time']:.3f}s"
             best_item = QtWidgets.QTableWidgetItem(best_str)
             best_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 7, best_item)
+            self.table.setItem(row_idx, 8, best_item)
 
             # AI
             ai_str = "Yes" if session["ai_enabled"] else "No"
             ai_item = QtWidgets.QTableWidgetItem(ai_str)
             ai_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 8, ai_item)
+            self.table.setItem(row_idx, 9, ai_item)
 
     def _on_selection_changed(self):
         selected = self.table.selectedItems()
         has_selection = len(selected) > 0
         self.open_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection)
+        self.rename_btn.setEnabled(has_selection)
+        self.export_session_btn.setEnabled(has_selection)
 
     def _on_double_click(self):
         """Open session on double-click."""
@@ -286,6 +328,89 @@ class SessionPickerDialog(QtWidgets.QDialog):
             self.table.setRowCount(0)
             self.table.clearSpans()
             self._load_sessions()
+
+    def _on_rename(self):
+        """Rename the selected session."""
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        id_item = self.table.item(row, 0)
+        if not id_item:
+            return
+
+        session_id = id_item.data(QtCore.Qt.UserRole)
+        if session_id is None:
+            return
+
+        current_name = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+        new_name, ok = QtWidgets.QInputDialog.getText(
+            self, "Rename Session",
+            f"Enter a name for session {session_id}:",
+            text=current_name
+        )
+        if ok and new_name is not None:
+            self.exporter.rename_session(session_id, new_name.strip())
+            self.table.clearContents()
+            self.table.setRowCount(0)
+            self.table.clearSpans()
+            self._load_sessions()
+
+    def _on_export_session(self):
+        """Export the selected session to a .jsession file."""
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        id_item = self.table.item(row, 0)
+        if not id_item:
+            return
+
+        session_id = id_item.data(QtCore.Qt.UserRole)
+        if session_id is None:
+            return
+
+        track = self.table.item(row, 3).text() if self.table.item(row, 3) else "session"
+        default_name = f"session_{session_id}_{track}.jsession"
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export Session", default_name,
+            "Jarvis Session File (*.jsession);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self.exporter.export_session_bundle(session_id, file_path)
+            QtWidgets.QMessageBox.information(
+                self, "Export Complete",
+                f"Session {session_id} exported to {os.path.basename(file_path)}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Export Error", f"Failed to export session:\n{str(e)}")
+
+    def _on_import_session(self):
+        """Import a .jsession file into the database."""
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Import Session", "",
+            "Jarvis Session File (*.jsession);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            new_id = self.exporter.import_session_bundle(file_path)
+            QtWidgets.QMessageBox.information(
+                self, "Import Complete",
+                f"Session imported as ID {new_id} from {os.path.basename(file_path)}"
+            )
+            self.table.clearContents()
+            self.table.setRowCount(0)
+            self.table.clearSpans()
+            self._load_sessions()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Import Error", f"Failed to import session:\n{str(e)}")
 
     def get_selected_session_id(self) -> int:
         """Return the selected session ID (call after exec_())."""
