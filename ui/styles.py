@@ -54,6 +54,10 @@ DARK_STYLESHEET = f"""
         background-color: {BG_COLOR};
         color: {TEXT_COLOR};
     }}
+    QWidget {{
+        background-color: {BG_COLOR};
+        color: {TEXT_COLOR};
+    }}
     QGroupBox {{
         border: 1px solid {BORDER_COLOR};
         border-radius: 4px;
@@ -94,6 +98,28 @@ DARK_STYLESHEET = f"""
         border-radius: 4px;
         padding: 4px;
     }}
+    QListWidget {{
+        background-color: {BG_COLOR_LIGHT};
+        color: {TEXT_COLOR};
+        border: 1px solid {BORDER_COLOR};
+    }}
+    QListWidget::item:selected {{
+        background-color: {ACCENT_BLUE};
+    }}
+    QTabWidget::pane {{
+        border: 1px solid {BORDER_COLOR};
+        background-color: {BG_COLOR};
+    }}
+    QTabBar::tab {{
+        background-color: {BG_COLOR_LIGHT};
+        color: {TEXT_COLOR};
+        padding: 8px 20px;
+        border: 1px solid {BORDER_COLOR};
+        border-bottom: none;
+    }}
+    QTabBar::tab:selected {{
+        background-color: {BG_COLOR};
+    }}
     QPushButton {{
         background-color: {ACCENT_BLUE};
         color: #FFFFFF;
@@ -115,6 +141,37 @@ DARK_STYLESHEET = f"""
     }}
     QMenuBar::item:selected {{
         background-color: {BG_COLOR_LIGHT};
+    }}
+    QSlider::groove:horizontal {{
+        border: 1px solid {BORDER_COLOR};
+        height: 8px;
+        background: {BG_COLOR_LIGHT};
+        margin: 2px 0;
+    }}
+    QSlider::handle:horizontal {{
+        background: {ACCENT_BLUE};
+        border: 1px solid {ACCENT_BLUE};
+        width: 18px;
+        margin: -5px 0;
+        border-radius: 9px;
+    }}
+    QScrollArea {{
+        border: none;
+    }}
+    QComboBox {{
+        background-color: {BG_COLOR_LIGHT};
+        color: {TEXT_COLOR};
+        border: 1px solid {BORDER_COLOR};
+        border-radius: 4px;
+        padding: 4px;
+    }}
+    QComboBox::drop-down {{
+        border: none;
+    }}
+    QComboBox QAbstractItemView {{
+        background-color: {BG_COLOR_LIGHT};
+        color: {TEXT_COLOR};
+        selection-background-color: {ACCENT_BLUE};
     }}
 """
 
