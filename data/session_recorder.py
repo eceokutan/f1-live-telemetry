@@ -213,6 +213,12 @@ class SessionRecorder(QtCore.QThread):
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_session ON ai_commentary(session_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_voice_session ON voice_queries(session_id)")
 
+                # Migration: add session_type column if it doesn't exist
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+
                 self.db.commit()
             logger.info("Database initialized successfully")
 
@@ -226,7 +232,8 @@ class SessionRecorder(QtCore.QThread):
         track_name: str = "",
         car_model: str = "",
         player_name: str = "",
-        ai_enabled: bool = False
+        ai_enabled: bool = False,
+        session_type: str = ""
     ) -> int:
         """
         Start a new recording session.
@@ -237,6 +244,7 @@ class SessionRecorder(QtCore.QThread):
             car_model: Car model
             player_name: Player name
             ai_enabled: Whether AI race engineer is enabled
+            session_type: Game mode (e.g. "Hotlap", "Practice", "Race", "Qualify")
 
         Returns:
             Session ID
@@ -248,15 +256,16 @@ class SessionRecorder(QtCore.QThread):
                 cursor = self.db.cursor()
                 cursor.execute("""
                 INSERT INTO sessions (
-                    start_time, game, track_name, car_model, player_name, ai_enabled
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    start_time, game, track_name, car_model, player_name, ai_enabled, session_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     self.session_start_time,
                     game,
                     track_name,
                     car_model,
                     player_name,
-                    1 if ai_enabled else 0
+                    1 if ai_enabled else 0,
+                    session_type
                 ))
 
                 self.session_id = cursor.lastrowid

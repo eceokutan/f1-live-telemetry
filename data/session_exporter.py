@@ -43,7 +43,8 @@ class SessionExporter:
                 player_name,
                 total_laps,
                 best_lap_time,
-                ai_enabled
+                ai_enabled,
+                COALESCE(session_type, '') as session_type
             FROM sessions
             WHERE total_laps > 0
             ORDER BY start_time DESC
@@ -76,6 +77,7 @@ class SessionExporter:
                 "total_laps": row["total_laps"] or 0,
                 "best_lap_time": row["best_lap_time"],
                 "ai_enabled": bool(row["ai_enabled"]),
+                "session_type": row["session_type"] or "",
             })
 
         db.close()
@@ -87,6 +89,27 @@ class SessionExporter:
         if sessions:
             return sessions[0]["session_id"]
         return None
+
+    def delete_session(self, session_id: int) -> None:
+        """Delete a session and all its related data from the database."""
+        if not Path(self.db_path).exists():
+            return
+
+        db = sqlite3.connect(self.db_path)
+        cursor = db.cursor()
+
+        cursor.execute("DELETE FROM telemetry WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM laps WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM ai_commentary WHERE session_id = ?", (session_id,))
+        try:
+            cursor.execute("DELETE FROM voice_queries WHERE session_id = ?", (session_id,))
+        except Exception:
+            pass
+        cursor.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+
+        db.commit()
+        db.close()
+        logger.info("Session %d deleted", session_id)
 
     def export_session(self, session_id: int, output_dir: Optional[str] = None) -> str:
         """

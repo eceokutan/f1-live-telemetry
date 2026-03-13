@@ -213,12 +213,25 @@ class AcTelemetryWorker(QtCore.QThread):
             return None
         return mm_phys, mm_graph, mm_static
 
-    def _read_session_info(self, mm_static):
-        """Read and emit static session info (track, car, driver)."""
+    # AC session type codes
+    AC_SESSION_TYPES = {0: "Practice", 1: "Qualify", 2: "Race", 3: "Hotlap"}
+
+    def _read_session_info(self, mm_static, mm_graph=None):
+        """Read and emit static session info (track, car, driver, mode)."""
         if mm_static is None:
             return
         try:
             static_data = read_static(mm_static)
+
+            # Read session type from graphics shared memory
+            session_type = ""
+            if mm_graph is not None:
+                try:
+                    gfx = read_graphics(mm_graph)
+                    session_type = self.AC_SESSION_TYPES.get(gfx.session, f"Unknown ({gfx.session})")
+                except Exception:
+                    pass
+
             session_data = {
                 "track": static_data.track,
                 "track_config": static_data.trackConfiguration,
@@ -228,11 +241,12 @@ class AcTelemetryWorker(QtCore.QThread):
                 "player_nick": static_data.playerNick,
                 "max_rpm": static_data.maxRpm,
                 "max_fuel": static_data.maxFuel,
+                "session_type": session_type,
             }
-            logger.info("Session: Track=%s (%s), Car=%s, Driver=%s %s",
+            logger.info("Session: Track=%s (%s), Car=%s, Driver=%s %s, Mode=%s",
                         session_data['track'], session_data['track_config'],
                         session_data['car_model'], session_data['player_name'],
-                        session_data['player_surname'])
+                        session_data['player_surname'], session_type)
             self.session_info_update.emit(session_data)
         except Exception as e:
             logger.warning("Could not read static info: %s", e)
@@ -282,7 +296,7 @@ class AcTelemetryWorker(QtCore.QThread):
             logger.info("Connected to AC shared memory")
             self.status_update.emit("Connected! Start driving...")
 
-            self._read_session_info(mm_static)
+            self._read_session_info(mm_static, mm_graph)
 
             # LapBuffer with callback that emits a Qt signal
             lap_buffer = LapBuffer(

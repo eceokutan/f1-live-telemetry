@@ -294,7 +294,8 @@ def run_jarvis_live(settings: dict):
                         track_name=session_info["track"],
                         car_model=session_info["car"],
                         player_name=session_info["player"],
-                        ai_enabled=enable_ai
+                        ai_enabled=enable_ai,
+                        session_type=info.get("session_type", "")
                     )
 
             if hasattr(telemetry_thread, 'session_info_update'):

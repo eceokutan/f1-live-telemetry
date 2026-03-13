@@ -5,7 +5,7 @@ import logging
 from PyQt5 import QtWidgets, QtCore
 from data.session_exporter import SessionExporter
 from ui.styles import (
-    BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR, TEXT_COLOR_DIM,
+    BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR,
     BORDER_COLOR, ACCENT_BLUE, ACCENT_GREEN,
 )
 
@@ -18,7 +18,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select Session - Jarvis Post")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(800, 500)
         self.setModal(True)
 
         self._selected_session_id = None
@@ -73,9 +73,9 @@ class SessionPickerDialog(QtWidgets.QDialog):
 
         # Session table
         self.table = QtWidgets.QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Date", "Track", "Car", "Laps", "Best Lap", "AI"
+            "ID", "Date", "Track", "Car", "Mode", "Duration", "Laps", "Best Lap", "AI"
         ])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -88,17 +88,38 @@ class SessionPickerDialog(QtWidgets.QDialog):
         # Set column widths
         header = self.table.horizontalHeader()
         header.resizeSection(0, 40)   # ID
-        header.resizeSection(1, 160)  # Date
-        header.resizeSection(2, 150)  # Track
-        header.resizeSection(3, 120)  # Car
-        header.resizeSection(4, 50)   # Laps
-        header.resizeSection(5, 90)   # Best Lap
-        header.resizeSection(6, 40)   # AI
+        header.resizeSection(1, 130)  # Date
+        header.resizeSection(2, 120)  # Track
+        header.resizeSection(3, 100)  # Car
+        header.resizeSection(4, 70)   # Mode
+        header.resizeSection(5, 70)   # Duration
+        header.resizeSection(6, 45)   # Laps
+        header.resizeSection(7, 80)   # Best Lap
+        header.resizeSection(8, 35)   # AI
 
         layout.addWidget(self.table)
 
         # Buttons
         btn_layout = QtWidgets.QHBoxLayout()
+
+        self.delete_btn = QtWidgets.QPushButton("Delete Session")
+        self.delete_btn.setFixedSize(130, 36)
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #8B2020;
+                color: {TEXT_COLOR};
+                border: none;
+                border-radius: 4px;
+                font-size: 10pt;
+            }}
+            QPushButton:hover {{ background-color: #A03030; }}
+            QPushButton:pressed {{ background-color: #701818; }}
+            QPushButton:disabled {{ background-color: #333333; color: #666666; }}
+        """)
+        self.delete_btn.clicked.connect(self._on_delete)
+        btn_layout.addWidget(self.delete_btn)
+
         btn_layout.addStretch()
 
         self.cancel_btn = QtWidgets.QPushButton("Cancel")
@@ -124,7 +145,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
 
         layout.addLayout(btn_layout)
 
-        # Enable open button when row is selected
+        # Enable buttons when row is selected
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
     def _load_sessions(self):
@@ -137,7 +158,7 @@ class SessionPickerDialog(QtWidgets.QDialog):
             no_data = QtWidgets.QTableWidgetItem("No recorded sessions found")
             no_data.setTextAlignment(QtCore.Qt.AlignCenter)
             self.table.setItem(0, 0, no_data)
-            self.table.setSpan(0, 0, 1, 7)
+            self.table.setSpan(0, 0, 1, 9)
             return
 
         self.table.setRowCount(len(sessions))
@@ -161,10 +182,30 @@ class SessionPickerDialog(QtWidgets.QDialog):
             # Car
             self.table.setItem(row_idx, 3, QtWidgets.QTableWidgetItem(session["car_model"]))
 
+            # Mode
+            mode_item = QtWidgets.QTableWidgetItem(session.get("session_type", "") or "")
+            mode_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            self.table.setItem(row_idx, 4, mode_item)
+
+            # Duration
+            duration_str = ""
+            if session["start_time"] and session["end_time"]:
+                delta = session["end_time"] - session["start_time"]
+                total_secs = int(delta.total_seconds())
+                if total_secs >= 3600:
+                    duration_str = f"{total_secs // 3600}h {(total_secs % 3600) // 60}m"
+                elif total_secs >= 60:
+                    duration_str = f"{total_secs // 60}m {total_secs % 60}s"
+                else:
+                    duration_str = f"{total_secs}s"
+            duration_item = QtWidgets.QTableWidgetItem(duration_str)
+            duration_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            self.table.setItem(row_idx, 5, duration_item)
+
             # Laps
             laps_item = QtWidgets.QTableWidgetItem(str(session["total_laps"]))
             laps_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 4, laps_item)
+            self.table.setItem(row_idx, 6, laps_item)
 
             # Best Lap
             best_str = ""
@@ -172,17 +213,19 @@ class SessionPickerDialog(QtWidgets.QDialog):
                 best_str = f"{session['best_lap_time']:.3f}s"
             best_item = QtWidgets.QTableWidgetItem(best_str)
             best_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 5, best_item)
+            self.table.setItem(row_idx, 7, best_item)
 
             # AI
             ai_str = "Yes" if session["ai_enabled"] else "No"
             ai_item = QtWidgets.QTableWidgetItem(ai_str)
             ai_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 6, ai_item)
+            self.table.setItem(row_idx, 8, ai_item)
 
     def _on_selection_changed(self):
         selected = self.table.selectedItems()
-        self.open_btn.setEnabled(len(selected) > 0)
+        has_selection = len(selected) > 0
+        self.open_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(has_selection)
 
     def _on_double_click(self):
         """Open session on double-click."""
@@ -211,6 +254,38 @@ class SessionPickerDialog(QtWidgets.QDialog):
                 self._selected_session_id = session_id
                 self._accepted = True
                 self.accept()
+
+    def _on_delete(self):
+        """Delete the selected session after confirmation."""
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        id_item = self.table.item(row, 0)
+        if not id_item:
+            return
+
+        session_id = id_item.data(QtCore.Qt.UserRole)
+        if session_id is None:
+            return
+
+        # Confirm deletion
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Session",
+            f"Delete session {session_id}? This will permanently remove all telemetry, laps, and AI commentary for this session.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.exporter.delete_session(session_id)
+            # Reload the table
+            self.table.clearContents()
+            self.table.setRowCount(0)
+            self.table.clearSpans()
+            self._load_sessions()
 
     def get_selected_session_id(self) -> int:
         """Return the selected session ID (call after exec_())."""
