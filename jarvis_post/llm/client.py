@@ -24,9 +24,19 @@ class LLMError(Exception):
 class HFClient:
     """Client for a model served via a HuggingFace Space (Docker FastAPI)."""
 
-    def __init__(self):
-        self.api_token = (os.getenv("HF_API_TOKEN") or "").strip()
-        space_url = os.getenv("HF_SPACE_URL", "https://ecsy9-f1-granite-post.hf.space")
+    def __init__(self, api_token: str | None = None, space_url: str | None = None):
+        resolved_api_token = api_token
+        if resolved_api_token is None:
+            resolved_api_token = os.getenv("POSTRACE_HF_API_TOKEN") or ""
+        self.api_token = resolved_api_token.strip()
+
+        resolved_space_url = space_url
+        if resolved_space_url is None:
+            resolved_space_url = (
+                os.getenv("POSTRACE_HF_SPACE_URL")
+                or ""
+            )
+        space_url = resolved_space_url
         self.space_url = space_url.rstrip("/")
         self.endpoint = f"{self.space_url}/v1/chat/completions"
         self.health_endpoint = f"{self.space_url}/health"

@@ -8,6 +8,7 @@ from pathlib import Path
 import asyncio
 import importlib
 import inspect
+import logging
 import os
 import sys
 import threading
@@ -21,6 +22,8 @@ from .ai_pipeline_types import (
     EXTERNAL_PIPELINE_MODULES,
     JARVIS_POST_ROOT_CANDIDATES,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AIPipelineBridge:
@@ -193,16 +196,25 @@ class AIPipelineBridge:
         coach_payload["driver_context"] = self._build_driver_context(session, lap)
 
         if not llm_client_cls:
+            logger.warning("Jarvis Post LLM client class is unavailable; skipping external analysis")
             return None
-        if not self._has_hf_config():
+        postrace_hf = self._get_postrace_hf_settings()
+        if not self._has_postrace_hf_config(postrace_hf):
+            logger.warning(
+                "Jarvis Post external AI disabled: missing POSTRACE_HF_SPACE_URL in environment"
+            )
             return None
 
         try:
             if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+                self._jarvis_llm_client = llm_client_cls(
+                    api_token=postrace_hf.get("api_token"),
+                    space_url=postrace_hf.get("space_url"),
+                )
             analyst_agent = race_agent_cls(self._jarvis_llm_client)
             coach_agent = coach_agent_cls(self._jarvis_llm_client)
-        except Exception:
+        except Exception as exc:
+            logger.error("Failed to initialize Jarvis Post agents/client: %s", exc, exc_info=True)
             return None
 
         try:
@@ -214,7 +226,8 @@ class AIPipelineBridge:
                     coach_payload=coach_payload,
                 )
             )
-        except Exception:
+        except Exception as exc:
+            logger.error("Jarvis Post external AI request failed: %s", exc, exc_info=True)
             return None
 
         analyst = self._normalize_text(analyst_raw.get("content") if isinstance(analyst_raw, dict) else analyst_raw)
@@ -257,14 +270,49 @@ class AIPipelineBridge:
         except Exception:
             pass
 
-    def _has_hf_config(self) -> bool:
-        """Check whether required HuggingFace settings are present."""
-        api_token = (os.getenv("HF_API_TOKEN") or "").strip()
-        if not api_token:
-            return False
-        if api_token == "your-hf-token-here":
-            return False
-        return True
+    def _get_postrace_hf_settings(self) -> dict[str, str]:
+        """
+        Resolve Hugging Face settings for Jarvis Post only.
+
+        Primary keys:
+        - POSTRACE_HF_API_TOKEN
+        - POSTRACE_HF_SPACE_URL
+        """
+        api_token = (
+            os.getenv("POSTRACE_HF_API_TOKEN")
+            or ""
+        ).strip()
+        space_url = (
+            os.getenv("POSTRACE_HF_SPACE_URL")
+            or ""
+        ).strip()
+        return {
+            "api_token": "" if self._is_placeholder_env_value(api_token) else api_token,
+            "space_url": "" if self._is_placeholder_env_value(space_url) else space_url,
+        }
+
+    def _is_placeholder_env_value(self, value: str) -> bool:
+        lowered = value.strip().lower()
+        if not lowered:
+            return True
+        placeholders = (
+            "your-hf-token-here",
+            "hf_your_api_key_here",
+            "your_api_key_here",
+            "https://username-space-name.hf.space",
+            "https://username-space-name.hf.space/chat",
+            "https://your-space.hf.space",
+        )
+        return lowered in placeholders
+
+    def _has_postrace_hf_config(self, settings: Optional[dict[str, str]] = None) -> bool:
+        """
+        Check whether Jarvis Post has enough Hugging Face config to call a Space.
+
+        Token is optional for public Spaces, but Space URL is required.
+        """
+        resolved = settings or self._get_postrace_hf_settings()
+        return bool((resolved.get("space_url") or "").strip())
 
     def _call_external_combined(
         self,
@@ -623,7 +671,8 @@ class AIPipelineBridge:
         """Best-effort background warmup so first interactive request is faster."""
         if self._jarvis_warmup_started:
             return
-        if not self._has_hf_config():
+        postrace_hf = self._get_postrace_hf_settings()
+        if not self._has_postrace_hf_config(postrace_hf):
             return
 
         llm_client_cls = handler.get("llm_client_cls")
@@ -635,12 +684,15 @@ class AIPipelineBridge:
         def _warmup() -> None:
             try:
                 if self._jarvis_llm_client is None:
-                    self._jarvis_llm_client = llm_client_cls()
+                    self._jarvis_llm_client = llm_client_cls(
+                        api_token=postrace_hf.get("api_token"),
+                        space_url=postrace_hf.get("space_url"),
+                    )
                 warmup_fn = getattr(self._jarvis_llm_client, "warmup_sync", None)
                 if callable(warmup_fn):
                     warmup_fn()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Jarvis Post warmup failed: %s", exc)
 
         threading.Thread(target=_warmup, daemon=True).start()
 
