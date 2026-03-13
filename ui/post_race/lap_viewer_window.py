@@ -13,6 +13,17 @@ from ui.styles import DARK_STYLESHEET, TIRE_COLORS, TIRE_LABELS
 from .canvases import TrackMapCanvas, TimeSeriesCanvas
 
 
+class _StayOpenMenu(QtWidgets.QMenu):
+    """QMenu subclass that stays open when checkable actions are toggled."""
+
+    def mouseReleaseEvent(self, event):
+        action = self.activeAction()
+        if action and action.isCheckable():
+            action.trigger()
+            return  # Don't close
+        super().mouseReleaseEvent(event)
+
+
 class LapViewerWindow(QtWidgets.QMainWindow):
     """
     Main window for post-race telemetry analysis.
@@ -107,8 +118,18 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
-        # Graphs menu with checkable items
-        graphs_menu = menu_bar.addMenu("Graphs")
+        # Graphs menu that stays open when clicking checkboxes
+        graphs_menu = _StayOpenMenu("Graphs", self)
+        menu_bar.addMenu(graphs_menu)
+
+        # Header label showing max limit
+        header_action = QtWidgets.QWidgetAction(self)
+        header_label = QtWidgets.QLabel(f"  Select up to {self.MAX_GRAPHS} graphs:")
+        header_label.setStyleSheet("color: #aaa; padding: 4px 8px; font-size: 11px;")
+        header_action.setDefaultWidget(header_label)
+        graphs_menu.addAction(header_action)
+        graphs_menu.addSeparator()
+
         self._graph_actions = {}
         for key, title, _, _ in self.GRAPH_DEFS:
             action = QtWidgets.QAction(title, self)
