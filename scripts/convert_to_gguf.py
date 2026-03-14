@@ -25,6 +25,10 @@ from pathlib import Path
 def find_quantize_binary(llama_cpp_path: Path) -> Path:
     """Find the llama-quantize binary in the llama.cpp build tree."""
     candidates = [
+        # Visual Studio multi-config builds place binaries under configuration dirs.
+        llama_cpp_path / "build" / "bin" / "Release" / "llama-quantize.exe",
+        llama_cpp_path / "build" / "bin" / "RelWithDebInfo" / "llama-quantize.exe",
+        llama_cpp_path / "build" / "bin" / "Debug" / "llama-quantize.exe",
         llama_cpp_path / "build" / "bin" / "llama-quantize",
         llama_cpp_path / "build" / "bin" / "llama-quantize.exe",
         llama_cpp_path / "llama-quantize",
@@ -34,6 +38,11 @@ def find_quantize_binary(llama_cpp_path: Path) -> Path:
     ]
     for candidate in candidates:
         if candidate.exists():
+            # On Windows, prefer an executable with nearby runtime DLLs.
+            if sys.platform == "win32":
+                required_dlls = ["ggml-base.dll", "llama.dll"]
+                if not all((candidate.parent / dll).exists() for dll in required_dlls):
+                    continue
             return candidate
     return None
 
