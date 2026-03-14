@@ -140,7 +140,7 @@ Both backends inherit from `QtCore.QThread` and emit these signals:
 
 **[ai/voice_input.py](ai/voice_input.py)** - Voice Input (experimental)
 - `VoiceInputWorker` - QThread for hands-free voice queries
-- Uses Silero VAD (local neural network) for voice activity detection
+- Uses webrtcvad for voice activity detection
 - Uses faster-whisper for local speech-to-text transcription (no API key needed)
 - Whisper `initial_prompt` seeded with F1/racing vocabulary for better accuracy
 - Automatically pauses during TTS playback to prevent echo/feedback

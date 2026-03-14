@@ -22,7 +22,7 @@ Drive with a live dashboard that updates as you race:
 An AI co-driver that watches your telemetry and talks to you:
 
 - **Proactive alerts** — fuel warnings, tire temperature/wear alerts, excessive wheel slip, gap changes, pit window suggestions
-- **Voice interaction** — ask questions hands-free via push-to-talk or continuous listening mode (Silero VAD + faster-whisper, runs locally)
+- **Voice interaction** — ask questions hands-free via push-to-talk or continuous listening mode (webrtcvad + faster-whisper, runs locally)
 - **Text-to-speech responses** — Kokoro local TTS with configurable voice
 - **Commentary transcript** — all AI messages displayed in a live panel
 
@@ -101,7 +101,7 @@ AI Race Engineer (optional)
     |--- ai_commentary --> UI transcript + Session Recorder
     |
 Voice (optional)
-    |--- Silero VAD + faster-whisper --> driver queries
+    |--- webrtcvad + faster-whisper --> driver queries
     |--- Kokoro TTS --> spoken responses
     |
 Session Recorder (automatic)
@@ -201,7 +201,7 @@ All thresholds are configurable.
 **Team 17 — Systems Course Project**
 
 - Kokoro — local text-to-speech
-- Silero VAD — voice activity detection
+- webrtcvad — voice activity detection
 - faster-whisper — speech-to-text
 - Hugging Face — LLM inference
 - Game APIs — AC shared memory, ACC UDP broadcasting

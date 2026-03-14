@@ -2,10 +2,5 @@
   "ai_enabled": true,
   "voice_mode": "push_to_talk",
   "ptt_key": "v",
-  "remember_credentials": false,
-  "huggingface_token": "",
-  "huggingface_model_id": "",
-  "use_local_llm": true,
-  "local_adapter_path": "race_engineer_llm",
-  "local_require_cuda": true
+  "local_adapter_path": "race_engineer_llm"
 }

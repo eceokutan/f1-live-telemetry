@@ -2,7 +2,7 @@
 Voice Input Worker for F1 Telemetry Dashboard.
 
 Provides voice input using either:
-- VAD mode (default): Continuous audio capture with Silero VAD for automatic
+- VAD mode (default): Continuous audio capture with webrtcvad for automatic
   voice activity detection. No button press required.
 - PTT mode (--ptt flag): Push-to-talk. Records only while PTT button is held.
   Skips VAD model loading entirely (saves memory).
@@ -24,7 +24,7 @@ class VoiceInputWorker(QtCore.QThread):
     Voice input worker thread for driver queries.
 
     Supports two modes:
-    - VAD mode (default): Uses Silero VAD to auto-detect speech, then transcribes
+    - VAD mode (default): Uses webrtcvad to auto-detect speech, then transcribes
       with faster-whisper. No button press required.
     - PTT mode: Records audio only while push-to-talk is active (controlled via
       start_recording/stop_recording). Skips VAD model loading.
@@ -42,13 +42,13 @@ class VoiceInputWorker(QtCore.QThread):
     error_occurred = QtCore.pyqtSignal(str)
 
     # Audio configuration
-    SAMPLE_RATE = 16000  # Hz (required by Silero VAD and Whisper)
-    CHUNK_SIZE = 512  # Samples per chunk (~32ms at 16kHz)
+    SAMPLE_RATE = 16000  # Hz (required by webrtcvad and Whisper)
+    CHUNK_SIZE = 480  # Samples per chunk (30ms at 16kHz, required by webrtcvad)
     CHANNELS = 1  # Mono audio
     FORMAT = pyaudio.paInt16  # 16-bit PCM
 
     # VAD configuration
-    VAD_THRESHOLD = 0.5  # Speech probability threshold
+    VAD_AGGRESSIVENESS = 2  # webrtcvad aggressiveness (0-3, higher = more aggressive filtering)
     SPEECH_PAD_MS = 150  # Padding before/after speech (ms)
     MIN_SPEECH_DURATION_MS = 300  # Minimum speech duration to process
 
@@ -71,8 +71,8 @@ class VoiceInputWorker(QtCore.QThread):
         self.audio = None
         self.stream = None
 
-        # Silero VAD model (not loaded in PTT mode)
-        self.vad_model = None
+        # webrtcvad instance (not loaded in PTT mode)
+        self.vad = None
 
         # Whisper model
         self.whisper_model = None
@@ -118,7 +118,7 @@ class VoiceInputWorker(QtCore.QThread):
             self.status_update.emit("Voice input stopped")
 
     def _run_vad_loop(self):
-        """Audio processing loop for VAD mode. Auto-detects speech using Silero VAD."""
+        """Audio processing loop for VAD mode. Auto-detects speech using webrtcvad."""
         while self._running:
             try:
                 # Read audio chunk
@@ -136,24 +136,11 @@ class VoiceInputWorker(QtCore.QThread):
 
                 audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
 
-                # Convert to float32 for VAD
-                audio_float32 = audio_int16.astype(np.float32) / 32768.0
-
-                # Detect speech
-                speech_prob = self._detect_speech(audio_float32)
-
-                # Debug: Print speech probability periodically
-                if hasattr(self, '_vad_debug_counter'):
-                    self._vad_debug_counter += 1
-                else:
-                    self._vad_debug_counter = 0
-
-                # Print VAD probability every 2 seconds (~125 chunks at 16kHz)
-                if self._vad_debug_counter % 125 == 0:
-                    logger.info(f"[VAD] Speech probability: {speech_prob:.3f} (threshold: {self.VAD_THRESHOLD})")
+                # Detect speech using raw PCM bytes
+                is_speech = self._detect_speech(audio_data)
 
                 # Process based on VAD state
-                if speech_prob > self.VAD_THRESHOLD:
+                if is_speech:
                     # Speech detected
                     if not self._is_speaking:
                         self._is_speaking = True
@@ -267,26 +254,19 @@ class VoiceInputWorker(QtCore.QThread):
         logger.debug("PTT recording stopped")
 
     def _initialize_vad(self):
-        """Initialize Silero VAD model. Only called in VAD mode (not PTT)."""
+        """Initialize webrtcvad. Only called in VAD mode (not PTT)."""
         try:
-            import torch
+            import webrtcvad
 
-            self.status_update.emit("Loading Silero VAD model...")
+            self.status_update.emit("Initializing voice activity detection...")
 
-            # Load Silero VAD from torch hub
-            self.vad_model, _ = torch.hub.load(
-                repo_or_dir='snakers4/silero-vad',
-                model='silero_vad',
-                force_reload=False,
-                onnx=False
-            )
+            self.vad = webrtcvad.Vad(self.VAD_AGGRESSIVENESS)
 
-            self.vad_model.eval()
-            logger.info("Silero VAD model loaded successfully")
+            logger.info("webrtcvad initialized (aggressiveness=%d)", self.VAD_AGGRESSIVENESS)
 
         except Exception as e:
-            logger.error(f"Failed to load Silero VAD: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to load VAD model: {e}")
+            logger.error(f"Failed to initialize webrtcvad: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to initialize VAD: {e}")
 
     def _initialize_whisper(self):
         """Initialize faster-whisper model for local transcription."""
@@ -339,54 +319,57 @@ class VoiceInputWorker(QtCore.QThread):
                 self.status_update.emit("Microphone ready - speak naturally!")
 
             except Exception as stream_error:
-                # Try with device's native sample rate if 16kHz fails
+                # Try webrtcvad-compatible rates before giving up
+                # webrtcvad supports: 8000, 16000, 32000, 48000 Hz
                 logger.warning(f"Failed at {self.SAMPLE_RATE} Hz: {stream_error}")
-                logger.info(f"Retrying with device native rate: {device_rate} Hz")
-
-                # Update sample rate to match device
-                self.SAMPLE_RATE = device_rate
-
-                self.stream = self.audio.open(
-                    format=self.FORMAT,
-                    channels=self.CHANNELS,
-                    rate=self.SAMPLE_RATE,
-                    input=True,
-                    frames_per_buffer=self.CHUNK_SIZE,
-                    input_device_index=device_info['index']
-                )
-                logger.info(f"Audio stream opened at native rate: {self.SAMPLE_RATE} Hz")
-                self.status_update.emit(f"Microphone ready ({self.SAMPLE_RATE} Hz) - speak naturally!")
+                fallback_rates = [48000, 32000, 8000]
+                opened = False
+                for rate in fallback_rates:
+                    try:
+                        logger.info(f"Trying fallback rate: {rate} Hz")
+                        self.SAMPLE_RATE = rate
+                        # Recalculate chunk size for 30ms at the new rate
+                        self.CHUNK_SIZE = int(rate * 30 / 1000)
+                        self.stream = self.audio.open(
+                            format=self.FORMAT,
+                            channels=self.CHANNELS,
+                            rate=self.SAMPLE_RATE,
+                            input=True,
+                            frames_per_buffer=self.CHUNK_SIZE,
+                            input_device_index=device_info['index']
+                        )
+                        logger.info(f"Audio stream opened at {self.SAMPLE_RATE} Hz")
+                        self.status_update.emit(f"Microphone ready ({self.SAMPLE_RATE} Hz) - speak naturally!")
+                        opened = True
+                        break
+                    except Exception:
+                        continue
+                if not opened:
+                    raise RuntimeError(
+                        f"Could not open audio stream at any supported sample rate. "
+                        f"Device native rate: {device_rate} Hz"
+                    )
 
         except Exception as e:
             logger.error(f"Failed to open audio stream: {e}", exc_info=True)
             self.error_occurred.emit(f"Microphone initialization failed: {e}")
             raise RuntimeError(f"Microphone initialization failed: {e}")
 
-    def _detect_speech(self, audio_chunk: np.ndarray) -> float:
+    def _detect_speech(self, audio_bytes: bytes) -> bool:
         """
-        Detect speech in audio chunk using Silero VAD.
+        Detect speech in audio chunk using webrtcvad.
 
         Args:
-            audio_chunk: Audio data as float32 array
+            audio_bytes: Raw 16-bit PCM audio bytes (30ms frame at 16kHz)
 
         Returns:
-            Speech probability (0.0 to 1.0)
+            True if speech is detected, False otherwise
         """
         try:
-            import torch
-
-            # Convert to torch tensor
-            audio_tensor = torch.from_numpy(audio_chunk)
-
-            # Run VAD
-            with torch.no_grad():
-                speech_prob = self.vad_model(audio_tensor, self.SAMPLE_RATE).item()
-
-            return speech_prob
-
+            return self.vad.is_speech(audio_bytes, self.SAMPLE_RATE)
         except Exception as e:
             logger.error(f"VAD error: {e}")
-            return 0.0
+            return False
 
     def _transcribe_speech(self):
         """Transcribe buffered speech using faster-whisper."""
