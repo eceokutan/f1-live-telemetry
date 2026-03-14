@@ -104,7 +104,7 @@ def _clear_stale_locks(cache_dir: Path, max_age_seconds: int = 1200) -> None:
 
 
 def needs_local_llm_prewarm() -> bool:
-    """True when the local LLM singleton is not yet loaded into GPU memory."""
+    """True when the local LLM singleton is not yet loaded into memory."""
     try:
         from ai.local_llm_inference import LocalLLMInference
         return LocalLLMInference.get_shared_if_loaded() is None
@@ -112,10 +112,20 @@ def needs_local_llm_prewarm() -> bool:
         return True
 
 
-def prewarm_local_llm(adapter_path: str = "race_engineer_llm") -> None:
-    """Load the local LLM into the shared singleton (downloads base model on first run)."""
+def is_local_llm_model_available(
+    model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
+) -> bool:
+    """Check whether the GGUF model file exists on disk."""
+    p = Path(model_path)
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parent.parent / p
+    return p.exists()
+
+
+def prewarm_local_llm(model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf") -> None:
+    """Load the local LLM into the shared singleton."""
     from ai.local_llm_inference import LocalLLMInference
-    LocalLLMInference.get_shared(adapter_path=adapter_path)
+    LocalLLMInference.get_shared(model_path=model_path)
 
 
 def prewarm_faster_whisper(model_size: str = "base") -> None:

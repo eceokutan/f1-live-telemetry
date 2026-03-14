@@ -118,12 +118,16 @@ def _start_background_model_prewarm(_settings: dict):
         prewarm_stt = True
         prewarm_tts = True
         prewarm_llm = bool(_settings.get("ai_enabled", False))
-        local_adapter_path = _settings.get("local_adapter_path", "race_engineer_llm")
+        local_model_path = _settings.get(
+            "local_model_path",
+            _settings.get("local_adapter_path", "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf"),
+        )
         try:
             # Run cache checks inside the worker so launcher creation is never
             # blocked by optional model imports (e.g., faster_whisper).
             try:
                 from ai.model_prewarm import (
+                    is_local_llm_model_available,
                     needs_faster_whisper_prewarm,
                     needs_kokoro_prewarm,
                     needs_local_llm_prewarm,
@@ -132,7 +136,14 @@ def _start_background_model_prewarm(_settings: dict):
                 prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
                 prewarm_tts = needs_kokoro_prewarm()
                 if prewarm_llm:
-                    prewarm_llm = needs_local_llm_prewarm()
+                    if not is_local_llm_model_available(local_model_path):
+                        logger.warning(
+                            "Background prewarm: GGUF model not found at %s, skipping LLM prewarm",
+                            local_model_path,
+                        )
+                        prewarm_llm = False
+                    else:
+                        prewarm_llm = needs_local_llm_prewarm()
             except Exception as e:
                 logger.warning(
                     "Could not inspect model cache state, falling back to full prewarm: %s",
@@ -154,7 +165,7 @@ def _start_background_model_prewarm(_settings: dict):
 
             if prewarm_llm:
                 try:
-                    prewarm_local_llm(adapter_path=local_adapter_path)
+                    prewarm_local_llm(model_path=local_model_path)
                     logger.info("Background prewarm: local LLM ready")
                 except Exception as e:
                     logger.warning("Background prewarm: local LLM failed: %s", e)
@@ -203,13 +214,16 @@ def run_jarvis_live(settings: dict):
     enable_ai = settings.get("ai_enabled", False)
     enable_ptt = settings.get("voice_mode") == "push_to_talk"
     ptt_key = settings.get("ptt_key", "v")
-    local_adapter_path = settings.get("local_adapter_path", "race_engineer_llm")
+    local_model_path = settings.get(
+        "local_model_path",
+        settings.get("local_adapter_path", "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf"),
+    )
 
-    # Export local LLM adapter path so AI worker can pick it up.
-    os.environ["LOCAL_ADAPTER_PATH"] = str(local_adapter_path or "race_engineer_llm")
+    # Export local LLM model path so AI worker can pick it up.
+    os.environ["LOCAL_MODEL_PATH"] = str(local_model_path or "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf")
 
     logger.info("Starting Jarvis Live for: %s", game.upper())
-    logger.info("LLM settings - adapter=%s", local_adapter_path)
+    logger.info("LLM settings - model=%s", local_model_path)
 
     window = MainWindow()
 

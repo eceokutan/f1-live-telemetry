@@ -81,3 +81,6 @@ livenotes.md
 race_engineer_llm/checkpoint-*/
 race_engineer_llm/runs/
 race_engineer_llm/training_args.bin
+race_engineer_gguf/
+race_engineer_llm_merged/
+*.gguf

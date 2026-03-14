@@ -22,8 +22,9 @@ pydantic>=2.5.0
 # Hugging Face Inference & Local LLM
 huggingface-hub>=0.23.0
 hf_xet>=1.1.0
-transformers>=4.36.0  # Required for local LLM inference (Granite-4.0-micro)
-peft>=0.10.0  # Required for QLoRA adapter loading
+llama-cpp-python>=0.2.50  # GGUF model inference (replaces transformers+peft at runtime)
+# transformers>=4.36.0  # Conversion only — install via requirements-convert.txt
+# peft>=0.10.0          # Conversion only — install via requirements-convert.txt
 
 # Utilities
 tenacity>=8.2.0

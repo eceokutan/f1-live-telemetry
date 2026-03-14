@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for local Granite-4.0-micro QLoRA model.
+Test script for local GGUF model (llama-cpp-python).
 
 Tests model loading, inference, and performance.
 """
@@ -15,7 +15,6 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
-
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -23,8 +22,10 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
 
 
-LOCAL_BASE_MODEL_ID = os.getenv("LOCAL_BASE_MODEL_ID", "ibm-granite/granite-4.0-micro")
-LOCAL_ADAPTER_PATH = os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_llm")
+LOCAL_MODEL_PATH = os.getenv(
+    "LOCAL_MODEL_PATH",
+    "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
+)
 LOCAL_MAX_TOKENS = int(os.getenv("LOCAL_MAX_TOKENS", "24"))
 LOCAL_NUM_PROMPTS = max(1, int(os.getenv("LOCAL_NUM_PROMPTS", "1")))
 LOCAL_TEMPERATURE = float(os.getenv("LOCAL_TEMPERATURE", "0.0"))
@@ -33,47 +34,45 @@ LOCAL_TEMPERATURE = float(os.getenv("LOCAL_TEMPERATURE", "0.0"))
 def test_local_llm_inference():
     """Test local LLM loading and inference."""
     print("=" * 80)
-    print("Testing Local Granite-4.0-micro + QLoRA Inference")
+    print("Testing Local GGUF Inference (llama-cpp-python)")
     print("=" * 80)
 
     # Test 1: Import and initialization
     print("\n[1/4] Importing LocalLLMInference...")
     try:
         from ai.local_llm_inference import LocalLLMInference
-        print("✓ Import successful")
+        print("[OK] Import successful")
     except ImportError as e:
-        print(f"✗ Import failed: {e}")
-        print("  Required: torch, transformers, peft")
+        print(f"[FAIL] Import failed: {e}")
+        print("  Required: llama-cpp-python")
         return False
 
     # Test 2: Initialize inference engine
     print("\n[2/4] Initializing local LLM inference engine...")
-    print(f"  base_model_id = {LOCAL_BASE_MODEL_ID}")
-    print(f"  adapter_path  = {LOCAL_ADAPTER_PATH}")
+    print(f"  model_path    = {LOCAL_MODEL_PATH}")
     print(f"  max_tokens    = {LOCAL_MAX_TOKENS}")
     print(f"  temperature   = {LOCAL_TEMPERATURE}")
     print(f"  num_prompts   = {LOCAL_NUM_PROMPTS}")
     try:
         llm = LocalLLMInference(
-            base_model_id=LOCAL_BASE_MODEL_ID,
-            adapter_path=LOCAL_ADAPTER_PATH,
+            model_path=LOCAL_MODEL_PATH,
             max_tokens=LOCAL_MAX_TOKENS,
             temperature=LOCAL_TEMPERATURE,
         )
-        print(f"✓ Initialized (device: {llm.device})")
+        print("[OK] Initialized")
     except Exception as e:
-        print(f"✗ Initialization failed: {e}")
+        print(f"[FAIL] Initialization failed: {e}")
         return False
 
     # Test 3: Load model
-    print("\n[3/4] Pre-loading model and QLoRA adapter...")
+    print("\n[3/4] Loading GGUF model...")
     start = time.time()
     try:
         llm.load()
         load_time = time.time() - start
-        print(f"✓ Model loaded in {load_time:.2f}s")
+        print(f"[OK] Model loaded in {load_time:.2f}s")
     except Exception as e:
-        print(f"✗ Model loading failed: {e}")
+        print(f"[FAIL] Model loading failed: {e}")
         return False
 
     # Test 4: Generate responses using actual race engineer prompt format
@@ -88,7 +87,7 @@ G-Forces: Lat 1.8g | Lon 0.2g
 Gap Ahead: 0.80s | Gap Behind: 1.20s
 Nearby Opponents: P1(car 5, 288 km/h), P3(car 2, 282 km/h)
 Fuel: 3.2L (8.0 laps)
-Tire Temps: FL:105°C FR:103°C RL:98°C RR:101°C
+Tire Temps: FL:105C FR:103C RL:98C RR:101C
 Tire Wear: FL:65% FR:62% RL:68% RR:64%
 Wheel Slip: FL:0.15 FR:0.12 RL:0.08 RR:0.09
 Suspension: FL:0.045m FR:0.047m RL:0.042m RR:0.043m
@@ -157,14 +156,14 @@ Alert:""",
         try:
             response = llm.generate(prompt)
             inference_time = time.time() - start
-            print(f"  → {response}")
-            print(f"  ⏱ {inference_time:.2f}s")
+            print(f"  -> {response}")
+            print(f"  [TIME] {inference_time:.2f}s")
         except Exception as e:
-            print(f"  ✗ Generation failed: {e}")
+            print(f"  [FAIL] Generation failed: {e}")
             return False
 
     print("\n" + "=" * 80)
-    print("✓ All tests passed!")
+    print("[OK] All tests passed!")
     print("=" * 80)
     return True
 
@@ -178,28 +177,28 @@ def test_llm_client():
     print("\n[1/2] Importing LLMClient...")
     try:
         from ai.race_engineer_core import LLMClient
-        print("✓ Import successful")
+        print("[OK] Import successful")
     except ImportError as e:
-        print(f"✗ Import failed: {e}")
+        print(f"[FAIL] Import failed: {e}")
         return False
 
     print("\n[2/2] Initializing LLMClient with local LLM...")
-    print(f"  local_adapter_path = {LOCAL_ADAPTER_PATH}")
+    print(f"  local_model_path = {LOCAL_MODEL_PATH}")
     try:
         client = LLMClient(
-            local_adapter_path=LOCAL_ADAPTER_PATH,
+            local_model_path=LOCAL_MODEL_PATH,
         )
-        print("✓ LLMClient initialized")
+        print("[OK] LLMClient initialized")
         if client._local_llm is not None:
-            print("✓ Local LLM pre-loaded successfully")
+            print("[OK] Local LLM pre-loaded successfully")
         else:
-            print("⚠ Local LLM not loaded")
+            print("[WARN] Local LLM not loaded")
     except Exception as e:
-        print(f"✗ LLMClient initialization failed: {e}")
+        print(f"[FAIL] LLMClient initialization failed: {e}")
         return False
 
     print("\n" + "=" * 80)
-    print("✓ LLMClient test passed!")
+    print("[OK] LLMClient test passed!")
     print("=" * 80)
     return True
 
@@ -211,9 +210,7 @@ def check_dependencies():
     print("=" * 80)
 
     deps = {
-        "torch": "torch",
-        "transformers": "transformers",
-        "peft": "peft",
+        "llama_cpp": "llama_cpp",
         "pydantic": "pydantic",
     }
 
@@ -221,28 +218,29 @@ def check_dependencies():
     for name, module in deps.items():
         try:
             __import__(module)
-            print(f"✓ {name}")
+            print(f"[OK] {name}")
         except ImportError:
-            print(f"✗ {name} - MISSING")
+            print(f"[FAIL] {name} - MISSING")
             all_ok = False
 
     if not all_ok:
-        print("\n⚠ Missing dependencies. Install with:")
-        print("  pip install -r requirements.txt")
+        print("\n[WARN] Missing dependencies. Install with:")
+        print("  pip install llama-cpp-python pydantic")
 
-    try:
-        import torch
-        print("\nCUDA check:")
-        print(f"  torch version: {torch.__version__}")
-        print(f"  torch cuda: {torch.version.cuda}")
-        print(f"  cuda available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"  cuda device: {torch.cuda.get_device_name(0)}")
-        if not torch.cuda.is_available():
-            print("✗ CUDA is required but unavailable")
-            return False
-    except Exception as e:
-        print(f"\n⚠ Could not run CUDA diagnostics: {e}")
+    # Check GGUF model file exists
+    model_path = Path(LOCAL_MODEL_PATH)
+    if not model_path.is_absolute():
+        model_path = project_root / model_path
+
+    print(f"\nGGUF model check:")
+    print(f"  path: {model_path}")
+    if model_path.exists():
+        size_mb = model_path.stat().st_size / 1e6
+        print(f"  [OK] exists ({size_mb:.1f} MB)")
+    else:
+        print("  [FAIL] GGUF model not found")
+        print("  Run: python scripts/convert_to_gguf.py --llama-cpp-path /path/to/llama.cpp")
+        return False
 
     print()
     return all_ok
@@ -263,7 +261,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("\n" + "=" * 80)
-    print("🎉 All tests passed! Local deployment is ready.")
+    print("[OK] All tests passed! Local deployment is ready.")
     print("=" * 80)
     print("\nRun the app with:")
     print("  python main.py --ai")
