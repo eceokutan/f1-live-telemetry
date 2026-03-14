@@ -25,8 +25,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 LOCAL_BASE_MODEL_ID = os.getenv("LOCAL_BASE_MODEL_ID", "ibm-granite/granite-4.0-micro")
 LOCAL_ADAPTER_PATH = os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_llm")
-LOCAL_USE_GPU = _env_bool("LOCAL_LLM_USE_GPU", True)
-LOCAL_REQUIRE_CUDA = _env_bool("LOCAL_REQUIRE_CUDA", False)
 LOCAL_MAX_TOKENS = int(os.getenv("LOCAL_MAX_TOKENS", "24"))
 LOCAL_NUM_PROMPTS = max(1, int(os.getenv("LOCAL_NUM_PROMPTS", "1")))
 LOCAL_TEMPERATURE = float(os.getenv("LOCAL_TEMPERATURE", "0.0"))
@@ -52,7 +50,6 @@ def test_local_llm_inference():
     print("\n[2/4] Initializing local LLM inference engine...")
     print(f"  base_model_id = {LOCAL_BASE_MODEL_ID}")
     print(f"  adapter_path  = {LOCAL_ADAPTER_PATH}")
-    print(f"  use_gpu       = {LOCAL_USE_GPU}")
     print(f"  max_tokens    = {LOCAL_MAX_TOKENS}")
     print(f"  temperature   = {LOCAL_TEMPERATURE}")
     print(f"  num_prompts   = {LOCAL_NUM_PROMPTS}")
@@ -62,12 +59,8 @@ def test_local_llm_inference():
             adapter_path=LOCAL_ADAPTER_PATH,
             max_tokens=LOCAL_MAX_TOKENS,
             temperature=LOCAL_TEMPERATURE,
-            use_gpu=LOCAL_USE_GPU,
         )
         print(f"✓ Initialized (device: {llm.device})")
-        if LOCAL_REQUIRE_CUDA and llm.device != "cuda":
-            print("✗ CUDA required but not selected")
-            return False
     except Exception as e:
         print(f"✗ Initialization failed: {e}")
         return False
@@ -245,8 +238,8 @@ def check_dependencies():
         print(f"  cuda available: {torch.cuda.is_available()}")
         if torch.cuda.is_available():
             print(f"  cuda device: {torch.cuda.get_device_name(0)}")
-        if LOCAL_REQUIRE_CUDA and not torch.cuda.is_available():
-            print("✗ LOCAL_REQUIRE_CUDA=true but CUDA is unavailable")
+        if not torch.cuda.is_available():
+            print("✗ CUDA is required but unavailable")
             return False
     except Exception as e:
         print(f"\n⚠ Could not run CUDA diagnostics: {e}")

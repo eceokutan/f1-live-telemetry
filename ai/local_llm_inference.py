@@ -7,6 +7,7 @@ the local QLoRA adapter from race_engineer_llm/.
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import ClassVar, Optional
 
@@ -17,13 +18,14 @@ logger = logging.getLogger(__name__)
 # Module-level singleton so the model stays in GPU memory across restarts
 # within the same process (e.g. launcher loop → run_jarvis_live → back to launcher).
 _shared_instance: Optional["LocalLLMInference"] = None
+_shared_lock = threading.Lock()
 
 
 class LocalLLMInference:
     """
     Loads and runs a QLoRA-finetuned model locally.
 
-    Supports GPU (with automatic fallback to CPU) and pre-loads on initialization.
+    Requires CUDA (NVIDIA GPU). Raises RuntimeError if CUDA is unavailable.
     """
 
     def __init__(
@@ -34,7 +36,6 @@ class LocalLLMInference:
         temperature: float = 0.3,
         max_time_seconds: float = 5.0,
         max_prompt_tokens: int = 256,
-        use_gpu: bool = True,
     ):
         """
         Initialize local LLM inference.
@@ -46,8 +47,16 @@ class LocalLLMInference:
             temperature: Sampling temperature
             max_time_seconds: Hard generation time cap per response
             max_prompt_tokens: Maximum input prompt tokens (truncate if longer)
-            use_gpu: Try to use GPU if available, else CPU
+
+        Raises:
+            RuntimeError: If CUDA is not available.
         """
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA is required for local LLM inference but is not available. "
+                "Install a CUDA-enabled PyTorch build or use rule-based fallback."
+            )
+
         self.base_model_id = base_model_id
         self.adapter_path = Path(adapter_path)
         if not self.adapter_path.is_absolute():
@@ -78,47 +87,22 @@ class LocalLLMInference:
                     max_prompt_tokens,
                 )
         self.max_prompt_tokens = max(32, int(max_prompt_tokens))
-        self.use_gpu = use_gpu
 
-        # Determine device
-        self.device = self._select_device()
-        self.dtype = self._select_dtype()
+        self.device = "cuda"
+        logger.info("CUDA device: %s", torch.cuda.get_device_name(0))
+
+        try:
+            if torch.cuda.is_bf16_supported():
+                self.dtype = torch.bfloat16
+            else:
+                self.dtype = torch.float16
+        except Exception:
+            self.dtype = torch.float16
 
         # Lazy-loaded model and tokenizer
         self._model = None
         self._tokenizer = None
         self._loaded = False
-
-    def _select_device(self) -> str:
-        """Select GPU or CPU based on availability and user preference."""
-        if not self.use_gpu:
-            logger.info("GPU disabled, using CPU")
-            return "cpu"
-
-        if torch.cuda.is_available():
-            device = "cuda"
-            logger.info(f"GPU available: {torch.cuda.get_device_name(0)}")
-            return device
-        elif torch.backends.mps.is_available():
-            device = "mps"  # Apple Silicon
-            logger.info("MPS (Apple Silicon) available")
-            return device
-        else:
-            logger.info("No GPU found, falling back to CPU")
-            return "cpu"
-
-    def _select_dtype(self):
-        """Select a memory/perf-friendly dtype for the chosen device."""
-        if self.device == "cuda":
-            try:
-                if torch.cuda.is_bf16_supported():
-                    return torch.bfloat16
-            except Exception:
-                pass
-            return torch.float16
-        if self.device == "mps":
-            return torch.float16
-        return torch.float32
 
     def load(self) -> None:
         """
@@ -274,30 +258,40 @@ class LocalLLMInference:
         temperature: float = 0.3,
         max_time_seconds: float = 5.0,
         max_prompt_tokens: int = 256,
-        use_gpu: bool = True,
     ) -> "LocalLLMInference":
         """
         Return the shared singleton instance, creating and loading it on first call.
 
-        The model stays in GPU memory for the lifetime of the process so
-        subsequent Jarvis Live sessions reuse it without the ~85 s reload.
+        Thread-safe: if the background prewarm thread is already loading the
+        model, a second caller (e.g. the AI worker thread) will block on the
+        lock and then receive the already-loaded instance instead of loading
+        a duplicate.
+
+        Raises RuntimeError if CUDA is not available.
         """
         global _shared_instance
+
+        # Fast path — no lock needed if already loaded.
         if _shared_instance is not None and _shared_instance._loaded:
             return _shared_instance
 
-        instance = cls(
-            base_model_id=base_model_id,
-            adapter_path=adapter_path,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            max_time_seconds=max_time_seconds,
-            max_prompt_tokens=max_prompt_tokens,
-            use_gpu=use_gpu,
-        )
-        instance.load()
-        _shared_instance = instance
-        return instance
+        with _shared_lock:
+            # Re-check after acquiring the lock (another thread may have finished).
+            if _shared_instance is not None and _shared_instance._loaded:
+                return _shared_instance
+
+            logger.info("Loading shared local LLM instance...")
+            instance = cls(
+                base_model_id=base_model_id,
+                adapter_path=adapter_path,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                max_time_seconds=max_time_seconds,
+                max_prompt_tokens=max_prompt_tokens,
+            )
+            instance.load()
+            _shared_instance = instance
+            return instance
 
     @classmethod
     def get_shared_if_loaded(cls) -> Optional["LocalLLMInference"]:
