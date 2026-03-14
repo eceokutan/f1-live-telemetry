@@ -241,11 +241,13 @@ class AIRaceEngineerWorker(QtCore.QThread):
             # Convert dict to TelemetryData
             telemetry = self._dict_to_telemetry(telemetry_dict)
 
-            # Update context
-            self.context.update(telemetry)
-
-            # Detect events
+            # Detect events BEFORE updating context so that delta-based
+            # checks (gap_change, lap_complete, sector_complete) compare
+            # new telemetry against the previous state, not itself.
             events = self.telemetry_agent.detect_events(telemetry, self.context)
+
+            # Update context with current telemetry
+            self.context.update(telemetry)
 
             # Process each event
             for event in events:

@@ -132,11 +132,11 @@ class TelemetryAgent:
         """
         events = []
 
-        # Can't calculate fuel laps if consumption is unknown
-        if context.fuel_consumption_per_lap <= 0:
+        # Can't calculate fuel laps if consumption is unknown or fuel data missing
+        if context.fuel_consumption_per_lap <= 0 or telemetry.fuel is None:
             return events
 
-        fuel_laps_remaining = telemetry.fuel_remaining / context.fuel_consumption_per_lap
+        fuel_laps_remaining = telemetry.fuel / context.fuel_consumption_per_lap
 
         # Check critical first (takes precedence)
         if fuel_laps_remaining <= self.thresholds.fuel_critical_laps:
