@@ -212,10 +212,7 @@ class LocalLLMInference:
             raise RuntimeError(f"Generation failed: {e}") from e
 
     def _prewarm_generation(self) -> None:
-        """Run a tiny generation to absorb first-token initialization overhead."""
-        if os.getenv("LOCAL_LLM_PREWARM_GENERATE", "0").strip().lower() not in {"1", "true", "yes", "on"}:
-            return
-
+        """Run a tiny generation to absorb CUDA kernel JIT compilation overhead."""
         try:
             encoded = self._tokenizer(
                 "Radio check.",
