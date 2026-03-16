@@ -345,22 +345,16 @@ class LiveSessionContext:
         # Format tire wear
         wear_str = f"FL:{self.tire_wear['fl']:.0f}% FR:{self.tire_wear['fr']:.0f}% RL:{self.tire_wear['rl']:.0f}% RR:{self.tire_wear['rr']:.0f}%"
 
-        # Format wheel slip (highlight if any tire is slipping significantly)
-        slip_str = f"FL:{self.wheel_slip['fl']:.2f} FR:{self.wheel_slip['fr']:.2f} RL:{self.wheel_slip['rl']:.2f} RR:{self.wheel_slip['rr']:.2f}"
-
         return f"""Track: {self.track_name}
 Lap: {self.current_lap} | Position: P{self.position}
 Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}
-Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%} | Steering: {self.steering_angle:.2f}
+Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%}
 G-Forces: Lat {self.g_force_lat:.2f}g | Lon {self.g_force_lon:.2f}g
 Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}
 Nearby Opponents: {nearby_str}
 Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)
 Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
 Tire Wear: {wear_str}
-Wheel Slip: {slip_str}
-Suspension: FL:{self.suspension_travel['fl']:.3f}m FR:{self.suspension_travel['fr']:.3f}m RL:{self.suspension_travel['rl']:.3f}m RR:{self.suspension_travel['rr']:.3f}m
-Ride Height: Front {self.ride_height_front:.3f}m | Rear {self.ride_height_rear:.3f}m
 Car Damage: {damage_str}
 Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"""
 
