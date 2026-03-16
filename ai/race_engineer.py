@@ -139,7 +139,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
         from pathlib import Path
 
         # Live mode targets short radio replies with low latency.
-        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "48"))
+        # Low-latency default for live radio replies (one short sentence).
+        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "24"))
         live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.3"))
         local_max_time_seconds = float(os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "5.0"))
         # Support new env var with fallback to old one for backwards compat
@@ -292,7 +293,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             # Generate AI response using reactive mode
             try:
-                query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "12.0"))
+                # Keep a guard timeout, but allow enough headroom for CPU-only GGUF inference.
+                query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "20.0"))
                 response = await asyncio.wait_for(
                     self.race_engineer_agent.generate_reactive_response(
                         query=query,
