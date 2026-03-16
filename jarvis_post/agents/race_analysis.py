@@ -116,7 +116,14 @@ class RaceAnalysisAgent(BaseAgent):
             })
 
         # --- car_data: sample up to 20 rows from telemetry ---
-        car_data_cols = ["t_sec", "speed_kmh", "rpm", "gear", "throttle_pct", "brake", "drs"]
+        car_data_cols = [
+            "t_sec", "speed_kmh", "rpm", "gear", "throttle_pct", "brake", "drs",
+            "steer_angle",
+            "tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr",
+            "tyre_pres_fl", "tyre_pres_fr", "tyre_pres_rl", "tyre_pres_rr",
+            "slip_fl", "slip_fr", "slip_rl", "slip_rr",
+            "dmg_front", "dmg_rear", "dmg_left", "dmg_right", "dmg_centre",
+        ]
         car_data = []
         if telemetry:
             step = max(1, len(telemetry) // 20)
@@ -133,6 +140,24 @@ class RaceAnalysisAgent(BaseAgent):
                     round(throttle_pct, 0),
                     round(brake_pct, 0),
                     int(row.get("drs", 0)),
+                    round(row.get("steer_angle", 0), 1),
+                    round(row.get("tyre_temp_fl", 0), 1),
+                    round(row.get("tyre_temp_fr", 0), 1),
+                    round(row.get("tyre_temp_rl", 0), 1),
+                    round(row.get("tyre_temp_rr", 0), 1),
+                    round(row.get("tyre_pressure_fl", 0), 1),
+                    round(row.get("tyre_pressure_fr", 0), 1),
+                    round(row.get("tyre_pressure_rl", 0), 1),
+                    round(row.get("tyre_pressure_rr", 0), 1),
+                    round(row.get("wheel_slip_fl", 0), 1),
+                    round(row.get("wheel_slip_fr", 0), 1),
+                    round(row.get("wheel_slip_rl", 0), 1),
+                    round(row.get("wheel_slip_rr", 0), 1),
+                    round(row.get("car_damage_front", 0), 0),
+                    round(row.get("car_damage_rear", 0), 0),
+                    round(row.get("car_damage_left", 0), 0),
+                    round(row.get("car_damage_right", 0), 0),
+                    round(row.get("car_damage_centre", 0), 0),
                 ])
 
         payload = {
