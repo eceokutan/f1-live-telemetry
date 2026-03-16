@@ -214,12 +214,16 @@ class LocalLLMInference:
             raise RuntimeError(f"Generation failed: {e}") from e
 
     def _prewarm_generation(self) -> None:
-        """Run a tiny generation to absorb first-inference overhead."""
+        """Run a representative generation to absorb first-inference overhead."""
         try:
+            warmup_prompt = self._format_with_chat_template(
+                "Radio check. Fuel and tires are stable. Reply in one short sentence."
+            )
             self._model.create_completion(
-                "Radio check.",
-                max_tokens=2,
+                warmup_prompt,
+                max_tokens=min(16, self.max_tokens),
                 temperature=0.0,
+                stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
             )
             logger.info("Local LLM generation warmup complete")
         except Exception as e:
