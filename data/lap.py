@@ -27,8 +27,13 @@ class Lap:
         self.lap_number = lap_number
         self.telemetry = telemetry.copy()
 
-        # Calculate lap time from telemetry
-        self.lap_time = telemetry['elapsed_time'].max() if len(telemetry) > 0 else 0.0
+        # Normalize elapsed_time to start at 0 for this lap (it's session-relative in the DB)
+        if len(self.telemetry) > 0 and 'elapsed_time' in self.telemetry.columns:
+            t0 = self.telemetry['elapsed_time'].iloc[0]
+            self.telemetry['elapsed_time'] = self.telemetry['elapsed_time'] - t0
+
+        # Calculate lap time from telemetry (now lap-relative)
+        self.lap_time = self.telemetry['elapsed_time'].max() if len(self.telemetry) > 0 else 0.0
 
         # Use provided summary or calculate it
         if summary:
