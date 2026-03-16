@@ -56,6 +56,7 @@ class TrackMapCanvas(FigureCanvas):
 
         self.line_collection = None
         self.colorbar = None
+        self._car_marker = None
 
         self.fig.tight_layout(pad=1.0)
 
@@ -112,6 +113,19 @@ class TrackMapCanvas(FigureCanvas):
             # Set axis limits with padding
             self.ax.set_xlim(xs.min() - 10, xs.max() + 10)
             self.ax.set_ylim(zs.min() - 10, zs.max() + 10)
+
+            # Update car position marker at the latest point
+            if self._car_marker is not None:
+                try:
+                    self._car_marker.remove()
+                except Exception:
+                    pass
+            self._car_marker = self.ax.plot(
+                xs[-1], zs[-1],
+                marker='o', markersize=10,
+                color='#FFFFFF', markeredgecolor='#E10600',
+                markeredgewidth=2.5, zorder=10,
+            )[0]
 
             # Only create colorbar once
             if self.colorbar is None:
