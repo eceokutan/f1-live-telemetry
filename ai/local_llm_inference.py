@@ -30,10 +30,10 @@ class LocalLLMInference:
         self,
         model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
         n_gpu_layers: int = 0,
-        max_tokens: int = 24,
+        max_tokens: int = 48,
         temperature: float = 0.3,
         max_time_seconds: float = 5.0,
-        max_prompt_tokens: int = 256,
+        max_prompt_tokens: int = 1024,
     ):
         """
         Initialize local LLM inference.
@@ -135,7 +135,7 @@ class LocalLLMInference:
             logger.info(f"Loading GGUF model from {self.model_path}...")
             self._model = Llama(
                 model_path=str(self.model_path),
-                n_ctx=512,
+                n_ctx=2048,
                 n_threads=self.n_threads,
                 n_gpu_layers=self.n_gpu_layers,
                 n_batch=256,
@@ -155,6 +155,24 @@ class LocalLLMInference:
             logger.error(f"Failed to load local model: {e}")
             raise RuntimeError(f"Failed to load local model: {e}") from e
 
+    def _format_with_chat_template(self, prompt: str) -> str:
+        """
+        Wrap a raw prompt in Granite chat template role markers.
+
+        The Granite 4.0 model expects prompts delimited by role tokens.
+        Without these markers, the model sees unstructured text and
+        hallucinates data continuations instead of generating responses.
+        """
+        system_msg = (
+            "You are an expert F1 race engineer communicating with your "
+            "driver over team radio. Reply in one short sentence."
+        )
+        return (
+            f"<|start_of_role|>system<|end_of_role|>{system_msg}<|end_of_text|>"
+            f"<|start_of_role|>user<|end_of_role|>{prompt}<|end_of_text|>"
+            f"<|start_of_role|>assistant<|end_of_role|>"
+        )
+
     def generate(self, prompt: str) -> str:
         """
         Generate a response for the given prompt.
@@ -169,19 +187,24 @@ class LocalLLMInference:
             raise RuntimeError("Model not loaded. Call load() first.")
 
         try:
+            # Wrap prompt in Granite chat template before tokenization
+            formatted_prompt = self._format_with_chat_template(prompt)
+
             # Truncate prompt if it exceeds max_prompt_tokens
-            tokens = self._model.tokenize(prompt.encode())
+            tokens = self._model.tokenize(formatted_prompt.encode())
             if len(tokens) > self.max_prompt_tokens:
                 tokens = tokens[:self.max_prompt_tokens]
-                prompt = self._model.detokenize(tokens).decode(errors="replace")
+                formatted_prompt = self._model.detokenize(tokens).decode(errors="replace")
+
+            logger.debug("Formatted prompt (first 200 chars): %s", formatted_prompt[:200])
 
             response = self._model.create_completion(
-                prompt,
+                formatted_prompt,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 top_k=50,
                 top_p=0.95,
-                stop=["<|end_of_text|>", "\n\n"],
+                stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
             )
 
             return response["choices"][0]["text"].strip()
@@ -215,10 +238,10 @@ class LocalLLMInference:
         cls,
         model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
         n_gpu_layers: int = 0,
-        max_tokens: int = 24,
+        max_tokens: int = 48,
         temperature: float = 0.3,
         max_time_seconds: float = 5.0,
-        max_prompt_tokens: int = 256,
+        max_prompt_tokens: int = 1024,
     ) -> "LocalLLMInference":
         """
         Return the shared singleton instance, creating and loading it on first call.

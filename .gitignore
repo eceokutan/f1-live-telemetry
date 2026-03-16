@@ -84,3 +84,8 @@ race_engineer_llm/training_args.bin
 race_engineer_gguf/
 race_engineer_llm_merged/
 *.gguf
+
+# Large local assets (runtime/training artifacts)
+sample_data/*_telemetry.csv
+race_engineer_llm/*.safetensors
+race_engineer_llm/tokenizer.json

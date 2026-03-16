@@ -25,6 +25,10 @@ from pathlib import Path
 def find_quantize_binary(llama_cpp_path: Path) -> Path:
     """Find the llama-quantize binary in the llama.cpp build tree."""
     candidates = [
+        # Visual Studio multi-config builds place binaries under configuration dirs.
+        llama_cpp_path / "build" / "bin" / "Release" / "llama-quantize.exe",
+        llama_cpp_path / "build" / "bin" / "RelWithDebInfo" / "llama-quantize.exe",
+        llama_cpp_path / "build" / "bin" / "Debug" / "llama-quantize.exe",
         llama_cpp_path / "build" / "bin" / "llama-quantize",
         llama_cpp_path / "build" / "bin" / "llama-quantize.exe",
         llama_cpp_path / "llama-quantize",
@@ -34,6 +38,11 @@ def find_quantize_binary(llama_cpp_path: Path) -> Path:
     ]
     for candidate in candidates:
         if candidate.exists():
+            # On Windows, prefer an executable with nearby runtime DLLs.
+            if sys.platform == "win32":
+                required_dlls = ["ggml-base.dll", "llama.dll"]
+                if not all((candidate.parent / dll).exists() for dll in required_dlls):
+                    continue
             return candidate
     return None
 
@@ -53,6 +62,26 @@ def validate_llama_cpp(llama_cpp_path: Path) -> tuple:
         sys.exit(1)
 
     return convert_script, quantize_bin
+
+
+def validate_adapter_files(adapter_path: Path) -> None:
+    """Validate adapter directory contains the minimum files required for merge."""
+    config_file = adapter_path / "adapter_config.json"
+    has_weights = any(
+        (adapter_path / name).exists()
+        for name in ("adapter_model.safetensors", "adapter_model.bin")
+    )
+
+    if not config_file.exists() or not has_weights:
+        print(f"ERROR: Adapter directory is missing required files: {adapter_path}")
+        print("Expected:")
+        print("  - adapter_config.json")
+        print("  - adapter_model.safetensors (or adapter_model.bin)")
+        print(
+            "Note: large adapter/model artifacts are often kept out of Git. "
+            "Provide --adapter-path to a local directory that contains them."
+        )
+        sys.exit(1)
 
 
 def merge_lora(base_model_id: str, adapter_path: Path, output_dir: Path) -> None:
@@ -188,6 +217,7 @@ def main():
     if not adapter_path.exists():
         print(f"ERROR: Adapter path does not exist: {adapter_path}")
         sys.exit(1)
+    validate_adapter_files(adapter_path)
 
     convert_script, quantize_bin = validate_llama_cpp(llama_cpp_path)
 

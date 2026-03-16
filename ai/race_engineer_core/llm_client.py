@@ -35,7 +35,7 @@ class LLMClient:
 
     def __init__(
         self,
-        max_tokens: int = 24,
+        max_tokens: int = 48,
         temperature: float = 0.3,
         local_model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
         local_max_time_seconds: float = 5.0,

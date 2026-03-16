@@ -139,7 +139,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         from pathlib import Path
 
         # Live mode targets short radio replies with low latency.
-        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "24"))
+        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "48"))
         live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.3"))
         local_max_time_seconds = float(os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "5.0"))
         # Support new env var with fallback to old one for backwards compat

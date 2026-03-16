@@ -82,6 +82,14 @@ KOKORO_VOICE=bm_lewis
 
 AI features are optional — the app works without them for pure telemetry.
 
+### Local LLM model files (GGUF)
+
+- `*.gguf` files are intentionally **not tracked in Git**.
+- Place your local model under `race_engineer_gguf/` (or any local path).
+- Point the app at it via `LOCAL_MODEL_PATH` or `config.json`.
+- Use `config.example.json` as the tracked template for local runtime config.
+- Large training/sample artifacts are also local-only by default (`*.safetensors`, large sample telemetry CSVs).
+
 ---
 
 ## Architecture Overview
