@@ -5,14 +5,22 @@ Convert QLoRA adapter + base model into a quantized GGUF file.
 Three stages:
 1. Merge LoRA adapter into base model
 2. Convert merged model to GGUF (f16)
-3. Quantize to Q4_K_M
+3. Quantize to target level (default Q4_K_M)
 
 Prerequisites:
     - pip install -r requirements-convert.txt
     - Clone and build llama.cpp (https://github.com/ggerganov/llama.cpp)
 
 Usage:
+    # Live race engineer (default):
     python scripts/convert_to_gguf.py --llama-cpp-path /path/to/llama.cpp
+
+    # Post-race analyst:
+    python scripts/convert_to_gguf.py --llama-cpp-path /path/to/llama.cpp \
+        --adapter-path granite_f1_finetuned_postrace \
+        --output-dir postrace_gguf \
+        --quantization Q5_K_M \
+        --model-name granite-postrace-analyst
 """
 
 import argparse
@@ -198,6 +206,10 @@ def main():
         "--quantization", default="Q4_K_M",
         help="Quantization level (default: Q4_K_M)"
     )
+    parser.add_argument(
+        "--model-name", default="granite-race-engineer",
+        help="Base name for output GGUF files (default: granite-race-engineer)"
+    )
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
@@ -222,9 +234,9 @@ def main():
     convert_script, quantize_bin = validate_llama_cpp(llama_cpp_path)
 
     # Paths
-    merged_dir = project_root / "race_engineer_llm_merged"
-    f16_gguf = output_dir / "granite-race-engineer-f16.gguf"
-    quant_name = f"granite-race-engineer-{args.quantization}.gguf"
+    merged_dir = project_root / f"{args.model_name}_merged"
+    f16_gguf = output_dir / f"{args.model_name}-f16.gguf"
+    quant_name = f"{args.model_name}-{args.quantization}.gguf"
     final_gguf = output_dir / quant_name
 
     print(f"\nConversion pipeline:")
