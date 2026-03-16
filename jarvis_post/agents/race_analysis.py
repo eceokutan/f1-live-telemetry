@@ -34,6 +34,16 @@ class RaceAnalysisAgent(BaseAgent):
 
         return self._parse_response(result)
 
+    def analyse_stream(self, session_data: dict):
+        """Streaming variant — yields str chunks, then a final StreamComplete."""
+        prompt = self._build_prompt(session_data)
+        yield from self.llm.generate_stream(
+            prompt=prompt,
+            system_prompt=RACE_ANALYSIS_SYSTEM_PROMPT,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+        )
+
     def _build_prompt(self, session_data: dict) -> str:
         """Build a JSON prompt matching the model's training data format.
 

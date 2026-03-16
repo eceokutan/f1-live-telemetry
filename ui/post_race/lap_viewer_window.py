@@ -5,7 +5,7 @@ from datetime import datetime
 import json
 import os
 import threading
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 from typing import Optional
 
 from data import Session, Lap
@@ -38,7 +38,10 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     - Play/pause controls
     """
     analyst_finished = QtCore.pyqtSignal(str, str)  # (analyst_text, source)
+    analyst_chunk = QtCore.pyqtSignal(str)
     coach_finished = QtCore.pyqtSignal(int, str, str)  # (request_id, coach_text, error)
+    coach_chunk = QtCore.pyqtSignal(int, str)   # (request_id, text)
+    coach_reset = QtCore.pyqtSignal(int)         # (request_id)
 
     def __init__(self):
         super().__init__()
@@ -56,9 +59,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline.time_changed.connect(self.on_time_changed)
         self.ai_pipeline = AIPipelineBridge()
         self.analyst_finished.connect(self._on_analyst_finished)
+        self.analyst_chunk.connect(self._on_analyst_chunk)
         self.coach_finished.connect(self._on_coach_finished)
+        self.coach_chunk.connect(self._on_coach_chunk)
+        self.coach_reset.connect(self._on_coach_reset)
         self._analysis_request_id = 0
         self._analyst_running = False
+        self._analyst_done_event = threading.Event()
+        self._analyst_done_event.set()  # not blocking initially
 
         # Analysis tab widgets
         self.analysis_context_label: Optional[QtWidgets.QLabel] = None
@@ -520,8 +528,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         if not self.session or self._analyst_running:
             return
         self._analyst_running = True
+        self._analyst_done_event.clear()
         if self.analyst_output:
-            self.analyst_output.setPlainText("Running session analyst...")
+            self.analyst_output.clear()
         session = self.session
         threading.Thread(
             target=self._run_analyst_worker,
@@ -531,27 +540,59 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _run_analyst_worker(self, session: Session) -> None:
         try:
-            text = self.ai_pipeline.generate_analyst(session)
-            if text:
+            stream = self.ai_pipeline.generate_analyst_stream(session)
+            if stream is not None:
+                for chunk in stream:
+                    self.analyst_chunk.emit(chunk)
                 source = f"external:{self.ai_pipeline._external_source}"
-                self.analyst_finished.emit(text, source)
+                self.analyst_finished.emit("", source)
             else:
-                self.analyst_finished.emit("", "")
+                # Streaming unavailable — fall back to non-streaming
+                text = self.ai_pipeline.generate_analyst(session)
+                if text:
+                    source = f"external:{self.ai_pipeline._external_source}"
+                    self.analyst_finished.emit(text, source)
+                else:
+                    self.analyst_finished.emit("", "")
         except Exception as exc:
             self.analyst_finished.emit(f"Analyst failed:\n{exc}", "error")
 
+    def _on_analyst_chunk(self, text: str) -> None:
+        if self.analyst_output:
+            self.analyst_output.moveCursor(QtGui.QTextCursor.End)
+            self.analyst_output.insertPlainText(text)
+
+    def _on_coach_chunk(self, request_id: int, text: str) -> None:
+        if request_id != self._analysis_request_id:
+            return
+        if self.coach_output:
+            self.coach_output.moveCursor(QtGui.QTextCursor.End)
+            self.coach_output.insertPlainText(text)
+
+    def _on_coach_reset(self, request_id: int) -> None:
+        if request_id != self._analysis_request_id:
+            return
+        if self.coach_output:
+            self.coach_output.clear()
+
     def _on_analyst_finished(self, analyst_text: str, source: str) -> None:
         self._analyst_running = False
-        if not analyst_text:
-            # Analyst unavailable — leave placeholder or fallback
+        self._analyst_done_event.set()
+        if analyst_text:
+            # Non-streaming path — replace content with full text
             if self.analyst_output:
-                self.analyst_output.setPlainText("Session analyst not available.")
-            return
-        generated_at = datetime.now().strftime("%H:%M:%S")
-        if self.analyst_output:
-            self.analyst_output.setPlainText(analyst_text)
-        if self.analysis_source_label and source and source != "error":
-            self.analysis_source_label.setText(f"Analyst source: {source} ({generated_at})")
+                self.analyst_output.setPlainText(analyst_text)
+        elif not source:
+            # No text and no source — analyst unavailable
+            if self.analyst_output:
+                current = self.analyst_output.toPlainText().strip()
+                if not current:
+                    self.analyst_output.setPlainText("Session analyst not available.")
+        # else: streaming path finished (text already appended via chunks)
+        if source and source != "error":
+            generated_at = datetime.now().strftime("%H:%M:%S")
+            if self.analysis_source_label:
+                self.analysis_source_label.setText(f"Analyst source: {source} ({generated_at})")
 
     def refresh_analysis(self) -> None:
         """Run coach analysis for the currently loaded lap (analyst runs on session load)."""
@@ -576,7 +617,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.analysis_refresh_button.setEnabled(False)
 
         if self.coach_output:
-            self.coach_output.setPlainText("Running coach analysis...")
+            self.coach_output.clear()
 
         threading.Thread(
             target=self._run_coach_worker,
@@ -585,13 +626,27 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         ).start()
 
     def _run_coach_worker(self, request_id: int, session: Session, lap: Lap) -> None:
+        RESET_SENTINEL = "\x00RESET\x00"
+        # Wait for analyst to finish so it always predates the coach.
+        # Both share one LLM lock; without this the coach's lighter setup
+        # lets it grab the lock first.
+        self._analyst_done_event.wait()
         try:
-            coach_text = self.ai_pipeline.generate_coach(session, lap)
-            if not coach_text:
-                # Fall back to built-in heuristic for coach only
-                fallback = self.ai_pipeline._generate_fallback(session, lap)
-                coach_text = fallback.coach
-            self.coach_finished.emit(request_id, coach_text or "", "")
+            stream = self.ai_pipeline.generate_coach_stream(session, lap)
+            if stream is not None:
+                for chunk in stream:
+                    if chunk == RESET_SENTINEL:
+                        self.coach_reset.emit(request_id)
+                    else:
+                        self.coach_chunk.emit(request_id, chunk)
+                self.coach_finished.emit(request_id, "", "")
+            else:
+                # Streaming unavailable — fall back to non-streaming
+                coach_text = self.ai_pipeline.generate_coach(session, lap)
+                if not coach_text:
+                    fallback = self.ai_pipeline._generate_fallback(session, lap)
+                    coach_text = fallback.coach
+                self.coach_finished.emit(request_id, coach_text or "", "")
         except Exception as exc:
             self.coach_finished.emit(request_id, "", str(exc))
 
@@ -608,9 +663,16 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 self.coach_output.setPlainText(f"Coach analysis failed:\n{error_text}")
             return
 
-        generated_at = datetime.now().strftime("%H:%M:%S")
-        if self.coach_output:
-            self.coach_output.setPlainText(coach_text or "Coach analysis returned no data.")
+        if coach_text:
+            # Non-streaming path — replace content with full text
+            if self.coach_output:
+                self.coach_output.setPlainText(coach_text)
+        else:
+            # Streaming path finished (text already appended via chunks)
+            if self.coach_output:
+                current = self.coach_output.toPlainText().strip()
+                if not current:
+                    self.coach_output.setPlainText("Coach analysis returned no data.")
 
     def _set_analysis_text(self, coach_text: str, analyst_text: str, source_text: str) -> None:
         if self.coach_output:

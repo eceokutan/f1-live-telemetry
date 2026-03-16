@@ -127,6 +127,99 @@ class AIPipelineBridge:
             coach_raw.get("content") if isinstance(coach_raw, dict) else coach_raw
         ) or None
 
+    def generate_analyst_stream(self, session: Session):
+        """Synchronous generator yielding str chunks for the session analyst.
+
+        Returns None (instead of a generator) when AI is unavailable.
+        """
+        handler = self._external_handler
+        if not isinstance(handler, dict) or handler.get("kind") != "jarvis_post":
+            return None
+
+        race_agent_cls = handler.get("race_agent_cls")
+        llm_client_cls = handler.get("llm_client_cls")
+        if not race_agent_cls or not llm_client_cls:
+            return None
+        if not self._has_postrace_local_model():
+            return None
+
+        try:
+            if self._jarvis_llm_client is None:
+                self._jarvis_llm_client = llm_client_cls()
+            analyst_agent = race_agent_cls(self._jarvis_llm_client)
+        except Exception as exc:
+            logger.error("Failed to initialize Jarvis Post analyst: %s", exc, exc_info=True)
+            return None
+
+        stream_fn = getattr(analyst_agent, "analyse_stream", None)
+        if not stream_fn:
+            # Fallback: run non-streaming and yield full text as one chunk
+            text = self.generate_analyst(session)
+            if text:
+                def _single_chunk():
+                    yield text
+                return _single_chunk()
+            return None
+
+        payload = self._build_jarvis_post_session_payload(session)
+
+        def _iter():
+            from jarvis_post.llm.local_client import StreamComplete
+            for item in stream_fn(payload):
+                if isinstance(item, StreamComplete):
+                    return
+                yield item
+
+        return _iter()
+
+    def generate_coach_stream(self, session: Session, lap: Lap):
+        """Synchronous generator yielding str chunks for the coaching agent.
+
+        Passes through the STREAM_RESET sentinel (``"\\x00RESET\\x00"``).
+        Returns None when AI is unavailable.
+        """
+        handler = self._external_handler
+        if not isinstance(handler, dict) or handler.get("kind") != "jarvis_post":
+            return None
+
+        coach_agent_cls = handler.get("coach_agent_cls")
+        llm_client_cls = handler.get("llm_client_cls")
+        if not coach_agent_cls or not llm_client_cls:
+            return None
+        if not self._has_postrace_local_model():
+            return None
+
+        try:
+            if self._jarvis_llm_client is None:
+                self._jarvis_llm_client = llm_client_cls()
+            coach_agent = coach_agent_cls(self._jarvis_llm_client)
+        except Exception as exc:
+            logger.error("Failed to initialize Jarvis Post coach: %s", exc, exc_info=True)
+            return None
+
+        stream_fn = getattr(coach_agent, "analyse_stream", None)
+        if not stream_fn:
+            # Fallback: run non-streaming and yield full text as one chunk
+            text = self.generate_coach(session, lap)
+            if text:
+                def _single_chunk():
+                    yield text
+                return _single_chunk()
+            return None
+
+        payload = self._build_jarvis_post_payload(session, lap)
+        payload.pop("options", None)
+        payload["driver_context"] = self._build_driver_context(session, lap)
+
+        def _iter():
+            from jarvis_post.llm.local_client import StreamComplete
+            for item in stream_fn(payload):
+                if isinstance(item, StreamComplete):
+                    return
+                yield item
+
+        return _iter()
+
     def _discover_external_pipeline(self) -> None:
         """Locate an external explorer AI pipeline if available."""
         jarvis_handler = self._discover_jarvis_post_pipeline()
