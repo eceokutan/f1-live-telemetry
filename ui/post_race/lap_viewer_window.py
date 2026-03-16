@@ -37,7 +37,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     - Lap selection
     - Play/pause controls
     """
-    analysis_finished = QtCore.pyqtSignal(int, object, str)
+    analyst_finished = QtCore.pyqtSignal(str, str)  # (analyst_text, source)
+    coach_finished = QtCore.pyqtSignal(int, str, str)  # (request_id, coach_text, error)
 
     def __init__(self):
         super().__init__()
@@ -54,8 +55,10 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline = TimelineController(self)
         self.timeline.time_changed.connect(self.on_time_changed)
         self.ai_pipeline = AIPipelineBridge()
-        self.analysis_finished.connect(self._on_analysis_finished)
+        self.analyst_finished.connect(self._on_analyst_finished)
+        self.coach_finished.connect(self._on_coach_finished)
         self._analysis_request_id = 0
+        self._analyst_running = False
 
         # Analysis tab widgets
         self.analysis_context_label: Optional[QtWidgets.QLabel] = None
@@ -219,7 +222,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         header_row.addWidget(self.analysis_context_label)
         header_row.addStretch()
 
-        self.analysis_refresh_button = QtWidgets.QPushButton("Refresh AI Analysis")
+        self.analysis_refresh_button = QtWidgets.QPushButton("Refresh Coach Analysis")
         self.analysis_refresh_button.setEnabled(False)
         self.analysis_refresh_button.clicked.connect(self.refresh_analysis)
         header_row.addWidget(self.analysis_refresh_button)
@@ -251,8 +254,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         layout.addWidget(splitter, stretch=1)
 
         self._set_analysis_text(
-            coach_text="Load a session and select a lap to run AI analysis.",
-            analyst_text="Load a session and select a lap to run AI analysis.",
+            coach_text="Load a session and select a lap, then click Refresh to run coach analysis.",
+            analyst_text="Session analyst will run automatically when a session is loaded.",
             source_text="Source: --",
         )
 
@@ -477,6 +480,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 item.setData(QtCore.Qt.UserRole, lap.lap_number)
                 self.lap_list.addItem(item)
 
+            # Start session-level analyst immediately in background
+            self._start_session_analyst()
+
             if self.session.laps:
                 self.load_lap(self.session.laps[0].lap_number)
 
@@ -502,16 +508,56 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self._update_visualizations_at_time(0.0)
         self.refresh_analysis()
 
+        if self.analysis_context_label:
+            self.analysis_context_label.setText(
+                f"Session {self.session.metadata.session_id} | Lap {self.current_lap.lap_number} | {self.current_lap.lap_time:.3f}s"
+            )
+
         self.status_bar.showMessage(f"Loaded Lap {lap_number}")
 
+    def _start_session_analyst(self) -> None:
+        """Kick off session-level analyst in background as soon as session loads."""
+        if not self.session or self._analyst_running:
+            return
+        self._analyst_running = True
+        if self.analyst_output:
+            self.analyst_output.setPlainText("Running session analyst...")
+        session = self.session
+        threading.Thread(
+            target=self._run_analyst_worker,
+            args=(session,),
+            daemon=True,
+        ).start()
+
+    def _run_analyst_worker(self, session: Session) -> None:
+        try:
+            text = self.ai_pipeline.generate_analyst(session)
+            if text:
+                source = f"external:{self.ai_pipeline._external_source}"
+                self.analyst_finished.emit(text, source)
+            else:
+                self.analyst_finished.emit("", "")
+        except Exception as exc:
+            self.analyst_finished.emit(f"Analyst failed:\n{exc}", "error")
+
+    def _on_analyst_finished(self, analyst_text: str, source: str) -> None:
+        self._analyst_running = False
+        if not analyst_text:
+            # Analyst unavailable — leave placeholder or fallback
+            if self.analyst_output:
+                self.analyst_output.setPlainText("Session analyst not available.")
+            return
+        generated_at = datetime.now().strftime("%H:%M:%S")
+        if self.analyst_output:
+            self.analyst_output.setPlainText(analyst_text)
+        if self.analysis_source_label and source and source != "error":
+            self.analysis_source_label.setText(f"Analyst source: {source} ({generated_at})")
+
     def refresh_analysis(self) -> None:
-        """Run AI analysis for the currently loaded lap."""
+        """Run coach analysis for the currently loaded lap (analyst runs on session load)."""
         if not self.session or not self.current_lap:
-            self._set_analysis_text(
-                coach_text="Load a session and select a lap to run AI analysis.",
-                analyst_text="Load a session and select a lap to run AI analysis.",
-                source_text="Source: --",
-            )
+            if self.coach_output:
+                self.coach_output.setPlainText("Load a session and select a lap to run coach analysis.")
             if self.analysis_context_label:
                 self.analysis_context_label.setText("No session loaded")
             return
@@ -529,26 +575,28 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         if self.analysis_refresh_button:
             self.analysis_refresh_button.setEnabled(False)
 
-        self._set_analysis_text(
-            coach_text="Running coach analysis...\nIf the Hugging Face Space is cold, the first request can take a few minutes.",
-            analyst_text="Running analyst analysis...\nIf the Hugging Face Space is cold, the first request can take a few minutes.",
-            source_text="Source: running...",
-        )
+        if self.coach_output:
+            self.coach_output.setPlainText("Running coach analysis...")
 
         threading.Thread(
-            target=self._run_analysis_worker,
+            target=self._run_coach_worker,
             args=(request_id, session, lap),
             daemon=True,
         ).start()
 
-    def _run_analysis_worker(self, request_id: int, session: Session, lap: Lap) -> None:
+    def _run_coach_worker(self, request_id: int, session: Session, lap: Lap) -> None:
         try:
-            result = self.ai_pipeline.generate(session, lap)
-            self.analysis_finished.emit(request_id, result, "")
+            coach_text = self.ai_pipeline.generate_coach(session, lap)
+            if not coach_text:
+                # Fall back to built-in heuristic for coach only
+                fallback = self.ai_pipeline._generate_fallback(session, lap)
+                coach_text = fallback.coach
+            self.coach_finished.emit(request_id, coach_text or "", "")
         except Exception as exc:
-            self.analysis_finished.emit(request_id, None, str(exc))
+            self.coach_finished.emit(request_id, "", str(exc))
 
-    def _on_analysis_finished(self, request_id: int, result: object, error_text: str) -> None:
+    def _on_coach_finished(self, request_id: int, coach_text: str, error_text: str) -> None:
+        """Handle coach analysis completion."""
         if request_id != self._analysis_request_id:
             return
 
@@ -556,27 +604,13 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.analysis_refresh_button.setEnabled(bool(self.session and self.current_lap))
 
         if error_text:
-            self._set_analysis_text(
-                coach_text=f"Coach analysis failed:\n{error_text}",
-                analyst_text=f"Analyst analysis failed:\n{error_text}",
-                source_text="Source: error",
-            )
-            return
-
-        if result is None:
-            self._set_analysis_text(
-                coach_text="Coach analysis returned no data.",
-                analyst_text="Analyst analysis returned no data.",
-                source_text="Source: empty",
-            )
+            if self.coach_output:
+                self.coach_output.setPlainText(f"Coach analysis failed:\n{error_text}")
             return
 
         generated_at = datetime.now().strftime("%H:%M:%S")
-        self._set_analysis_text(
-            coach_text=result.coach,
-            analyst_text=result.analyst,
-            source_text=f"Source: {result.source} ({generated_at})",
-        )
+        if self.coach_output:
+            self.coach_output.setPlainText(coach_text or "Coach analysis returned no data.")
 
     def _set_analysis_text(self, coach_text: str, analyst_text: str, source_text: str) -> None:
         if self.coach_output:
