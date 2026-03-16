@@ -6,10 +6,18 @@ import asyncio
 import logging
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from .client import LLMError
+
+
+@dataclass
+class StreamComplete:
+    """Sentinel yielded as the final item from generate_stream()."""
+    tokens_used: int
+    finish_reason: str
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +162,39 @@ class LocalGGUFClient:
             "tokens_used": tokens_used,
             "finish_reason": finish_reason,
         }
+
+    def generate_stream(self, prompt, system_prompt, max_tokens=1000, temperature=0.5):
+        """Synchronous generator yielding str chunks, then a final StreamComplete."""
+        self._load_model()
+        formatted = self._format_prompt(prompt, system_prompt)
+        self._lock.acquire()
+        try:
+            response_iter = self._model.create_completion(
+                formatted,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_k=50,
+                top_p=0.95,
+                stop=["<|end_of_text|>", "<|start_of_role|>"],
+                stream=True,
+            )
+            tokens_used = 0
+            finish_reason = "stop"
+            for chunk in response_iter:
+                choice = chunk["choices"][0]
+                text = choice.get("text", "")
+                if text:
+                    yield text
+                if choice.get("finish_reason"):
+                    finish_reason = choice["finish_reason"]
+                usage = chunk.get("usage")
+                if usage:
+                    tokens_used = usage.get("completion_tokens", 0)
+            yield StreamComplete(tokens_used=tokens_used, finish_reason=finish_reason)
+        except Exception as exc:
+            raise LLMError(f"Local GGUF streaming failed: {exc}") from exc
+        finally:
+            self._lock.release()
 
     def warmup_sync(self) -> bool:
         """
