@@ -721,7 +721,7 @@ class MainWindow(QMainWindow):
         # Driver query responses go to Communications Transcript
         if trigger == "driver_query" or trigger == "driver_query_error" or trigger == "driver_query_timeout":
             formatted_response = (
-                f"<div style='margin-bottom: 4px;'>"
+                f"<div style='margin-bottom: 6px; font-size: 14pt;'>"
                 f"<span style='color: #888;'>[{timestamp}]</span> "
                 f"<span style='font-weight: bold; color: #FF6B6B;'>RACE ENGINEER:</span><br>"
                 f"<span style='color: #EEEEEE;'>{message}</span>"
@@ -743,7 +743,7 @@ class MainWindow(QMainWindow):
             priority_label = priority_labels.get(priority, "⚪ INFO")
 
             formatted_message = (
-                f"<div style='margin-bottom: 4px;'>"
+                f"<div style='margin-bottom: 6px; font-size: 14pt;'>"
                 f"<span style='color: #888;'>[{timestamp}]</span> "
                 f"<span style='font-weight: bold;'>{priority_label}</span> "
                 f"<span style='color: #AAA;'>({trigger})</span><br>"

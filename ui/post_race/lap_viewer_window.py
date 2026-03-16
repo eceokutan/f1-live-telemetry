@@ -170,7 +170,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Header label showing max limit
         header_action = QtWidgets.QWidgetAction(self)
         header_label = QtWidgets.QLabel(f"  Select up to {self.MAX_GRAPHS} graphs:")
-        header_label.setStyleSheet("color: #aaa; padding: 6px 12px; font-size: 11pt;")
+        header_label.setStyleSheet("color: #aaa; padding: 6px 12px; font-size: 13pt;")
         header_action.setDefaultWidget(header_label)
         graphs_menu.addAction(header_action)
         graphs_menu.addSeparator()
@@ -230,13 +230,13 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         header_row = QtWidgets.QHBoxLayout()
         self.analysis_context_label = QtWidgets.QLabel("No session loaded")
-        self.analysis_context_label.setStyleSheet("font-size: 12px; color: #AAAAAA;")
+        self.analysis_context_label.setStyleSheet("font-size: 14pt; color: #AAAAAA;")
         header_row.addWidget(self.analysis_context_label)
         header_row.addStretch()
         layout.addLayout(header_row)
 
         self.analysis_source_label = QtWidgets.QLabel("Source: --")
-        self.analysis_source_label.setStyleSheet("font-size: 11px; color: #888888;")
+        self.analysis_source_label.setStyleSheet("font-size: 13pt; color: #888888;")
         layout.addWidget(self.analysis_source_label)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -315,7 +315,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         layout.addWidget(info_label)
 
         self.time_label = QtWidgets.QLabel("Time: 0.00s")
-        self.time_label.setStyleSheet("font-size: 12px; padding: 2px 8px;")
+        self.time_label.setStyleSheet("font-size: 14pt; padding: 2px 8px;")
         layout.addWidget(self.time_label)
 
         self.speed_label = QtWidgets.QLabel("Speed: -- km/h")
@@ -326,7 +326,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         for label in [self.speed_label, self.gear_label, self.rpm_label,
                       self.throttle_label, self.brake_label]:
-            label.setStyleSheet("padding: 1px 8px; font-size: 12px;")
+            label.setStyleSheet("padding: 1px 8px; font-size: 14pt;")
             layout.addWidget(label)
 
         layout.addStretch()

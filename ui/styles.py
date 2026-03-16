@@ -114,6 +114,7 @@ DARK_STYLESHEET = f"""
         margin-top: 8px;
         padding-top: 10px;
         font-weight: bold;
+        font-size: 14pt;
         color: {TEXT_COLOR};
     }}
     QGroupBox::title {{
@@ -123,13 +124,14 @@ DARK_STYLESHEET = f"""
     }}
     QLabel {{
         color: {TEXT_COLOR};
-        font-size: 10pt;
+        font-size: 13pt;
     }}
     QTableWidget {{
         background-color: {BG_COLOR_LIGHT};
         color: {TEXT_COLOR};
         gridline-color: {BORDER_COLOR};
         border: 1px solid {BORDER_COLOR};
+        font-size: 13pt;
     }}
     QTableWidget::item {{
         padding: 4px;
@@ -140,6 +142,7 @@ DARK_STYLESHEET = f"""
         padding: 4px;
         border: 1px solid {BORDER_COLOR};
         font-weight: bold;
+        font-size: 13pt;
     }}
     QTextEdit {{
         background-color: {BG_COLOR_LIGHT};
@@ -147,6 +150,7 @@ DARK_STYLESHEET = f"""
         border: 1px solid {BORDER_COLOR};
         border-radius: 4px;
         padding: 4px;
+        font-size: 13pt;
     }}
     QListWidget {{
         background-color: {BG_COLOR_LIGHT};
@@ -231,12 +235,17 @@ DARK_STYLESHEET = f"""
     QScrollArea {{
         border: none;
     }}
+    QLineEdit {{
+        font-size: 13pt;
+        padding: 4px;
+    }}
     QComboBox {{
         background-color: {BG_COLOR_LIGHT};
         color: {TEXT_COLOR};
         border: 1px solid {BORDER_COLOR};
         border-radius: 4px;
         padding: 4px;
+        font-size: 13pt;
     }}
     QComboBox::drop-down {{
         border: none;
