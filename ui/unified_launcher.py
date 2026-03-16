@@ -137,11 +137,6 @@ class UnifiedLauncher(QtWidgets.QDialog):
 
         layout.addStretch()
 
-        # Footer
-        footer = QtWidgets.QLabel("Team 17  |  Systems Course")
-        footer.setAlignment(QtCore.Qt.AlignCenter)
-        footer.setStyleSheet(f"font-family: '{FONT_BODY}'; font-size: 9px; color: #555555; padding: 4px; letter-spacing: 1px;")
-        layout.addWidget(footer)
 
     def _on_live(self):
         self._action = self.ACTION_LIVE
