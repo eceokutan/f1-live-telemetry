@@ -78,11 +78,13 @@ livenotes.md
 
 # Models
 /granite_f1_finetuned_live
+/granite_f1_finetuned_postrace
 race_engineer_llm/checkpoint-*/
 race_engineer_llm/runs/
 race_engineer_llm/training_args.bin
 race_engineer_gguf/
 race_engineer_llm_merged/
+postrace_gguf/
 *.gguf
 
 # Large local assets (runtime/training artifacts)

@@ -183,10 +183,10 @@ class AIPipelineBridge:
 
             llm_client_cls = None
             try:
-                client_module = importlib.import_module("jarvis_post.llm.client")
-                llm_client_cls = getattr(client_module, "HFClient", None)
+                local_client_module = importlib.import_module("jarvis_post.llm.local_client")
+                llm_client_cls = getattr(local_client_module, "LocalGGUFClient", None)
             except Exception as exc:
-                logger.warning("Jarvis Post HF client import failed from %s: %s", root, exc)
+                logger.warning("Jarvis Post local GGUF client import failed from %s: %s", root, exc)
                 llm_client_cls = None
 
             return {
@@ -243,19 +243,15 @@ class AIPipelineBridge:
         if not llm_client_cls:
             logger.warning("Jarvis Post LLM client class is unavailable; skipping external analysis")
             return None
-        postrace_hf = self._get_postrace_hf_settings()
-        if not self._has_postrace_hf_config(postrace_hf):
+        if not self._has_postrace_local_model():
             logger.warning(
-                "Jarvis Post external AI disabled: missing POSTRACE_HF_SPACE_URL in environment"
+                "Jarvis Post external AI disabled: GGUF model file not found"
             )
             return None
 
         try:
             if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls(
-                    api_token=postrace_hf.get("api_token"),
-                    space_url=postrace_hf.get("space_url"),
-                )
+                self._jarvis_llm_client = llm_client_cls()
             analyst_agent = race_agent_cls(self._jarvis_llm_client)
             coach_agent = coach_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
@@ -297,49 +293,14 @@ class AIPipelineBridge:
         )
         return analyst_raw, coach_raw
 
-    def _get_postrace_hf_settings(self) -> dict[str, str]:
-        """
-        Resolve Hugging Face settings for Jarvis Post only.
+    def _has_postrace_local_model(self) -> bool:
+        """Check whether the local GGUF model file exists for post-race analysis."""
+        env_path = (os.getenv("POSTRACE_GGUF_MODEL_PATH") or "").strip()
+        if env_path:
+            return Path(env_path).exists()
 
-        Primary keys:
-        - POSTRACE_HF_API_TOKEN
-        - POSTRACE_HF_SPACE_URL
-        """
-        api_token = (
-            os.getenv("POSTRACE_HF_API_TOKEN")
-            or ""
-        ).strip()
-        space_url = (
-            os.getenv("POSTRACE_HF_SPACE_URL")
-            or ""
-        ).strip()
-        return {
-            "api_token": "" if self._is_placeholder_env_value(api_token) else api_token,
-            "space_url": "" if self._is_placeholder_env_value(space_url) else space_url,
-        }
-
-    def _is_placeholder_env_value(self, value: str) -> bool:
-        lowered = value.strip().lower()
-        if not lowered:
-            return True
-        placeholders = (
-            "your-hf-token-here",
-            "hf_your_api_key_here",
-            "your_api_key_here",
-            "https://username-space-name.hf.space",
-            "https://username-space-name.hf.space/chat",
-            "https://your-space.hf.space",
-        )
-        return lowered in placeholders
-
-    def _has_postrace_hf_config(self, settings: Optional[dict[str, str]] = None) -> bool:
-        """
-        Check whether Jarvis Post has enough Hugging Face config to call a Space.
-
-        Token is optional for public Spaces, but Space URL is required.
-        """
-        resolved = settings or self._get_postrace_hf_settings()
-        return bool((resolved.get("space_url") or "").strip())
+        default_path = Path(__file__).resolve().parent.parent / "postrace_gguf" / "granite-postrace-analyst-Q5_K_M.gguf"
+        return default_path.exists()
 
     def _call_external_combined(
         self,
@@ -774,8 +735,7 @@ class AIPipelineBridge:
         """Best-effort background warmup so first interactive request is faster."""
         if self._jarvis_warmup_started:
             return
-        postrace_hf = self._get_postrace_hf_settings()
-        if not self._has_postrace_hf_config(postrace_hf):
+        if not self._has_postrace_local_model():
             return
 
         llm_client_cls = handler.get("llm_client_cls")
@@ -787,10 +747,7 @@ class AIPipelineBridge:
         def _warmup() -> None:
             try:
                 if self._jarvis_llm_client is None:
-                    self._jarvis_llm_client = llm_client_cls(
-                        api_token=postrace_hf.get("api_token"),
-                        space_url=postrace_hf.get("space_url"),
-                    )
+                    self._jarvis_llm_client = llm_client_cls()
                 warmup_fn = getattr(self._jarvis_llm_client, "warmup_sync", None)
                 if callable(warmup_fn):
                     warmup_fn()
