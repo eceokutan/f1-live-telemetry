@@ -5,7 +5,6 @@ Lets the user configure voice mode and keyboard PTT key.
 """
 
 import logging
-import os
 from PyQt5 import QtWidgets, QtCore, QtGui
 from ui.config_manager import load_config, save_config
 from ui.styles import (
@@ -194,40 +193,6 @@ class LauncherWindow(QtWidgets.QDialog):
 
         lower_row.addWidget(voice_group, 1)
 
-        # ---- AI mode ----
-        ai_group = QtWidgets.QGroupBox("AI RACE ENGINEER")
-        ai_layout = QtWidgets.QVBoxLayout(ai_group)
-        ai_layout.setContentsMargins(12, 16, 12, 10)
-        ai_layout.setSpacing(8)
-
-        self.ai_enabled_checkbox = QtWidgets.QCheckBox("Enable AI Race Engineer")
-        ai_layout.addWidget(self.ai_enabled_checkbox)
-
-        self.use_local_llm_checkbox = QtWidgets.QCheckBox("Use Local Model (GGUF)")
-        ai_layout.addWidget(self.use_local_llm_checkbox)
-
-        model_row = QtWidgets.QHBoxLayout()
-        model_row.addWidget(QtWidgets.QLabel("GGUF Model Path:"))
-        self.local_model_path_edit = QtWidgets.QLineEdit()
-        self.local_model_path_edit.setPlaceholderText("race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf")
-        model_row.addWidget(self.local_model_path_edit, 1)
-        self.local_model_browse_button = QtWidgets.QPushButton("Browse")
-        self.local_model_browse_button.setFixedWidth(90)
-        self.local_model_browse_button.clicked.connect(self._browse_local_model_path)
-        model_row.addWidget(self.local_model_browse_button)
-        ai_layout.addLayout(model_row)
-
-        ai_hint = QtWidgets.QLabel(
-            "If the GGUF model file is not found, "
-            "Jarvis Live will use rule-based fallback responses."
-        )
-        ai_hint.setWordWrap(True)
-        ai_hint.setStyleSheet(f"color: {TEXT_COLOR}; font-size: 10pt;")
-        ai_layout.addWidget(ai_hint)
-
-        self.use_local_llm_checkbox.toggled.connect(self._update_local_controls_visibility)
-        lower_row.addWidget(ai_group, 1)
-
         content_layout.addLayout(lower_row)
         content_layout.addStretch()
         content_scroll.setWidget(content)
@@ -281,14 +246,6 @@ class LauncherWindow(QtWidgets.QDialog):
         self.ptt_key_button.key_name = ptt_key
         self.ptt_key_button._update_text()
 
-        self.ai_enabled_checkbox.setChecked(c.get("ai_enabled", True))
-        self.use_local_llm_checkbox.setChecked(c.get("use_local_llm", False))
-        self.local_model_path_edit.setText(
-            c.get("local_model_path",
-                   c.get("local_adapter_path", "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf"))
-        )
-        self._update_local_controls_visibility()
-
     def _save_to_config(self):
         if self.voice_ptt_radio.isChecked():
             voice_mode = "push_to_talk"
@@ -298,11 +255,8 @@ class LauncherWindow(QtWidgets.QDialog):
             voice_mode = "disabled"
 
         self.config.update({
-            "ai_enabled": self.ai_enabled_checkbox.isChecked(),
             "voice_mode": voice_mode,
             "ptt_key": self.ptt_key_button.key_name,
-            "use_local_llm": self.use_local_llm_checkbox.isChecked(),
-            "local_model_path": self.local_model_path_edit.text().strip() or "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
         })
         save_config(self.config)
 
@@ -322,21 +276,6 @@ class LauncherWindow(QtWidgets.QDialog):
     def was_accepted(self) -> bool:
         return self._accepted
 
-    def _browse_local_model_path(self):
-        selected, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Select GGUF Model File",
-            self.local_model_path_edit.text() or os.getcwd(),
-            "GGUF Models (*.gguf);;All Files (*)",
-        )
-        if selected:
-            self.local_model_path_edit.setText(selected)
-
-    def _update_local_controls_visibility(self):
-        enabled = self.use_local_llm_checkbox.isChecked()
-        self.local_model_path_edit.setEnabled(enabled)
-        self.local_model_browse_button.setEnabled(enabled)
-
     # ------------------------------------------------------------------
     # Theme
     # ------------------------------------------------------------------
@@ -352,15 +291,17 @@ class LauncherWindow(QtWidgets.QDialog):
                 background-color: {BG_COLOR};
                 border: 1px solid {BORDER_COLOR};
                 border-radius: 4px;
-                margin-top: 12px;
-                padding-top: 20px;
+                margin-top: 10px;
+                padding-top: 8px;
                 font-family: '{FONT_HEADING}';
                 font-size: 16pt;
                 color: {TEXT_COLOR};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
+                subcontrol-position: top left;
                 left: 8px;
+                top: 8px;
                 padding: 0 6px;
             }}
             QLabel {{

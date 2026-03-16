@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS = {
-    "ai_enabled": False,
+    "ai_enabled": True,
     "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
     "ptt_key": "v",                 # Key name for push-to-talk
+    "use_local_llm": True,
     "local_model_path": "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
 }
 
