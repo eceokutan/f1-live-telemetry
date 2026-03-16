@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         self._best_lap_samples = None  # list of sample dicts from best lap
         self._best_lap_distances = None  # cumulative distance array
         self._best_lap_times = None      # elapsed time array (from t=0)
+        self._previous_lap_samples = None  # samples from last completed lap (for best-lap saving)
 
         # Menu bar
         self._create_menu_bar()
@@ -454,8 +455,8 @@ class MainWindow(QMainWindow):
                            and (self._best_time_ms == 0 or best_time_ms <= self._best_time_ms))
             self._best_time_ms = best_time_ms
 
-            if is_new_best and self.current_lap_samples:
-                self._save_best_lap_reference(list(self.current_lap_samples))
+            if is_new_best and self._previous_lap_samples:
+                self._save_best_lap_reference(self._previous_lap_samples)
 
             self._add_lap_to_table(completed_laps, last_time_ms)
 
@@ -470,6 +471,9 @@ class MainWindow(QMainWindow):
 
         # Check if new lap started
         if self.current_lap_id is None or lap_id != self.current_lap_id:
+            # Save previous lap samples before clearing (needed for best-lap reference)
+            if self.current_lap_samples:
+                self._previous_lap_samples = list(self.current_lap_samples)
             self.current_lap_samples = []
             self.current_lap_id = lap_id
             # Reset track map initialization flag so it redraws properly

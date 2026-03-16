@@ -117,6 +117,9 @@ class LiveSessionContext:
     # Internal tracking for fuel consumption calculation
     _lap_start_fuel: float = field(default=100.0, repr=False)
 
+    # Internal tracking for lap time calculation from telemetry timestamps
+    _lap_start_time: float = field(default=0.0, repr=False)
+
     def update(self, telemetry: TelemetryData) -> None:
         """
         Update context from telemetry data.
@@ -183,6 +186,14 @@ class LiveSessionContext:
 
         # Lap and sector (keep current values if None in AC)
         if telemetry.lap_number is not None:
+            # Detect lap transition and record lap time from timestamps
+            if telemetry.lap_number > self.current_lap and self.current_lap > 0:
+                lap_time = telemetry.t - self._lap_start_time
+                if lap_time > 0:
+                    self.record_lap_time(lap_time)
+            # Reset lap start time on any lap change (including first lap)
+            if telemetry.lap_number != self.current_lap:
+                self._lap_start_time = telemetry.t
             self.current_lap = telemetry.lap_number
         if telemetry.sector is not None:
             self.current_sector = telemetry.sector

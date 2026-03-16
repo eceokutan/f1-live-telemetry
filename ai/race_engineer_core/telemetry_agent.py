@@ -282,9 +282,13 @@ class TelemetryAgent:
         if (telemetry.lap_number is not None and
             context.current_lap is not None and
             telemetry.lap_number > context.current_lap):
+            # Compute lap time from timestamps (current t minus lap start t)
+            lap_time = telemetry.t - context._lap_start_time if context._lap_start_time > 0 else 0.0
+            # AC uses 0-indexed lap IDs; display as 1-indexed for the driver
+            display_lap = context.current_lap + 1
             events.append(create_lap_complete_event(
-                lap_number=telemetry.lap_number,
-                lap_time=context.last_lap or 0.0,
+                lap_number=display_lap,
+                lap_time=lap_time,
                 best_lap=context.best_lap
             ))
 
