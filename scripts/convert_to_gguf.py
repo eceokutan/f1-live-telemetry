@@ -64,6 +64,26 @@ def validate_llama_cpp(llama_cpp_path: Path) -> tuple:
     return convert_script, quantize_bin
 
 
+def validate_adapter_files(adapter_path: Path) -> None:
+    """Validate adapter directory contains the minimum files required for merge."""
+    config_file = adapter_path / "adapter_config.json"
+    has_weights = any(
+        (adapter_path / name).exists()
+        for name in ("adapter_model.safetensors", "adapter_model.bin")
+    )
+
+    if not config_file.exists() or not has_weights:
+        print(f"ERROR: Adapter directory is missing required files: {adapter_path}")
+        print("Expected:")
+        print("  - adapter_config.json")
+        print("  - adapter_model.safetensors (or adapter_model.bin)")
+        print(
+            "Note: large adapter/model artifacts are often kept out of Git. "
+            "Provide --adapter-path to a local directory that contains them."
+        )
+        sys.exit(1)
+
+
 def merge_lora(base_model_id: str, adapter_path: Path, output_dir: Path) -> None:
     """Merge LoRA adapter into base model and save."""
     print(f"\n{'='*60}")
@@ -197,6 +217,7 @@ def main():
     if not adapter_path.exists():
         print(f"ERROR: Adapter path does not exist: {adapter_path}")
         sys.exit(1)
+    validate_adapter_files(adapter_path)
 
     convert_script, quantize_bin = validate_llama_cpp(llama_cpp_path)
 
