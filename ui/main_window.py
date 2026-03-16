@@ -467,6 +467,12 @@ class MainWindow(QMainWindow):
         Args:
             sample: Dict with telemetry data
         """
+        # Skip stationary samples before the car starts moving
+        # (prevents plotting zero-speed data from garage/grid/loading)
+        speed = sample.get("speed", 0.0)
+        if not self.current_lap_samples and speed < 1.0:
+            return
+
         lap_id = sample.get("lap_id", 0)
 
         # Check if new lap started
