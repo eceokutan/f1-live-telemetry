@@ -163,6 +163,66 @@ class LocalGGUFClient:
             "finish_reason": finish_reason,
         }
 
+    def _format_messages(self, messages: list[dict], system_prompt: str) -> str:
+        """Format multi-turn messages using Granite chat template role markers.
+
+        Args:
+            messages: List of {"role": "user"|"assistant", "content": str}.
+                      The final entry must have role "user".
+            system_prompt: System prompt placed at the start of the template.
+        """
+        parts: list[str] = []
+        if system_prompt.strip():
+            parts.append(
+                f"<|start_of_role|>system<|end_of_role|>{system_prompt.strip()}<|end_of_text|>"
+            )
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            parts.append(
+                f"<|start_of_role|>{role}<|end_of_role|>{content}<|end_of_text|>"
+            )
+        # Trailing assistant marker (no end_of_text) to prompt generation
+        parts.append("<|start_of_role|>assistant<|end_of_role|>")
+        return "".join(parts)
+
+    def generate_stream_messages(self, messages, system_prompt, max_tokens=300, temperature=0.6):
+        """Synchronous generator for multi-turn conversations.
+
+        Same lock/yield/StreamComplete pattern as generate_stream(), but accepts
+        a list of message dicts instead of a single prompt string.
+        """
+        self._load_model()
+        formatted = self._format_messages(messages, system_prompt)
+        self._lock.acquire()
+        try:
+            response_iter = self._model.create_completion(
+                formatted,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_k=50,
+                top_p=0.95,
+                stop=["<|end_of_text|>", "<|start_of_role|>"],
+                stream=True,
+            )
+            tokens_used = 0
+            finish_reason = "stop"
+            for chunk in response_iter:
+                choice = chunk["choices"][0]
+                text = choice.get("text", "")
+                if text:
+                    yield text
+                if choice.get("finish_reason"):
+                    finish_reason = choice["finish_reason"]
+                usage = chunk.get("usage")
+                if usage:
+                    tokens_used = usage.get("completion_tokens", 0)
+            yield StreamComplete(tokens_used=tokens_used, finish_reason=finish_reason)
+        except Exception as exc:
+            raise LLMError(f"Local GGUF streaming failed: {exc}") from exc
+        finally:
+            self._lock.release()
+
     def generate_stream(self, prompt, system_prompt, max_tokens=1000, temperature=0.5):
         """Synchronous generator yielding str chunks, then a final StreamComplete."""
         self._load_model()

@@ -175,7 +175,6 @@ class AIPipelineBridge:
     def generate_coach_stream(self, session: Session, lap: Lap):
         """Synchronous generator yielding str chunks for the coaching agent.
 
-        Passes through the STREAM_RESET sentinel (``"\\x00RESET\\x00"``).
         Returns None when AI is unavailable.
         """
         handler = self._external_handler
@@ -199,7 +198,6 @@ class AIPipelineBridge:
 
         stream_fn = getattr(coach_agent, "analyse_stream", None)
         if not stream_fn:
-            # Fallback: run non-streaming and yield full text as one chunk
             text = self.generate_coach(session, lap)
             if text:
                 def _single_chunk():
@@ -214,6 +212,49 @@ class AIPipelineBridge:
         def _iter():
             from jarvis_post.llm.local_client import StreamComplete
             for item in stream_fn(payload):
+                if isinstance(item, StreamComplete):
+                    return
+                yield item
+
+        return _iter()
+
+    def generate_coach_followup_stream(
+        self, session: Session, lap: Lap, conversation_history: list[dict]
+    ):
+        """Synchronous generator yielding str chunks for a coaching follow-up.
+
+        Returns None when AI is unavailable.
+        """
+        handler = self._external_handler
+        if not isinstance(handler, dict) or handler.get("kind") != "jarvis_post":
+            return None
+
+        coach_agent_cls = handler.get("coach_agent_cls")
+        llm_client_cls = handler.get("llm_client_cls")
+        if not coach_agent_cls or not llm_client_cls:
+            return None
+        if not self._has_postrace_local_model():
+            return None
+
+        try:
+            if self._jarvis_llm_client is None:
+                self._jarvis_llm_client = llm_client_cls()
+            coach_agent = coach_agent_cls(self._jarvis_llm_client)
+        except Exception as exc:
+            logger.error("Failed to initialize Jarvis Post coach follow-up: %s", exc, exc_info=True)
+            return None
+
+        follow_up_fn = getattr(coach_agent, "follow_up_stream", None)
+        if not follow_up_fn:
+            return None
+
+        payload = self._build_jarvis_post_payload(session, lap)
+        payload.pop("options", None)
+        payload["driver_context"] = self._build_driver_context(session, lap)
+
+        def _iter():
+            from jarvis_post.llm.local_client import StreamComplete
+            for item in follow_up_fn(payload, conversation_history):
                 if isinstance(item, StreamComplete):
                     return
                 yield item

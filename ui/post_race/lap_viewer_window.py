@@ -41,7 +41,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     analyst_chunk = QtCore.pyqtSignal(str)
     coach_finished = QtCore.pyqtSignal(int, str, str)  # (request_id, coach_text, error)
     coach_chunk = QtCore.pyqtSignal(int, str)   # (request_id, text)
-    coach_reset = QtCore.pyqtSignal(int)         # (request_id)
 
     def __init__(self):
         super().__init__()
@@ -62,7 +61,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.analyst_chunk.connect(self._on_analyst_chunk)
         self.coach_finished.connect(self._on_coach_finished)
         self.coach_chunk.connect(self._on_coach_chunk)
-        self.coach_reset.connect(self._on_coach_reset)
         self._analysis_request_id = 0
         self._analyst_running = False
         self._analyst_done_event = threading.Event()
@@ -71,9 +69,15 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Analysis tab widgets
         self.analysis_context_label: Optional[QtWidgets.QLabel] = None
         self.analysis_source_label: Optional[QtWidgets.QLabel] = None
-        self.analysis_refresh_button: Optional[QtWidgets.QPushButton] = None
         self.coach_output: Optional[QtWidgets.QTextEdit] = None
         self.analyst_output: Optional[QtWidgets.QTextEdit] = None
+
+        # Coach chatbot state
+        self._coach_conversation: list[dict] = []
+        self._coach_streaming = False
+        self._coach_input: Optional[QtWidgets.QLineEdit] = None
+        self._coach_send_button: Optional[QtWidgets.QPushButton] = None
+        self._current_stream_text: list[str] = []
 
         # Build UI
         self.setWindowTitle("Jarvis Post - Post-Race Telemetry Analysis")
@@ -229,11 +233,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.analysis_context_label.setStyleSheet("font-size: 12px; color: #AAAAAA;")
         header_row.addWidget(self.analysis_context_label)
         header_row.addStretch()
-
-        self.analysis_refresh_button = QtWidgets.QPushButton("Refresh Coach Analysis")
-        self.analysis_refresh_button.setEnabled(False)
-        self.analysis_refresh_button.clicked.connect(self.refresh_analysis)
-        header_row.addWidget(self.analysis_refresh_button)
         layout.addLayout(header_row)
 
         self.analysis_source_label = QtWidgets.QLabel("Source: --")
@@ -247,7 +246,19 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.coach_output = QtWidgets.QTextEdit()
         self.coach_output.setReadOnly(True)
         self.coach_output.setPlaceholderText("Coach model output will appear here.")
-        coach_layout.addWidget(self.coach_output)
+        coach_layout.addWidget(self.coach_output, stretch=1)
+
+        chat_row = QtWidgets.QHBoxLayout()
+        self._coach_input = QtWidgets.QLineEdit()
+        self._coach_input.setPlaceholderText("Ask the coach...")
+        self._coach_input.setEnabled(False)
+        self._coach_input.returnPressed.connect(self._send_coach_followup)
+        chat_row.addWidget(self._coach_input)
+        self._coach_send_button = QtWidgets.QPushButton("Send")
+        self._coach_send_button.setEnabled(False)
+        self._coach_send_button.clicked.connect(self._send_coach_followup)
+        chat_row.addWidget(self._coach_send_button)
+        coach_layout.addLayout(chat_row)
 
         analyst_group = QtWidgets.QGroupBox("Analyst")
         analyst_layout = QtWidgets.QVBoxLayout(analyst_group)
@@ -262,7 +273,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         layout.addWidget(splitter, stretch=1)
 
         self._set_analysis_text(
-            coach_text="Load a session and select a lap, then click Refresh to run coach analysis.",
+            coach_text="Load a session and select a lap to start coaching.",
             analyst_text="Session analyst will run automatically when a session is loaded.",
             source_text="Source: --",
         )
@@ -479,8 +490,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             from data import TelemetryLoader
             self.session = TelemetryLoader.load_session(file_path)
             self.status_bar.showMessage(f"Loaded session: {self.session.metadata.track_name}")
-            if self.analysis_refresh_button:
-                self.analysis_refresh_button.setEnabled(True)
 
             self.lap_list.clear()
             for lap in self.session.laps:
@@ -495,8 +504,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 self.load_lap(self.session.laps[0].lap_number)
 
         except Exception as e:
-            if self.analysis_refresh_button:
-                self.analysis_refresh_button.setEnabled(False)
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to load session:\n{str(e)}")
 
     def load_lap(self, lap_number: int) -> None:
@@ -565,15 +572,10 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     def _on_coach_chunk(self, request_id: int, text: str) -> None:
         if request_id != self._analysis_request_id:
             return
+        self._current_stream_text.append(text)
         if self.coach_output:
             self.coach_output.moveCursor(QtGui.QTextCursor.End)
             self.coach_output.insertPlainText(text)
-
-    def _on_coach_reset(self, request_id: int) -> None:
-        if request_id != self._analysis_request_id:
-            return
-        if self.coach_output:
-            self.coach_output.clear()
 
     def _on_analyst_finished(self, analyst_text: str, source: str) -> None:
         self._analyst_running = False
@@ -598,7 +600,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         """Run coach analysis for the currently loaded lap (analyst runs on session load)."""
         if not self.session or not self.current_lap:
             if self.coach_output:
-                self.coach_output.setPlainText("Load a session and select a lap to run coach analysis.")
+                self.coach_output.setPlainText("Load a session and select a lap to start coaching.")
             if self.analysis_context_label:
                 self.analysis_context_label.setText("No session loaded")
             return
@@ -608,13 +610,19 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 f"Session {self.session.metadata.session_id} | Lap {self.current_lap.lap_number} | {self.current_lap.lap_time:.3f}s"
             )
 
+        # Reset conversation state for new lap
+        self._coach_conversation = []
+        self._current_stream_text = []
+        self._coach_streaming = True
+        if self._coach_input:
+            self._coach_input.setEnabled(False)
+        if self._coach_send_button:
+            self._coach_send_button.setEnabled(False)
+
         self._analysis_request_id += 1
         request_id = self._analysis_request_id
         session = self.session
         lap = self.current_lap
-
-        if self.analysis_refresh_button:
-            self.analysis_refresh_button.setEnabled(False)
 
         if self.coach_output:
             self.coach_output.clear()
@@ -626,7 +634,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         ).start()
 
     def _run_coach_worker(self, request_id: int, session: Session, lap: Lap) -> None:
-        RESET_SENTINEL = "\x00RESET\x00"
         # Wait for analyst to finish so it always predates the coach.
         # Both share one LLM lock; without this the coach's lighter setup
         # lets it grab the lock first.
@@ -635,10 +642,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             stream = self.ai_pipeline.generate_coach_stream(session, lap)
             if stream is not None:
                 for chunk in stream:
-                    if chunk == RESET_SENTINEL:
-                        self.coach_reset.emit(request_id)
-                    else:
-                        self.coach_chunk.emit(request_id, chunk)
+                    self.coach_chunk.emit(request_id, chunk)
                 self.coach_finished.emit(request_id, "", "")
             else:
                 # Streaming unavailable — fall back to non-streaming
@@ -651,28 +655,109 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.coach_finished.emit(request_id, "", str(exc))
 
     def _on_coach_finished(self, request_id: int, coach_text: str, error_text: str) -> None:
-        """Handle coach analysis completion."""
+        """Handle coach analysis or follow-up completion."""
         if request_id != self._analysis_request_id:
             return
 
-        if self.analysis_refresh_button:
-            self.analysis_refresh_button.setEnabled(bool(self.session and self.current_lap))
+        self._coach_streaming = False
 
         if error_text:
             if self.coach_output:
-                self.coach_output.setPlainText(f"Coach analysis failed:\n{error_text}")
+                self.coach_output.moveCursor(QtGui.QTextCursor.End)
+                self.coach_output.insertPlainText(f"\n\nCoach analysis failed:\n{error_text}")
+            self._enable_coach_input()
             return
 
+        # Capture the assistant's response for conversation history
         if coach_text:
             # Non-streaming path — replace content with full text
+            response = coach_text
             if self.coach_output:
                 self.coach_output.setPlainText(coach_text)
         else:
             # Streaming path finished (text already appended via chunks)
-            if self.coach_output:
+            response = "".join(self._current_stream_text).strip()
+            if not response and self.coach_output:
                 current = self.coach_output.toPlainText().strip()
                 if not current:
                     self.coach_output.setPlainText("Coach analysis returned no data.")
+
+        if response:
+            self._coach_conversation.append({"role": "assistant", "content": response})
+
+        self._enable_coach_input()
+
+    def _enable_coach_input(self) -> None:
+        """Enable the chat input field and send button."""
+        if self._coach_input:
+            self._coach_input.setEnabled(True)
+            self._coach_input.setFocus()
+        if self._coach_send_button:
+            self._coach_send_button.setEnabled(True)
+
+    def _send_coach_followup(self) -> None:
+        """Send a follow-up question to the coach."""
+        if not self.session or not self.current_lap:
+            return
+        if self._coach_streaming:
+            return
+        if not self._coach_input:
+            return
+
+        question = self._coach_input.text().strip()
+        if not question:
+            return
+
+        # Add user question to conversation history
+        self._coach_conversation.append({"role": "user", "content": question})
+
+        # Display in widget with turquoise colour for user messages
+        if self.coach_output:
+            cursor = self.coach_output.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.insertText("\n\n")
+            fmt = QtGui.QTextCharFormat()
+            fmt.setForeground(QtGui.QColor("#40E0D0"))
+            cursor.insertText(f"You: {question}", fmt)
+            default_fmt = QtGui.QTextCharFormat()
+            default_fmt.setForeground(QtGui.QColor("#DDDDDD"))
+            cursor.insertText("\n\nCoach:\n", default_fmt)
+            self.coach_output.setTextCursor(cursor)
+
+        # Clear input and disable during generation
+        self._coach_input.clear()
+        self._coach_input.setEnabled(False)
+        if self._coach_send_button:
+            self._coach_send_button.setEnabled(False)
+        self._coach_streaming = True
+        self._current_stream_text = []
+
+        self._analysis_request_id += 1
+        request_id = self._analysis_request_id
+        session = self.session
+        lap = self.current_lap
+        history_snapshot = list(self._coach_conversation)
+
+        threading.Thread(
+            target=self._run_coach_followup_worker,
+            args=(request_id, session, lap, history_snapshot),
+            daemon=True,
+        ).start()
+
+    def _run_coach_followup_worker(
+        self, request_id: int, session: Session, lap: Lap, history: list[dict]
+    ) -> None:
+        """Background worker for coach follow-up streaming."""
+        try:
+            stream = self.ai_pipeline.generate_coach_followup_stream(session, lap, history)
+            if stream is not None:
+                for chunk in stream:
+                    self.coach_chunk.emit(request_id, chunk)
+                self.coach_finished.emit(request_id, "", "")
+            else:
+                self.coach_finished.emit(request_id, "", "Follow-up not available.")
+        except Exception as exc:
+            self.coach_finished.emit(request_id, "", str(exc))
 
     def _set_analysis_text(self, coach_text: str, analyst_text: str, source_text: str) -> None:
         if self.coach_output:
@@ -948,9 +1033,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             )
             item.setData(QtCore.Qt.UserRole, lap.lap_number)
             self.lap_list.addItem(item)
-
-            if self.analysis_refresh_button:
-                self.analysis_refresh_button.setEnabled(True)
 
             self.load_lap(lap.lap_number)
             self.status_bar.showMessage(

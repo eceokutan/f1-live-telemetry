@@ -5,10 +5,7 @@ import re
 from .base import BaseAgent
 from ..llm.local_client import StreamComplete
 from ..preprocessing.telemetry import preprocess_for_analysis
-from ..config.prompts import COACHING_SYSTEM_PROMPT
-
-# Sentinel string emitted to tell the UI to clear the widget and start fresh.
-STREAM_RESET = "\x00RESET\x00"
+from ..config.prompts import COACHING_SYSTEM_PROMPT, COACHING_CHAT_SYSTEM_PROMPT
 
 
 class CoachingAgent(BaseAgent):
@@ -93,81 +90,63 @@ class CoachingAgent(BaseAgent):
         }
 
     def analyse_stream(self, session_data: dict):
-        """Streaming variant with truncation-retry.
-
-        Yields str chunks progressively.  Special sentinels:
-        - ``STREAM_RESET`` — tells the UI to clear and start fresh (fallback).
-        - ``StreamComplete`` — final item (end of generation).
-        """
+        """Streaming variant — yields str chunks then a final StreamComplete."""
         summary = preprocess_for_analysis(
             session_data.get("telemetry", []),
             session_data.get("laps", []),
         )
         prompt = self._build_prompt(session_data, summary)
-
-        # --- First attempt ---
-        accumulated = []
-        first_complete = None
-        for item in self.llm.generate_stream(
+        yield from self.llm.generate_stream(
             prompt=prompt,
             system_prompt=COACHING_SYSTEM_PROMPT,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
-        ):
-            if isinstance(item, StreamComplete):
-                first_complete = item
-            else:
-                accumulated.append(item)
-                yield item
-
-        first_text = "".join(accumulated).strip()
-        tokens_used = first_complete.tokens_used if first_complete else 0
-        finish_reason = first_complete.finish_reason if first_complete else "stop"
-
-        if not self._is_likely_truncated(first_text, tokens_used, self.max_tokens, finish_reason):
-            yield StreamComplete(tokens_used=tokens_used, finish_reason=finish_reason)
-            return
-
-        # --- Retry with shorter constraints ---
-        yield "\n\n(Regenerating with shorter constraints...)\n\n"
-
-        concise_prompt = (
-            prompt
-            + "\n\nMANDATORY LENGTH LIMITS:\n"
-            + "- Keep total response under 160 words.\n"
-            + "- Give 3-5 tips maximum.\n"
-            + "- Each tip must be one sentence.\n"
-            + "- End with one short closing sentence.\n"
-            + "- If space is tight, shorten tips instead of cutting off mid-thought.\n"
         )
 
-        retry_accumulated = []
-        retry_complete = None
-        for item in self.llm.generate_stream(
-            prompt=concise_prompt,
-            system_prompt=COACHING_SYSTEM_PROMPT,
-            max_tokens=self.retry_max_tokens,
-            temperature=0.4,
-        ):
-            if isinstance(item, StreamComplete):
-                retry_complete = item
+    def follow_up_stream(self, session_data: dict, conversation_history: list[dict]):
+        """Stream a follow-up response in a multi-turn coaching conversation.
+
+        Args:
+            session_data: Same payload shape as analyse_stream().
+            conversation_history: List of {"role": "assistant"|"user", "content": str}.
+                The first assistant entry is the initial analysis. The last entry
+                must be a user question.
+
+        Yields:
+            str chunks, then a final StreamComplete.
+        """
+        summary = preprocess_for_analysis(
+            session_data.get("telemetry", []),
+            session_data.get("laps", []),
+        )
+        session_context = self._build_prompt(session_data, summary)
+
+        # Build multi-turn messages: session briefing as first user message,
+        # then the conversation history (assistant/user alternating).
+        messages: list[dict] = [{"role": "user", "content": session_context}]
+        messages.extend(conversation_history)
+
+        # Trim oldest conversation pairs if history is too long, but always
+        # keep the first assistant entry (initial analysis).
+        max_history_chars = 6000
+        while len(messages) > 3:
+            total_chars = sum(len(m["content"]) for m in messages)
+            if total_chars <= max_history_chars:
+                break
+            # Remove the oldest pair after the first assistant entry
+            # messages[0] = session context (user), messages[1] = initial analysis (assistant)
+            # Remove messages[2] and messages[3] if they exist
+            if len(messages) > 4:
+                del messages[2:4]
             else:
-                retry_accumulated.append(item)
-                yield item
+                break
 
-        retry_text = "".join(retry_accumulated).strip()
-        retry_tokens = retry_complete.tokens_used if retry_complete else 0
-        retry_finish = retry_complete.finish_reason if retry_complete else "stop"
-
-        if not self._is_likely_truncated(retry_text, retry_tokens, self.retry_max_tokens, retry_finish):
-            yield StreamComplete(tokens_used=retry_tokens, finish_reason=retry_finish)
-            return
-
-        # --- Deterministic fallback: reset widget, emit full fallback ---
-        yield STREAM_RESET
-        fallback_content = self._build_compact_fallback(session_data, summary)
-        yield fallback_content
-        yield StreamComplete(tokens_used=0, finish_reason="fallback")
+        yield from self.llm.generate_stream_messages(
+            messages=messages,
+            system_prompt=COACHING_CHAT_SYSTEM_PROMPT,
+            max_tokens=300,
+            temperature=0.6,
+        )
 
     def _build_prompt(self, session_data: dict, summary: dict) -> str:
         """Build the prompt for the LLM from session data and telemetry summary.
