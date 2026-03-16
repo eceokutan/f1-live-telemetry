@@ -1,9 +1,9 @@
 """
 LLM Client for Jarvis-Granite Live Telemetry.
 
-Provides an interface to a locally-hosted QLoRA-finetuned model.
+Provides an interface to a locally-hosted GGUF model (via llama-cpp-python).
 Falls back to deterministic rule-based responses when the local model
-is unavailable (e.g. no CUDA, adapter load failure).
+is unavailable (e.g. GGUF file missing, load failure).
 """
 
 import asyncio
@@ -21,11 +21,11 @@ class LLMError(Exception):
 
 class LLMClient:
     """
-    Client for the local QLoRA-finetuned race engineer LLM.
+    Client for the local GGUF race engineer LLM (via llama-cpp-python).
 
     Priority order in _invoke_llm:
-    1. Force rule-based fallback (if configured, e.g. no CUDA)
-    2. Local LLM (Granite-4.0-micro + QLoRA adapter)
+    1. Force rule-based fallback (if configured, e.g. GGUF missing)
+    2. Local LLM (GGUF quantized model)
     3. Rule-based fallback (if local LLM unavailable or generation fails)
 
     Attributes:
@@ -35,9 +35,9 @@ class LLMClient:
 
     def __init__(
         self,
-        max_tokens: int = 24,
+        max_tokens: int = 48,
         temperature: float = 0.3,
-        local_adapter_path: str = "race_engineer_llm",
+        local_model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
         local_max_time_seconds: float = 5.0,
         force_rule_based_fallback: bool = False,
     ):
@@ -47,14 +47,14 @@ class LLMClient:
         Args:
             max_tokens: Maximum response tokens (default: 24, short for racing brevity)
             temperature: Response temperature (default: 0.3)
-            local_adapter_path: Path to QLoRA adapter directory (relative to project root).
+            local_model_path: Path to GGUF model file (relative to project root).
             local_max_time_seconds: Max generation time for local model responses.
             force_rule_based_fallback: If True, bypass the local LLM and use
                                       rule-based fallback responses only.
         """
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.local_adapter_path = local_adapter_path
+        self.local_model_path = local_model_path
         self.local_max_time_seconds = local_max_time_seconds
         self.force_rule_based_fallback = force_rule_based_fallback
 
@@ -87,11 +87,11 @@ class LLMClient:
         try:
             from ai.local_llm_inference import LocalLLMInference
 
-            logger.info("Acquiring shared local LLM instance (Granite-4.0-micro + QLoRA)...")
+            logger.info("Acquiring shared local LLM instance (GGUF)...")
             self._local_llm = LocalLLMInference.get_shared(
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                adapter_path=self.local_adapter_path,
+                model_path=self.local_model_path,
                 max_time_seconds=self.local_max_time_seconds,
             )
             self._local_llm_initialized = True

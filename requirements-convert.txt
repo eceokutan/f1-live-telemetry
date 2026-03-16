@@ -1,0 +1,7 @@
+# Dependencies for converting QLoRA adapter to GGUF format.
+# Install these only when running scripts/convert_to_gguf.py.
+# Not needed at runtime (llama-cpp-python loads GGUF directly).
+
+torch
+transformers>=4.36.0
+peft>=0.10.0

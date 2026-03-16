@@ -1,6 +1,0 @@
-{
-  "ai_enabled": true,
-  "voice_mode": "push_to_talk",
-  "ptt_key": "v",
-  "local_adapter_path": "race_engineer_llm"
-}

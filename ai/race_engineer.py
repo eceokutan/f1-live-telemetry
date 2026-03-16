@@ -136,41 +136,39 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     def _initialize_agents(self):
         """Initialize TelemetryAgent and RaceEngineerAgent."""
+        from pathlib import Path
+
         # Live mode targets short radio replies with low latency.
-        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "24"))
+        live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "48"))
         live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.3"))
         local_max_time_seconds = float(os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "5.0"))
-        local_adapter_path = os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_llm")
+        # Support new env var with fallback to old one for backwards compat
+        local_model_path = os.getenv(
+            "LOCAL_MODEL_PATH",
+            os.getenv("LOCAL_ADAPTER_PATH", "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf"),
+        )
 
-        # Check CUDA availability — local LLM requires CUDA.
-        # If CUDA is unavailable, fall back to rule-based responses only.
+        # Check if GGUF model file exists
         force_rule_based_fallback = False
-        cuda_available = False
-        cuda_device = ""
-        try:
-            import torch
+        model_file = Path(local_model_path)
+        if not model_file.is_absolute():
+            model_file = Path(__file__).parent.parent / model_file
 
-            cuda_available = bool(torch.cuda.is_available())
-            if cuda_available:
-                cuda_device = torch.cuda.get_device_name(0)
-        except Exception as e:
-            logger.warning("Unable to check CUDA status: %s", e)
-
-        if cuda_available:
-            logger.info("Local LLM CUDA active: %s", cuda_device or "unknown device")
-        else:
+        if not model_file.exists():
             logger.warning(
-                "CUDA is unavailable; falling back to rule-based responses."
+                "GGUF model not found at %s; falling back to rule-based responses. "
+                "Run 'python scripts/convert_to_gguf.py' to generate it.",
+                model_file,
             )
             self.status_update.emit(
-                "CUDA unavailable. Using rule-based fallback responses."
+                "GGUF model not found. Using rule-based fallback responses."
             )
             force_rule_based_fallback = True
 
         llm_client = LLMClient(
             max_tokens=live_max_tokens,
             temperature=live_temperature,
-            local_adapter_path=local_adapter_path,
+            local_model_path=local_model_path,
             local_max_time_seconds=local_max_time_seconds,
             force_rule_based_fallback=force_rule_based_fallback,
         )
@@ -180,9 +178,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
         )
 
         if not force_rule_based_fallback:
-            logger.info("Using local QLoRA-finetuned Granite model from: %s", local_adapter_path)
+            logger.info("Using local GGUF model from: %s", local_model_path)
         else:
-            logger.info("Rule-based responses only (no CUDA)")
+            logger.info("Rule-based responses only (GGUF model unavailable)")
 
         # Create race engineer agent
         self.race_engineer_agent = RaceEngineerAgent(

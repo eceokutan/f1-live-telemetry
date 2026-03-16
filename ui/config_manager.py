@@ -18,7 +18,7 @@ DEFAULTS = {
     "ai_enabled": False,
     "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
     "ptt_key": "v",                 # Key name for push-to-talk
-    "local_adapter_path": "race_engineer_llm",
+    "local_model_path": "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
 }
 
 

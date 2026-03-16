@@ -1,70 +1,94 @@
 """
-Local LLM inference using transformers + PEFT for QLoRA-finetuned models.
+Local LLM inference using llama-cpp-python with GGUF models.
 
-Loads Granite-4.0-micro base model from Hugging Face Hub and applies
-the local QLoRA adapter from race_engineer_llm/.
+Loads a quantized GGUF model (converted from Granite-4.0-micro + QLoRA adapter)
+for fast CPU or GPU inference without torch/transformers/peft dependencies.
 """
 
 import logging
 import os
 import threading
 from pathlib import Path
-from typing import ClassVar, Optional
-
-import torch
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Module-level singleton so the model stays in GPU memory across restarts
-# within the same process (e.g. launcher loop → run_jarvis_live → back to launcher).
+# Module-level singleton so the model stays in memory across restarts
+# within the same process (e.g. launcher loop -> run_jarvis_live -> back to launcher).
 _shared_instance: Optional["LocalLLMInference"] = None
 _shared_lock = threading.Lock()
 
 
 class LocalLLMInference:
     """
-    Loads and runs a QLoRA-finetuned model locally.
+    Loads and runs a GGUF-quantized model via llama-cpp-python.
 
-    Requires CUDA (NVIDIA GPU). Raises RuntimeError if CUDA is unavailable.
+    Supports both CPU (n_gpu_layers=0) and GPU (n_gpu_layers=-1) inference.
     """
 
     def __init__(
         self,
-        base_model_id: str = "ibm-granite/granite-4.0-micro",
-        adapter_path: str = "race_engineer_llm",
-        max_tokens: int = 24,
+        model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
+        n_gpu_layers: int = 0,
+        max_tokens: int = 48,
         temperature: float = 0.3,
         max_time_seconds: float = 5.0,
-        max_prompt_tokens: int = 256,
+        max_prompt_tokens: int = 1024,
     ):
         """
         Initialize local LLM inference.
 
         Args:
-            base_model_id: Hugging Face model ID for base model
-            adapter_path: Path to QLoRA adapter directory (relative to project root)
+            model_path: Path to GGUF model file (relative to project root)
+            n_gpu_layers: Number of layers to offload to GPU (0=CPU, -1=all)
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             max_time_seconds: Hard generation time cap per response
             max_prompt_tokens: Maximum input prompt tokens (truncate if longer)
 
         Raises:
-            RuntimeError: If CUDA is not available.
+            FileNotFoundError: If GGUF model file does not exist.
         """
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "CUDA is required for local LLM inference but is not available. "
-                "Install a CUDA-enabled PyTorch build or use rule-based fallback."
+        # Resolve model path relative to project root
+        self.model_path = Path(model_path)
+        if not self.model_path.is_absolute():
+            self.model_path = Path(__file__).parent.parent / self.model_path
+
+        if not self.model_path.exists():
+            raise FileNotFoundError(
+                f"GGUF model not found at {self.model_path}. "
+                "Run 'python scripts/convert_to_gguf.py' to generate it from the QLoRA adapter."
             )
 
-        self.base_model_id = base_model_id
-        self.adapter_path = Path(adapter_path)
-        if not self.adapter_path.is_absolute():
-            # Make relative to project root
-            self.adapter_path = Path(__file__).parent.parent / self.adapter_path
+        # Env var overrides
+        env_model_path = os.getenv("LOCAL_LLM_MODEL_PATH", "").strip()
+        if env_model_path:
+            self.model_path = Path(env_model_path)
 
+        env_n_gpu_layers = os.getenv("LOCAL_LLM_N_GPU_LAYERS", "").strip()
+        if env_n_gpu_layers:
+            try:
+                n_gpu_layers = int(env_n_gpu_layers)
+            except ValueError:
+                logger.warning(
+                    "Invalid LOCAL_LLM_N_GPU_LAYERS=%s, using %d",
+                    env_n_gpu_layers,
+                    n_gpu_layers,
+                )
+
+        env_n_threads = os.getenv("LOCAL_LLM_N_THREADS", "").strip()
+        if env_n_threads:
+            try:
+                self.n_threads = max(1, int(env_n_threads))
+            except ValueError:
+                self.n_threads = max(1, (os.cpu_count() or 2) // 2)
+        else:
+            self.n_threads = max(1, (os.cpu_count() or 2) // 2)
+
+        self.n_gpu_layers = n_gpu_layers
         self.max_tokens = max_tokens
         self.temperature = temperature
+
         env_max_time = os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "").strip()
         if env_max_time:
             try:
@@ -76,6 +100,7 @@ class LocalLLMInference:
                     max_time_seconds,
                 )
         self.max_time_seconds = max(0.0, float(max_time_seconds))
+
         env_max_prompt_tokens = os.getenv("LOCAL_LLM_MAX_PROMPT_TOKENS", "").strip()
         if env_max_prompt_tokens:
             try:
@@ -88,73 +113,65 @@ class LocalLLMInference:
                 )
         self.max_prompt_tokens = max(32, int(max_prompt_tokens))
 
-        self.device = "cuda"
-        logger.info("CUDA device: %s", torch.cuda.get_device_name(0))
+        logger.info(
+            "GGUF model: %s (n_gpu_layers=%d, n_threads=%d)",
+            self.model_path.name,
+            self.n_gpu_layers,
+            self.n_threads,
+        )
 
-        try:
-            if torch.cuda.is_bf16_supported():
-                self.dtype = torch.bfloat16
-            else:
-                self.dtype = torch.float16
-        except Exception:
-            self.dtype = torch.float16
-
-        # Lazy-loaded model and tokenizer
+        # Lazy-loaded model
         self._model = None
-        self._tokenizer = None
         self._loaded = False
 
     def load(self) -> None:
-        """
-        Pre-load model and tokenizer.
-
-        This is called during initialization by default.
-        """
+        """Load the GGUF model into memory."""
         if self._loaded:
             return
 
         try:
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            from peft import PeftModel
+            from llama_cpp import Llama
 
-            logger.info(f"Loading base model {self.base_model_id}...")
-            tokenizer = AutoTokenizer.from_pretrained(self.base_model_id)
-            try:
-                # Newer transformers prefers `dtype`; keep a compatibility fallback.
-                base_model = AutoModelForCausalLM.from_pretrained(
-                    self.base_model_id,
-                    dtype=self.dtype,
-                    low_cpu_mem_usage=True,
-                )
-            except TypeError:
-                base_model = AutoModelForCausalLM.from_pretrained(
-                    self.base_model_id,
-                    torch_dtype=self.dtype,
-                    low_cpu_mem_usage=True,
-                )
+            logger.info(f"Loading GGUF model from {self.model_path}...")
+            self._model = Llama(
+                model_path=str(self.model_path),
+                n_ctx=2048,
+                n_threads=self.n_threads,
+                n_gpu_layers=self.n_gpu_layers,
+                n_batch=256,
+                verbose=False,
+            )
 
-            if self.device != "cpu":
-                base_model = base_model.to(self.device)
-
-            logger.info(f"Loading QLoRA adapter from {self.adapter_path}...")
-            model = PeftModel.from_pretrained(base_model, str(self.adapter_path))
-            model = model.to(self.device)
-
-            self._tokenizer = tokenizer
-            self._model = model
-
-            # Prime first-token latency so initial live query is responsive.
             self._prewarm_generation()
-
             self._loaded = True
             logger.info("Model loaded successfully")
 
         except ImportError as e:
             logger.error(f"Missing required library: {e}")
-            raise RuntimeError(f"Cannot load local model: {e}") from e
+            raise RuntimeError(
+                f"Cannot load local model: {e}. Install with: pip install llama-cpp-python"
+            ) from e
         except Exception as e:
             logger.error(f"Failed to load local model: {e}")
             raise RuntimeError(f"Failed to load local model: {e}") from e
+
+    def _format_with_chat_template(self, prompt: str) -> str:
+        """
+        Wrap a raw prompt in Granite chat template role markers.
+
+        The Granite 4.0 model expects prompts delimited by role tokens.
+        Without these markers, the model sees unstructured text and
+        hallucinates data continuations instead of generating responses.
+        """
+        system_msg = (
+            "You are an expert F1 race engineer communicating with your "
+            "driver over team radio. Reply in one short sentence."
+        )
+        return (
+            f"<|start_of_role|>system<|end_of_role|>{system_msg}<|end_of_text|>"
+            f"<|start_of_role|>user<|end_of_role|>{prompt}<|end_of_text|>"
+            f"<|start_of_role|>assistant<|end_of_role|>"
+        )
 
     def generate(self, prompt: str) -> str:
         """
@@ -170,70 +187,40 @@ class LocalLLMInference:
             raise RuntimeError("Model not loaded. Call load() first.")
 
         try:
-            # Use truncation to cap prompt prefill latency for live response budgets.
-            encoded = self._tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=self.max_prompt_tokens,
-            )
-            input_ids = encoded["input_ids"].to(self.device)
-            attention_mask = encoded.get("attention_mask")
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.device)
+            # Wrap prompt in Granite chat template before tokenization
+            formatted_prompt = self._format_with_chat_template(prompt)
 
-            # Generate
-            generation_kwargs = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "max_new_tokens": self.max_tokens,
-                "temperature": self.temperature,
-                "do_sample": self.temperature > 0.0,
-                "top_k": 50,
-                "top_p": 0.95,
-                "pad_token_id": self._tokenizer.eos_token_id,
-            }
-            if self.max_time_seconds > 0:
-                generation_kwargs["max_time"] = self.max_time_seconds
+            # Truncate prompt if it exceeds max_prompt_tokens
+            tokens = self._model.tokenize(formatted_prompt.encode())
+            if len(tokens) > self.max_prompt_tokens:
+                tokens = tokens[:self.max_prompt_tokens]
+                formatted_prompt = self._model.detokenize(tokens).decode(errors="replace")
 
-            with torch.no_grad():
-                outputs = self._model.generate(**generation_kwargs)
+            logger.debug("Formatted prompt (first 200 chars): %s", formatted_prompt[:200])
 
-            # Decode response (excluding the input prompt)
-            response = self._tokenizer.decode(
-                outputs[0][input_ids.shape[-1]:],
-                skip_special_tokens=True,
+            response = self._model.create_completion(
+                formatted_prompt,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                top_k=50,
+                top_p=0.95,
+                stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
             )
 
-            return response.strip()
+            return response["choices"][0]["text"].strip()
 
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             raise RuntimeError(f"Generation failed: {e}") from e
 
     def _prewarm_generation(self) -> None:
-        """Run a tiny generation to absorb CUDA kernel JIT compilation overhead."""
+        """Run a tiny generation to absorb first-inference overhead."""
         try:
-            encoded = self._tokenizer(
+            self._model.create_completion(
                 "Radio check.",
-                return_tensors="pt",
-                truncation=True,
-                max_length=64,
+                max_tokens=2,
+                temperature=0.0,
             )
-            input_ids = encoded["input_ids"].to(self.device)
-            attention_mask = encoded.get("attention_mask")
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.device)
-
-            with torch.no_grad():
-                self._model.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    max_new_tokens=2,
-                    do_sample=False,
-                    pad_token_id=self._tokenizer.eos_token_id,
-                    max_time=max(self.max_time_seconds, 3.0),
-                )
             logger.info("Local LLM generation warmup complete")
         except Exception as e:
             logger.warning("Local LLM generation warmup failed: %s", e)
@@ -249,12 +236,12 @@ class LocalLLMInference:
     @classmethod
     def get_shared(
         cls,
-        base_model_id: str = "ibm-granite/granite-4.0-micro",
-        adapter_path: str = "race_engineer_llm",
-        max_tokens: int = 24,
+        model_path: str = "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
+        n_gpu_layers: int = 0,
+        max_tokens: int = 48,
         temperature: float = 0.3,
         max_time_seconds: float = 5.0,
-        max_prompt_tokens: int = 256,
+        max_prompt_tokens: int = 1024,
     ) -> "LocalLLMInference":
         """
         Return the shared singleton instance, creating and loading it on first call.
@@ -263,12 +250,10 @@ class LocalLLMInference:
         model, a second caller (e.g. the AI worker thread) will block on the
         lock and then receive the already-loaded instance instead of loading
         a duplicate.
-
-        Raises RuntimeError if CUDA is not available.
         """
         global _shared_instance
 
-        # Fast path — no lock needed if already loaded.
+        # Fast path -- no lock needed if already loaded.
         if _shared_instance is not None and _shared_instance._loaded:
             return _shared_instance
 
@@ -279,8 +264,8 @@ class LocalLLMInference:
 
             logger.info("Loading shared local LLM instance...")
             instance = cls(
-                base_model_id=base_model_id,
-                adapter_path=adapter_path,
+                model_path=model_path,
+                n_gpu_layers=n_gpu_layers,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 max_time_seconds=max_time_seconds,
