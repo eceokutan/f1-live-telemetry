@@ -653,16 +653,22 @@ class AIRaceEngineerWorker(QtCore.QThread):
         q = (query or "").lower()
         c = self.context
 
-        if "wear" in q and "tire" in q:
+        if "wear" in q and ("tire" in q or "tyre" in q):
             return (
                 f"Tire wear is FL {c.tire_wear['fl']:.0f}, FR {c.tire_wear['fr']:.0f}, "
                 f"RL {c.tire_wear['rl']:.0f}, RR {c.tire_wear['rr']:.0f} percent."
             )
 
-        if "temp" in q and "tire" in q:
+        if "temp" in q and ("tire" in q or "tyre" in q):
             return (
                 f"Tire temps are FL {c.tire_temps['fl']:.0f}, FR {c.tire_temps['fr']:.0f}, "
                 f"RL {c.tire_temps['rl']:.0f}, RR {c.tire_temps['rr']:.0f} C."
+            )
+
+        if "pressure" in q and ("tire" in q or "tyre" in q):
+            return (
+                f"Tire pressures are FL {c.tire_pressures['fl']:.1f}, FR {c.tire_pressures['fr']:.1f}, "
+                f"RL {c.tire_pressures['rl']:.1f}, RR {c.tire_pressures['rr']:.1f} PSI."
             )
 
         if "fuel" in q:

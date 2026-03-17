@@ -64,6 +64,9 @@ class LiveSessionContext:
     tire_temps: Dict[str, float] = field(
         default_factory=lambda: {"fl": 80, "fr": 80, "rl": 80, "rr": 80}
     )
+    tire_pressures: Dict[str, float] = field(
+        default_factory=lambda: {"fl": 28.0, "fr": 28.0, "rl": 28.0, "rr": 28.0}
+    )
 
     # Race position
     position: int = 1
@@ -142,6 +145,13 @@ class LiveSessionContext:
             "rl": telemetry.tire_temps.rl,
             "rr": telemetry.tire_temps.rr,
         }
+        if telemetry.tire_pressure is not None:
+            self.tire_pressures = {
+                "fl": telemetry.tire_pressure.fl,
+                "fr": telemetry.tire_pressure.fr,
+                "rl": telemetry.tire_pressure.rl,
+                "rr": telemetry.tire_pressure.rr,
+            }
         # Tire wear may not be available in AC
         if telemetry.tire_wear is not None:
             self.tire_wear = {
@@ -356,6 +366,9 @@ class LiveSessionContext:
         # Format tire wear
         wear_str = f"FL:{self.tire_wear['fl']:.0f}% FR:{self.tire_wear['fr']:.0f}% RL:{self.tire_wear['rl']:.0f}% RR:{self.tire_wear['rr']:.0f}%"
 
+        # Format tire pressure
+        pressure_str = f"FL:{self.tire_pressures['fl']:.1f}psi FR:{self.tire_pressures['fr']:.1f}psi RL:{self.tire_pressures['rl']:.1f}psi RR:{self.tire_pressures['rr']:.1f}psi"
+
         return f"""Track: {self.track_name}
 Lap: {self.current_lap} | Position: P{self.position}
 Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}
@@ -365,6 +378,7 @@ Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}
 Nearby Opponents: {nearby_str}
 Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)
 Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
+Tire Pressures: {pressure_str}
 Tire Wear: {wear_str}
 Car Damage: {damage_str}
 Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"""
