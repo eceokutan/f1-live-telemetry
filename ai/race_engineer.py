@@ -157,15 +157,26 @@ class AIRaceEngineerWorker(QtCore.QThread):
             model_file = Path(__file__).parent.parent / model_file
 
         if not model_file.exists():
-            logger.warning(
-                "GGUF model not found at %s; falling back to rule-based responses. "
-                "Run 'python scripts/convert_to_gguf.py' to generate it.",
-                model_file,
-            )
-            self.status_update.emit(
-                "GGUF model not found. Using rule-based fallback responses."
-            )
-            force_rule_based_fallback = True
+            # Try auto-downloading from Hugging Face Hub
+            try:
+                from ai.model_downloader import ensure_model
+                logger.info("Model not found locally, attempting auto-download...")
+                self.status_update.emit("Downloading AI model (first run)...")
+                downloaded = ensure_model(local_model_path)
+                model_file = downloaded
+                local_model_path = str(downloaded)
+                os.environ["LOCAL_MODEL_PATH"] = local_model_path
+                logger.info("Model downloaded: %s", model_file)
+            except Exception as dl_err:
+                logger.warning(
+                    "GGUF model not found at %s and auto-download failed: %s; "
+                    "falling back to rule-based responses.",
+                    model_file, dl_err,
+                )
+                self.status_update.emit(
+                    "GGUF model not found. Using rule-based fallback responses."
+                )
+                force_rule_based_fallback = True
 
         llm_client = LLMClient(
             max_tokens=live_max_tokens,

@@ -14,6 +14,11 @@ import os
 import logging
 import threading
 
+# When running as a PyInstaller bundle, set working directory to the exe's folder
+# so that relative paths (config.json, data/, race_engineer_gguf/) resolve correctly.
+if getattr(sys, "frozen", False):
+    os.chdir(os.path.dirname(sys.executable))
+
 # Pre-load native DLLs BEFORE PyQt5 to avoid DLL conflicts on Windows.
 # PyQt5 changes the DLL search path, which breaks onnxruntime if loaded after.
 for _mod in ("onnxruntime", "ctranslate2"):

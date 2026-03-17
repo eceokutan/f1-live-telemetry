@@ -67,10 +67,18 @@ class LocalGGUFClient:
                 return
 
             if not self._model_path.exists():
-                raise FileNotFoundError(
-                    f"Post-race GGUF model not found at {self._model_path}. "
-                    "Run the conversion script to generate it."
-                )
+                # Try auto-downloading from Hugging Face Hub
+                try:
+                    from ai.model_downloader import ensure_postrace_model
+                    logger.info("Post-race model not found locally, attempting auto-download...")
+                    downloaded = ensure_postrace_model()
+                    self._model_path = downloaded
+                except Exception as dl_err:
+                    raise FileNotFoundError(
+                        f"Post-race GGUF model not found at {self._model_path} "
+                        f"and auto-download failed: {dl_err}. "
+                        "Run the conversion script to generate it."
+                    ) from dl_err
 
             try:
                 from llama_cpp import Llama

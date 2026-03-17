@@ -496,13 +496,25 @@ class AIPipelineBridge:
         return analyst_raw, coach_raw
 
     def _has_postrace_local_model(self) -> bool:
-        """Check whether the local GGUF model file exists for post-race analysis."""
+        """Check whether the local GGUF model file exists for post-race analysis.
+
+        If the model is not found, attempts auto-download from Hugging Face Hub.
+        """
         env_path = (os.getenv("POSTRACE_GGUF_MODEL_PATH") or "").strip()
         if env_path:
             return Path(env_path).exists()
 
         default_path = Path(__file__).resolve().parent.parent / "postrace_gguf" / "granite-postrace-analyst-Q4_K_M.gguf"
-        return default_path.exists()
+        if default_path.exists():
+            return True
+
+        # Try auto-downloading
+        try:
+            from ai.model_downloader import ensure_postrace_model
+            ensure_postrace_model()
+            return default_path.exists()
+        except Exception:
+            return False
 
     def _call_external_combined(
         self,

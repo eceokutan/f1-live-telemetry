@@ -55,10 +55,18 @@ class LocalLLMInference:
             self.model_path = Path(__file__).parent.parent / self.model_path
 
         if not self.model_path.exists():
-            raise FileNotFoundError(
-                f"GGUF model not found at {self.model_path}. "
-                "Run 'python scripts/convert_to_gguf.py' to generate it from the QLoRA adapter."
-            )
+            # Try auto-downloading from Hugging Face Hub
+            try:
+                from ai.model_downloader import ensure_model
+                logger.info("Model not found locally, attempting auto-download...")
+                downloaded = ensure_model(model_path)
+                self.model_path = downloaded
+            except Exception as dl_err:
+                raise FileNotFoundError(
+                    f"GGUF model not found at {self.model_path} and auto-download failed: {dl_err}. "
+                    "Run 'python scripts/convert_to_gguf.py' to generate it from the QLoRA adapter, "
+                    "or place the model file manually."
+                ) from dl_err
 
         # Env var overrides
         env_model_path = os.getenv("LOCAL_LLM_MODEL_PATH", "").strip()
