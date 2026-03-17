@@ -3,11 +3,13 @@ Auto-download GGUF models from Hugging Face Hub on first run.
 
 Downloads the quantized race engineer and post-race analyst models
 if they are not found locally. Caches files for future launches.
+Shows a Qt progress dialog so the user knows what's happening.
 """
 
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -48,20 +50,100 @@ def is_model_available(local_path: str = DEFAULT_LOCAL_PATH) -> bool:
     return get_model_path(local_path).exists()
 
 
+def _show_download_dialog(model_name: str, repo_id: str, filename: str, dest: Path) -> Path:
+    """
+    Show a Qt progress dialog while downloading the model.
+
+    Runs the actual download in a background thread and updates
+    the dialog with a pulsing progress bar.
+    """
+    try:
+        from PyQt5 import QtWidgets, QtCore
+
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            # No Qt app running — fall back to silent download
+            return _download_silent(repo_id, filename, dest)
+
+        dialog = QtWidgets.QProgressDialog(
+            f"Downloading {model_name}...\n"
+            f"This only happens once. The file is ~2 GB.",
+            None,  # No cancel button — download must complete
+            0, 0,  # Indeterminate (pulsing) progress bar
+        )
+        dialog.setWindowTitle("Jarvis — Downloading AI Model")
+        dialog.setWindowModality(QtCore.Qt.ApplicationModal)
+        dialog.setMinimumWidth(420)
+        dialog.setMinimumDuration(0)  # Show immediately
+        dialog.show()
+
+        # Force the dialog to paint before the download starts
+        app.processEvents()
+
+        result = [None]
+        error = [None]
+
+        def _worker():
+            try:
+                result[0] = _download_silent(repo_id, filename, dest)
+            except Exception as e:
+                error[0] = e
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        # Keep the UI responsive while the download runs
+        while thread.is_alive():
+            app.processEvents()
+            thread.join(timeout=0.1)
+
+        dialog.close()
+
+        if error[0]:
+            raise error[0]
+        return result[0]
+
+    except ImportError:
+        # PyQt5 not available — silent download
+        return _download_silent(repo_id, filename, dest)
+
+
+def _download_silent(repo_id: str, filename: str, dest: Path) -> Path:
+    """Download without UI (used as fallback or from non-GUI contexts)."""
+    from huggingface_hub import hf_hub_download
+
+    cached_path = hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_dir=str(dest.parent),
+        local_dir_use_symlinks=False,
+    )
+
+    result = Path(cached_path)
+    if result.exists():
+        return result
+    if dest.exists():
+        return dest
+
+    raise RuntimeError(f"Download completed but file not found at {dest}")
+
+
 def download_model(
     local_path: str = DEFAULT_LOCAL_PATH,
     repo_id: str = HF_REPO_ID,
     filename: str = HF_FILENAME,
-    progress_callback: Optional[callable] = None,
+    model_name: str = "AI Race Engineer model",
 ) -> Path:
     """
     Download the GGUF model from Hugging Face Hub.
+
+    Shows a progress dialog if a Qt application is running.
 
     Args:
         local_path: Local path to save the model (relative to project root)
         repo_id: Hugging Face repository ID
         filename: Filename within the HF repo
-        progress_callback: Optional callable(bytes_downloaded, total_bytes)
+        model_name: Human-readable name for the progress dialog
 
     Returns:
         Path to the downloaded model file
@@ -78,31 +160,12 @@ def download_model(
     # Create directory if needed
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Downloading model from %s/%s ...", repo_id, filename)
+    logger.info("Downloading %s from %s/%s ...", model_name, repo_id, filename)
 
     try:
-        from huggingface_hub import hf_hub_download
-
-        # hf_hub_download caches files; we symlink/copy to our expected path
-        cached_path = hf_hub_download(
-            repo_id=repo_id,
-            filename=filename,
-            local_dir=str(dest.parent),
-            local_dir_use_symlinks=False,
-        )
-
-        # hf_hub_download with local_dir puts the file directly there
-        result = Path(cached_path)
-        if result.exists():
-            logger.info("Model downloaded to %s", result)
-            return result
-
-        # Fallback: check if it ended up at our expected dest
-        if dest.exists():
-            logger.info("Model downloaded to %s", dest)
-            return dest
-
-        raise RuntimeError(f"Download completed but file not found at {dest}")
+        result = _show_download_dialog(model_name, repo_id, filename, dest)
+        logger.info("Model downloaded to %s", result)
+        return result
 
     except ImportError:
         raise RuntimeError(
@@ -132,7 +195,7 @@ def ensure_model(
     if is_model_available(local_path):
         return get_model_path(local_path)
 
-    return download_model(local_path, repo_id, filename)
+    return download_model(local_path, repo_id, filename, model_name="AI Race Engineer model")
 
 
 def ensure_postrace_model(
@@ -149,4 +212,4 @@ def ensure_postrace_model(
     if is_model_available(local_path):
         return get_model_path(local_path)
 
-    return download_model(local_path, repo_id, filename)
+    return download_model(local_path, repo_id, filename, model_name="Post-Race Analyst model")
