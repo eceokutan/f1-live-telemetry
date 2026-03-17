@@ -270,7 +270,17 @@ def run_jarvis_live(settings: dict):
                 verbosity="moderate"
             )
 
-            ai_thread.ai_commentary.connect(window.handle_ai_commentary)
+            # Pending driver query response — shown in UI only when TTS starts playing
+            pending_query_transcript = [None]
+
+            def on_ai_commentary_for_ui(msg, trigger, priority):
+                if trigger == "driver_query":
+                    # Defer until TTS playback starts so text and audio are in sync
+                    pending_query_transcript[0] = (msg, trigger, priority)
+                    return
+                window.handle_ai_commentary(msg, trigger, priority)
+
+            ai_thread.ai_commentary.connect(on_ai_commentary_for_ui)
             ai_thread.driver_query_received.connect(window.handle_driver_query)
             ai_thread.status_update.connect(window.handle_ai_status_update)
             ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
@@ -377,6 +387,15 @@ def run_jarvis_live(settings: dict):
                 if voice_thread:
                     worker.playback_started.connect(voice_thread.pause)
                     worker.playback_finished.connect(voice_thread.resume)
+
+                def _show_pending_transcript():
+                    """Show driver query transcript when TTS starts playing."""
+                    if pending_query_transcript[0]:
+                        msg, trigger, priority = pending_query_transcript[0]
+                        pending_query_transcript[0] = None
+                        window.handle_ai_commentary(msg, trigger, priority)
+
+                worker.playback_started.connect(_show_pending_transcript)
                 return worker
 
             def _ensure_tts_worker_running(reason: str) -> bool:

@@ -356,9 +356,12 @@ class AIRaceEngineerWorker(QtCore.QThread):
             else:
                 response = self._clean_llm_response(response)
 
-            # Guardrail: if model introduces numeric claims not present in
-            # current query/context, keep the advice but mark it as an estimate.
-            response = self._label_estimate_if_ungrounded_numbers(response, query)
+            # Guardrail: log if model introduces numeric claims not present
+            # in current query/context.  Don't mutate the response text —
+            # TTS already spoke the clauses, so the transcript must match.
+            labeled = self._label_estimate_if_ungrounded_numbers(response, query)
+            if labeled != response:
+                logger.warning("Ungrounded numeric claims in streamed response")
 
             # Check for empty response and provide fallback
             if not response or not response.strip():
