@@ -501,7 +501,7 @@ class AIPipelineBridge:
         if env_path:
             return Path(env_path).exists()
 
-        default_path = Path(__file__).resolve().parent.parent / "postrace_gguf" / "granite-postrace-analyst-Q5_K_M.gguf"
+        default_path = Path(__file__).resolve().parent.parent / "postrace_gguf" / "granite-postrace-analyst-Q4_K_M.gguf"
         return default_path.exists()
 
     def _call_external_combined(

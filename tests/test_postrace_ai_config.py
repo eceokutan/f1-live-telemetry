@@ -16,7 +16,7 @@ def _bridge_for_config_tests() -> AIPipelineBridge:
 
 def test_has_postrace_local_model_true_when_gguf_exists(monkeypatch, tmp_path):
     monkeypatch.delenv("POSTRACE_GGUF_MODEL_PATH", raising=False)
-    model_file = tmp_path / "granite-postrace-analyst-Q5_K_M.gguf"
+    model_file = tmp_path / "granite-postrace-analyst-Q4_K_M.gguf"
     model_file.write_bytes(b"fake")
 
     monkeypatch.setenv("POSTRACE_GGUF_MODEL_PATH", str(model_file))
