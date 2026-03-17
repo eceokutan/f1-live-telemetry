@@ -143,7 +143,7 @@ class RaceAnalysisAgent(BaseAgent):
             "avg_tyre_pressure_psi",
             "max_damage_sum",
         ]
-        car_data = self._build_lap_aggregate_rows(telemetry, max_rows=20)
+        car_data = self._build_lap_aggregate_rows(telemetry, max_rows=60)
 
         # --- session identity (so the model knows what it's analysing) ---
         session_context = {}
