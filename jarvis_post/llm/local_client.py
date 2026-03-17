@@ -55,7 +55,15 @@ class LocalGGUFClient:
         if env_n_threads:
             self._n_threads = max(1, int(env_n_threads))
         else:
-            self._n_threads = max(1, (os.cpu_count() or 2) // 2)
+            # Default to "all logical CPUs minus 2" to keep some headroom for UI/OS.
+            self._n_threads = max(1, (os.cpu_count() or 2) - 2)
+
+        logger.info(
+            "Post-race GGUF threading configured: n_threads=%d (logical_cpus=%s, env_override=%s)",
+            self._n_threads,
+            os.cpu_count(),
+            "set" if env_n_threads else "unset",
+        )
 
     def _load_model(self) -> None:
         """Load the GGUF model into memory (lazy, thread-safe)."""
@@ -88,7 +96,12 @@ class LocalGGUFClient:
                     "Install with: pip install llama-cpp-python"
                 ) from exc
 
-            logger.info("Loading post-race GGUF model from %s ...", self._model_path)
+            logger.info(
+                "Loading post-race GGUF model from %s (n_ctx=%d, n_threads=%d) ...",
+                self._model_path,
+                self._n_ctx,
+                self._n_threads,
+            )
             self._model = Llama(
                 model_path=str(self._model_path),
                 n_ctx=self._n_ctx,
