@@ -226,6 +226,10 @@ class TelemetryAgent:
         if telemetry.wheel_slip is None:
             return events
 
+        # Slip ratio is meaningless at low speed (denominator ≈ 0 → huge values)
+        if telemetry.speed < 10.0:
+            return events
+
         slip_positions = {
             "fl": abs(telemetry.wheel_slip.fl),
             "fr": abs(telemetry.wheel_slip.fr),
