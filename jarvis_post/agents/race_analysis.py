@@ -1,6 +1,7 @@
 """Race analysis agent for Jarvis Post."""
 
 import json
+from collections import defaultdict
 
 from .base import BaseAgent
 from ..config.prompts import RACE_ANALYSIS_SYSTEM_PROMPT
@@ -125,50 +126,24 @@ class RaceAnalysisAgent(BaseAgent):
                 "fastest_time": round(min(final_times), 3) if final_times else 0,
             })
 
-        # --- car_data: sample up to 20 rows from telemetry ---
+        # --- car_data: fixed-size lap aggregates (max 20 rows) ---
+        # Keep prompt size bounded for latency while improving representativeness
+        # versus single-point telemetry sampling.
         car_data_cols = [
-            "t_sec", "speed_kmh", "rpm", "gear", "throttle_pct", "brake", "drs",
-            "steer_angle",
-            "tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr",
-            "tyre_pres_fl", "tyre_pres_fr", "tyre_pres_rl", "tyre_pres_rr",
-            "slip_fl", "slip_fr", "slip_rl", "slip_rr",
-            "dmg_front", "dmg_rear", "dmg_left", "dmg_right", "dmg_centre",
+            "lap",
+            "samples",
+            "t_start_sec",
+            "t_end_sec",
+            "avg_speed_kmh",
+            "max_speed_kmh",
+            "avg_throttle_pct",
+            "avg_brake_pct",
+            "avg_steer_angle",
+            "avg_tyre_temp_c",
+            "avg_tyre_pressure_psi",
+            "max_damage_sum",
         ]
-        car_data = []
-        if telemetry:
-            step = max(1, len(telemetry) // 20)
-            for row in telemetry[::step][:20]:
-                throttle_raw = row.get("throttle", 0) or 0
-                brake_raw = row.get("brake", 0) or 0
-                throttle_pct = throttle_raw * 100 if throttle_raw <= 1 else throttle_raw
-                brake_pct = brake_raw * 100 if brake_raw <= 1 else brake_raw
-                car_data.append([
-                    round(row.get("elapsed_time", 0), 1),
-                    round(row.get("speed", 0), 0),
-                    int(row.get("rpm", 0)),
-                    int(row.get("gear", 0)),
-                    round(throttle_pct, 0),
-                    round(brake_pct, 0),
-                    int(row.get("drs", 0)),
-                    round(row.get("steer_angle", 0), 1),
-                    round(row.get("tyre_temp_fl", 0), 1),
-                    round(row.get("tyre_temp_fr", 0), 1),
-                    round(row.get("tyre_temp_rl", 0), 1),
-                    round(row.get("tyre_temp_rr", 0), 1),
-                    round(row.get("tyre_pressure_fl", 0), 1),
-                    round(row.get("tyre_pressure_fr", 0), 1),
-                    round(row.get("tyre_pressure_rl", 0), 1),
-                    round(row.get("tyre_pressure_rr", 0), 1),
-                    round(row.get("wheel_slip_fl", 0), 1),
-                    round(row.get("wheel_slip_fr", 0), 1),
-                    round(row.get("wheel_slip_rl", 0), 1),
-                    round(row.get("wheel_slip_rr", 0), 1),
-                    round(row.get("car_damage_front", 0), 0),
-                    round(row.get("car_damage_rear", 0), 0),
-                    round(row.get("car_damage_left", 0), 0),
-                    round(row.get("car_damage_right", 0), 0),
-                    round(row.get("car_damage_centre", 0), 0),
-                ])
+        car_data = self._build_lap_aggregate_rows(telemetry, max_rows=20)
 
         # --- session identity (so the model knows what it's analysing) ---
         session_context = {}
@@ -186,11 +161,111 @@ class RaceAnalysisAgent(BaseAgent):
             "laps": lap_times,
             "stints": stints,
             "pit_stops": pit_stops,
+            "car_data_mode": "lap_aggregate",
+            "telemetry_total_rows": len(telemetry),
             "car_data_cols": car_data_cols,
             "car_data": car_data,
         }
 
         return json.dumps(payload, separators=(",", ":"))
+
+    def _build_lap_aggregate_rows(self, telemetry: list[dict], max_rows: int = 20) -> list[list]:
+        """Build compact, representative lap-level telemetry rows."""
+        if not telemetry:
+            return []
+
+        by_lap: dict[int, list[dict]] = defaultdict(list)
+        for sample in telemetry:
+            lap = sample.get("lap_number")
+            if lap is None:
+                continue
+            try:
+                by_lap[int(lap)].append(sample)
+            except Exception:
+                continue
+
+        if not by_lap:
+            return []
+
+        lap_numbers = sorted(by_lap.keys())
+        selected_laps = self._select_evenly_spaced(lap_numbers, max_rows)
+
+        rows: list[list] = []
+        for lap in selected_laps:
+            samples = by_lap.get(lap, [])
+            if not samples:
+                continue
+            rows.append(self._aggregate_lap_row(lap, samples))
+
+        return rows
+
+    @staticmethod
+    def _select_evenly_spaced(items: list[int], max_items: int) -> list[int]:
+        """Return up to max_items values spread across the full list."""
+        if len(items) <= max_items:
+            return items
+
+        last = len(items) - 1
+        idxs = {round(i * last / (max_items - 1)) for i in range(max_items)}
+        return [items[i] for i in sorted(idxs)]
+
+    @staticmethod
+    def _avg(values: list[float]) -> float:
+        return sum(values) / len(values) if values else 0.0
+
+    def _aggregate_lap_row(self, lap: int, samples: list[dict]) -> list:
+        """Compute stable per-lap metrics from raw sample points."""
+        elapsed = [float(s.get("elapsed_time", 0) or 0) for s in samples]
+        speeds = [float(s.get("speed", 0) or 0) for s in samples]
+        steer = [float(s.get("steer_angle", 0) or 0) for s in samples]
+
+        throttle_pct = []
+        brake_pct = []
+        for s in samples:
+            thr = float(s.get("throttle", 0) or 0)
+            brk = float(s.get("brake", 0) or 0)
+            throttle_pct.append(thr * 100.0 if thr <= 1.0 else thr)
+            brake_pct.append(brk * 100.0 if brk <= 1.0 else brk)
+
+        tyre_temp_vals = []
+        tyre_pressure_vals = []
+        for s in samples:
+            for key in ("tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr"):
+                val = s.get(key)
+                if val is not None:
+                    tyre_temp_vals.append(float(val))
+            for key in ("tyre_pressure_fl", "tyre_pressure_fr", "tyre_pressure_rl", "tyre_pressure_rr"):
+                val = s.get(key)
+                if val is not None:
+                    tyre_pressure_vals.append(float(val))
+
+        damage_sums = []
+        for s in samples:
+            damage_total = 0.0
+            for key in (
+                "car_damage_front",
+                "car_damage_rear",
+                "car_damage_left",
+                "car_damage_right",
+                "car_damage_centre",
+            ):
+                damage_total += float(s.get(key, 0) or 0)
+            damage_sums.append(damage_total)
+
+        return [
+            int(lap),
+            len(samples),
+            round(min(elapsed), 1) if elapsed else 0.0,
+            round(max(elapsed), 1) if elapsed else 0.0,
+            round(self._avg(speeds), 1),
+            round(max(speeds), 1) if speeds else 0.0,
+            round(self._avg(throttle_pct), 1),
+            round(self._avg(brake_pct), 1),
+            round(self._avg(steer), 3),
+            round(self._avg(tyre_temp_vals), 1),
+            round(self._avg(tyre_pressure_vals), 2),
+            round(max(damage_sums), 1) if damage_sums else 0.0,
+        ]
 
     def _parse_response(self, result: dict) -> dict:
         return {
