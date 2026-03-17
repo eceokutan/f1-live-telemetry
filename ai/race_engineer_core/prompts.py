@@ -108,7 +108,10 @@ Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-
 
 REACTIVE_PROMPT_MINIMAL = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""F1 engineer radio. Driver asks: "{query}". Data: {session_context}. Under 10 words.
+    template="""F1 engineer radio. Driver asks: "{query}".
+Use only the provided data. Do not invent exact numbers.
+If key data is missing, give a brief estimate and say it is an estimate.
+Data: {session_context}. Under 10 words.
 
 Answer:"""
 )
@@ -116,6 +119,9 @@ Answer:"""
 REACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
     template="""F1 race engineer on radio. Answer the driver's question in one short sentence using the data below.
+Ground every claim in the provided data.
+Do not invent exact values (laps, fuel, gaps, positions, temperatures, wear).
+If key data is missing, give your best estimate and explicitly label it as an estimate.
 
 Question: "{query}"
 
@@ -143,8 +149,11 @@ Provide a comprehensive response that:
 1. Directly answers the question
 2. Includes relevant supporting data
 3. Offers any strategic insights if applicable
+4. Uses only provided data; if something is missing, state an estimate clearly
 Keep it under 4 sentences for clarity during racing.
-Reply ONLY as the engineer speaking directly to the driver. Do NOT include any notes, asterisks, explanations, or meta-commentary about your response."""
+Reply ONLY as the engineer speaking directly to the driver.
+Do NOT include notes, asterisks, or meta-commentary.
+Do NOT fabricate exact numeric facts."""
 )
 
 

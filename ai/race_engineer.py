@@ -141,7 +141,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
         # Live mode targets short radio replies with low latency.
         # Low-latency default for live radio replies (one short sentence).
         live_max_tokens = int(os.getenv("LIVE_LLM_MAX_TOKENS", "24"))
-        live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.3"))
+        # Lower default temperature to reduce speculative/hallucinated claims.
+        live_temperature = float(os.getenv("LIVE_LLM_TEMPERATURE", "0.15"))
         local_max_time_seconds = float(os.getenv("LOCAL_LLM_MAX_TIME_SECONDS", "5.0"))
         # Support new env var with fallback to old one for backwards compat
         local_model_path = os.getenv(
@@ -318,6 +319,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             # Clean LLM response (strip meta-commentary, references, prompt leakage)
             response = self._clean_llm_response(response)
+            # Guardrail: if model introduces numeric claims not present in
+            # current query/context, keep the advice but mark it as an estimate.
+            response = self._label_estimate_if_ungrounded_numbers(response, query)
 
             # Check for empty response and provide fallback
             if not response or not response.strip():
@@ -638,6 +642,68 @@ class AIRaceEngineerWorker(QtCore.QThread):
             first_sentence = re.split(r'(?<=[.!?])\s', response, maxsplit=1)
             if first_sentence:
                 response = first_sentence[0]
+
+        return response
+
+    @staticmethod
+    def _extract_numeric_values(text: str) -> list[float]:
+        """Extract numeric values from text for grounding checks."""
+        if not text:
+            return []
+
+        values = []
+        for token in re.findall(r"\d+(?:\.\d+)?", text):
+            try:
+                values.append(float(token))
+            except ValueError:
+                continue
+        return values
+
+    @staticmethod
+    def _is_estimate_labeled(text: str) -> bool:
+        """Return True when the response already signals uncertainty."""
+        if not text:
+            return False
+
+        lowered = text.lower()
+        markers = (
+            "estimate",
+            "estimated",
+            "roughly",
+            "about",
+            "around",
+            "approximately",
+            "likely",
+            "probably",
+            "maybe",
+        )
+        return any(marker in lowered for marker in markers)
+
+    def _label_estimate_if_ungrounded_numbers(self, response: str, query: str) -> str:
+        """
+        Mark responses as estimates when they contain numeric claims that are
+        not present in the current query/context snapshot.
+        """
+        if not response or not self.context or self._is_estimate_labeled(response):
+            return response
+
+        response_nums = self._extract_numeric_values(response)
+        if not response_nums:
+            return response
+
+        source_text = f"{query}\n{self.context.to_prompt_context()}"
+        source_nums = self._extract_numeric_values(source_text)
+        if not source_nums:
+            return f"Estimate based on current data: {response}"
+
+        tolerance = 0.6  # allow small rounding differences
+        for val in response_nums:
+            if min(abs(val - src) for src in source_nums) > tolerance:
+                logger.warning(
+                    "Out-of-context numeric claim in response (%.3f); labeling as estimate",
+                    val,
+                )
+                return f"Estimate based on current data: {response}"
 
         return response
 

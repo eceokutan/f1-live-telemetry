@@ -165,7 +165,9 @@ class LocalLLMInference:
         """
         system_msg = (
             "You are an expert F1 race engineer communicating with your "
-            "driver over team radio. Reply in one short sentence."
+            "driver over team radio. Ground every claim in provided telemetry. "
+            "Never invent exact numbers. If key data is missing, give a brief "
+            "estimate and clearly say it is an estimate. Reply in one short sentence."
         )
         return (
             f"<|start_of_role|>system<|end_of_role|>{system_msg}<|end_of_text|>"
