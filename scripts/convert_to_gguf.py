@@ -19,7 +19,7 @@ Usage:
     python scripts/convert_to_gguf.py --llama-cpp-path /path/to/llama.cpp \
         --adapter-path granite_f1_finetuned_postrace \
         --output-dir postrace_gguf \
-        --quantization Q5_K_M \
+        --quantization Q4_K_M \
         --model-name granite-postrace-analyst
 """
 

@@ -12,7 +12,7 @@ class RaceAnalysisAgent(BaseAgent):
     def __init__(self, llm_client):
         self.llm = llm_client
         self.max_tokens = 2000
-        self.temperature = 0.4
+        self.temperature = 0.3
 
     async def analyse(self, session_data: dict) -> dict:
         """Analyse session data and return technical breakdown.
@@ -170,7 +170,17 @@ class RaceAnalysisAgent(BaseAgent):
                     round(row.get("car_damage_centre", 0), 0),
                 ])
 
+        # --- session identity (so the model knows what it's analysing) ---
+        session_context = {}
+        if metadata.get("track"):
+            session_context["track"] = metadata["track"]
+        if metadata.get("car"):
+            session_context["car"] = metadata["car"]
+        if metadata.get("player_name"):
+            session_context["driver"] = metadata["player_name"]
+
         payload = {
+            "session": session_context,
             "result": result,
             "lap_summary": lap_summary,
             "laps": lap_times,

@@ -21,7 +21,7 @@ class StreamComplete:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL_PATH = "postrace_gguf/granite-postrace-analyst-Q5_K_M.gguf"
+_DEFAULT_MODEL_PATH = "postrace_gguf/granite-postrace-analyst-Q4_K_M.gguf"
 
 
 class LocalGGUFClient:
