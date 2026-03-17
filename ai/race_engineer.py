@@ -50,6 +50,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
     """
 
     ai_commentary = QtCore.pyqtSignal(str, str, int)  # message, trigger, priority
+    ai_sentence_ready = QtCore.pyqtSignal(str, bool)  # sentence_text, is_final
     driver_query_received = QtCore.pyqtSignal(str)  # driver query text (for UI display)
     status_update = QtCore.pyqtSignal(str)
 
@@ -303,20 +304,34 @@ class AIRaceEngineerWorker(QtCore.QThread):
             logger.info(f"Processing driver query: {query}")
             self.status_update.emit(f"Processing: \"{query}\"")
 
-            # Generate AI response using reactive mode
+            # Streaming clause callback: clean each clause and emit to TTS.
+            # Accumulate the cleaned clauses so the UI transcript matches.
+            spoken_clauses = []
+
+            def on_clause(clause: str):
+                if not clause or not clause.strip():
+                    return
+                cleaned = self._clean_llm_response(clause.strip())
+                if cleaned:
+                    spoken_clauses.append(cleaned)
+                    self.ai_sentence_ready.emit(cleaned, False)
+
+            # Generate AI response using streaming reactive mode
             try:
-                # Keep a guard timeout, but allow enough headroom for CPU-only GGUF inference.
                 query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "20.0"))
                 response = await asyncio.wait_for(
-                    self.race_engineer_agent.generate_reactive_response(
+                    self.race_engineer_agent.generate_reactive_response_streaming(
                         query=query,
-                        context=self.context
+                        context=self.context,
+                        on_clause=on_clause,
                     ),
                     timeout=query_timeout_seconds,
                 )
                 logger.debug(f"LLM response received: {response[:100]}...")
             except asyncio.TimeoutError:
                 logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
+                # Signal end of stream so TTS doesn't hang
+                self.ai_sentence_ready.emit("", True)
                 fallback = self._build_timeout_fallback_response(query)
                 self.ai_commentary.emit(
                     fallback,
@@ -326,10 +341,19 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 return
             except Exception as llm_error:
                 logger.error(f"LLM error: {llm_error}", exc_info=True)
+                # Signal end of stream so TTS doesn't hang
+                self.ai_sentence_ready.emit("", True)
                 raise
 
-            # Clean LLM response (strip meta-commentary, references, prompt leakage)
-            response = self._clean_llm_response(response)
+            # Signal end of streaming sentences
+            self.ai_sentence_ready.emit("", True)
+
+            # Build UI transcript from the same clauses TTS spoke
+            if spoken_clauses:
+                response = " ".join(spoken_clauses)
+            else:
+                response = self._clean_llm_response(response)
+
             # Guardrail: if model introduces numeric claims not present in
             # current query/context, keep the advice but mark it as an estimate.
             response = self._label_estimate_if_ungrounded_numbers(response, query)

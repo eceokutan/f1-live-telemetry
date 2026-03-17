@@ -424,10 +424,26 @@ def run_jarvis_live(settings: dict):
                 )
 
             def on_ai_commentary_for_tts(msg, trigger, priority):
+                # Skip driver_query triggers - handled by streaming path
+                if trigger == "driver_query":
+                    return
                 _speak_with_retry(msg)
+
+            def on_ai_sentence_for_tts(sentence, is_final):
+                """Handle streaming LLM sentences for TTS."""
+                worker = tts_runtime["worker"]
+                if not worker or not worker.isRunning():
+                    if not _ensure_tts_worker_running("streaming-restart"):
+                        return
+                    worker = tts_runtime["worker"]
+                if is_final:
+                    worker.signal_stream_end()
+                elif sentence and sentence.strip():
+                    worker.speak_sentence(sentence)
 
             if ai_thread:
                 ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
+                ai_thread.ai_sentence_ready.connect(on_ai_sentence_for_tts)
 
             if _ensure_tts_worker_running("initialization"):
                 tts_thread = tts_runtime["worker"]

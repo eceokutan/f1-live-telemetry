@@ -18,7 +18,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from ai.race_engineer_core.context import LiveSessionContext
 from ai.race_engineer_core.events import Event
@@ -202,6 +202,64 @@ class RaceEngineerAgent:
         except Exception as e:
             logger.error(f"Error generating reactive response: {e}")
             raise LLMError(f"Failed to generate reactive response: {e}") from e
+
+    async def generate_reactive_response_streaming(
+        self,
+        query: str,
+        context: LiveSessionContext,
+        on_clause: Callable[[str], None],
+    ) -> str:
+        """
+        Generate reactive response with streaming clause dispatch.
+
+        Same prompt construction as generate_reactive_response(), but
+        uses invoke_streaming() so that on_clause is called as each
+        speakable clause is detected during LLM generation.
+
+        Args:
+            query: Driver's question or command
+            context: Current session context
+            on_clause: Callback invoked with each speakable clause
+
+        Returns:
+            Full generated response text
+
+        Raises:
+            LLMError: If LLM invocation fails
+        """
+        start_time = time.time()
+
+        session_context_str = context.to_prompt_context()
+        conversation_str = format_conversation_history(
+            list(context.conversation_history)
+        )
+
+        prompt = self.reactive_prompt.format(
+            query=query,
+            session_context=session_context_str,
+            conversation_history=conversation_str,
+        )
+
+        logger.debug(f"Reactive streaming prompt for query: {len(prompt)} chars")
+
+        try:
+            response = await self.llm_client.invoke_streaming(prompt, on_clause)
+
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(f"Reactive streaming response generated in {elapsed_ms:.0f}ms")
+
+            context.add_exchange(query, response)
+
+            return response
+
+        except LLMError:
+            raise
+        except asyncio.TimeoutError:
+            logger.error("Timeout during reactive streaming response generation")
+            raise
+        except Exception as e:
+            logger.error(f"Error generating reactive streaming response: {e}")
+            raise LLMError(f"Failed to generate reactive streaming response: {e}") from e
 
     def _format_event_data(self, data: Dict[str, Any]) -> str:
         """

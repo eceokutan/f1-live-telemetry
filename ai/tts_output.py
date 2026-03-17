@@ -260,6 +260,7 @@ class TTSOutputWorker(QtCore.QThread):
         # State
         self._running = False
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._streaming_playback_active = False
 
         # Message queue (initialized in run() after event loop is created)
         self.message_queue: Optional[asyncio.Queue] = None
@@ -353,6 +354,23 @@ class TTSOutputWorker(QtCore.QThread):
                     timeout=1.0
                 )
 
+                # Handle streaming sentence tuples
+                if isinstance(message, tuple):
+                    msg_type = message[0]
+                    if msg_type == "sentence":
+                        sentence_text = message[1]
+                        if sentence_text and sentence_text.strip():
+                            if not self._streaming_playback_active:
+                                self._streaming_playback_active = True
+                                self.playback_started.emit()
+                            await self._speak_single_sentence(sentence_text)
+                    elif msg_type == "end_of_stream":
+                        if self._streaming_playback_active:
+                            self._streaming_playback_active = False
+                            self.playback_finished.emit()
+                    continue
+
+                # Legacy string path (proactive commentary, pipelined/batch)
                 logger.info(f"Synthesizing TTS for: {message[:50]}...")
 
                 # Use pipelined or batch mode.
@@ -500,6 +518,59 @@ class TTSOutputWorker(QtCore.QThread):
         except RuntimeError as e:
             # Can happen during shutdown races; do not crash caller thread.
             logger.warning("[TTS] Failed to queue message during shutdown: %s", e)
+
+    def speak_sentence(self, sentence: str):
+        """
+        Queue a pre-split sentence for immediate synthesis+playback.
+
+        Used by the streaming LLM-to-TTS path. Each sentence is dispatched
+        directly for synthesis without re-splitting.
+
+        Args:
+            sentence: A single sentence to speak
+        """
+        loop = self._event_loop
+        text_ok = bool(sentence and sentence.strip())
+        loop_running = bool(loop and loop.is_running() and not loop.is_closed())
+        queue_ready = self.message_queue is not None
+        thread_running = self._running and self.isRunning()
+
+        if not (thread_running and loop_running and queue_ready and text_ok):
+            logger.warning("[TTS] Streaming sentence NOT queued - worker not ready")
+            return
+
+        logger.info("[TTS] Queueing streaming sentence: %s", sentence[:50])
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.message_queue.put(("sentence", sentence)),
+                loop,
+            )
+        except RuntimeError as e:
+            logger.warning("[TTS] Failed to queue streaming sentence: %s", e)
+
+    def signal_stream_end(self):
+        """
+        Signal that no more streaming sentences are coming.
+
+        Causes the TTS worker to emit playback_finished if a streaming
+        playback session was active.
+        """
+        loop = self._event_loop
+        loop_running = bool(loop and loop.is_running() and not loop.is_closed())
+        queue_ready = self.message_queue is not None
+        thread_running = self._running and self.isRunning()
+
+        if not (thread_running and loop_running and queue_ready):
+            return
+
+        logger.info("[TTS] Signalling end of stream")
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.message_queue.put(("end_of_stream", None)),
+                loop,
+            )
+        except RuntimeError as e:
+            logger.warning("[TTS] Failed to signal stream end: %s", e)
 
     def _cleanup(self):
         """Clean up audio resources."""

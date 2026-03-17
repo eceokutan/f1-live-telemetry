@@ -239,6 +239,47 @@ class LocalLLMInference:
         except Exception as e:
             logger.warning("Local LLM generation warmup failed: %s", e)
 
+    def generate_stream(self, prompt: str):
+        """
+        Yield token chunks as they are generated.
+
+        Same prompt formatting, tokenization, truncation, and generation
+        params as generate(), but with stream=True so tokens arrive
+        incrementally.
+
+        Yields:
+            str: Token text chunks as they are produced.
+        """
+        if not self._loaded:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        try:
+            formatted_prompt = self._format_with_chat_template(prompt)
+
+            tokens = self._model.tokenize(formatted_prompt.encode())
+            if len(tokens) > self.max_prompt_tokens:
+                tokens = tokens[:self.max_prompt_tokens]
+                formatted_prompt = self._model.detokenize(tokens).decode(errors="replace")
+
+            logger.debug("Streaming formatted prompt (first 200 chars): %s", formatted_prompt[:200])
+
+            for chunk in self._model.create_completion(
+                formatted_prompt,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                top_k=50,
+                top_p=0.95,
+                stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
+                stream=True,
+            ):
+                text = chunk["choices"][0]["text"]
+                if text:
+                    yield text
+
+        except Exception as e:
+            logger.error(f"Streaming generation failed: {e}")
+            raise RuntimeError(f"Streaming generation failed: {e}") from e
+
     def __call__(self, prompt: str) -> str:
         """Allow calling the inference object directly."""
         return self.generate(prompt)
