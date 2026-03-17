@@ -56,6 +56,10 @@ class TelemetryAgent:
         thresholds: Configuration for event trigger thresholds
     """
 
+    # Cooldown periods (seconds) to avoid spamming the driver
+    FUEL_CRITICAL_COOLDOWN = 45.0
+    FUEL_WARNING_COOLDOWN = 60.0
+
     def __init__(self, thresholds: Optional[ThresholdsConfig] = None):
         """
         Initialize TelemetryAgent.
@@ -64,6 +68,8 @@ class TelemetryAgent:
             thresholds: Threshold configuration. Uses defaults if not provided.
         """
         self.thresholds = thresholds or ThresholdsConfig()
+        self._last_fuel_critical_time: float = 0.0
+        self._last_fuel_warning_time: float = 0.0
 
     def detect_events(
         self,
@@ -137,13 +143,18 @@ class TelemetryAgent:
             return events
 
         fuel_laps_remaining = telemetry.fuel / context.fuel_consumption_per_lap
+        now = time.time()
 
-        # Check critical first (takes precedence)
+        # Check critical first (takes precedence) — cooldown ~45s
         if fuel_laps_remaining <= self.thresholds.fuel_critical_laps:
-            events.append(create_fuel_critical_event(fuel_laps_remaining))
-        # Only check warning if not critical
+            if now - self._last_fuel_critical_time >= self.FUEL_CRITICAL_COOLDOWN:
+                events.append(create_fuel_critical_event(fuel_laps_remaining))
+                self._last_fuel_critical_time = now
+        # Only check warning if not critical — cooldown ~60s
         elif fuel_laps_remaining <= self.thresholds.fuel_warning_laps:
-            events.append(create_fuel_warning_event(fuel_laps_remaining))
+            if now - self._last_fuel_warning_time >= self.FUEL_WARNING_COOLDOWN:
+                events.append(create_fuel_warning_event(fuel_laps_remaining))
+                self._last_fuel_warning_time = now
 
         return events
 
@@ -282,8 +293,12 @@ class TelemetryAgent:
         if (telemetry.lap_number is not None and
             context.current_lap is not None and
             telemetry.lap_number > context.current_lap):
-            # Compute lap time from timestamps (current t minus lap start t)
-            lap_time = telemetry.t - context._lap_start_time if context._lap_start_time > 0 else 0.0
+            # Prefer the game's authoritative lap time (lastTimeMs) over
+            # computed timestamps which are imprecise due to telemetry throttling.
+            if telemetry.last_time_ms and telemetry.last_time_ms > 0:
+                lap_time = telemetry.last_time_ms / 1000.0
+            else:
+                lap_time = telemetry.t - context._lap_start_time if context._lap_start_time > 0 else 0.0
             # AC uses 0-indexed lap IDs; display as 1-indexed for the driver
             display_lap = context.current_lap + 1
             events.append(create_lap_complete_event(

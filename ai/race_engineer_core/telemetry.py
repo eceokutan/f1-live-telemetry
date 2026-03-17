@@ -207,3 +207,6 @@ class TelemetryData(BaseModel):
 
     # Car damage (AC: 5 zones — front, rear, left, right, centre; 0.0 = no damage)
     car_damage: Optional[Dict[str, float]] = Field(default=None, description="Car damage per zone (0.0=none)")
+
+    # Authoritative lap time from the game (AC: gfx.lastTimeMs in milliseconds)
+    last_time_ms: Optional[int] = Field(default=None, description="Last completed lap time in milliseconds (from game)")

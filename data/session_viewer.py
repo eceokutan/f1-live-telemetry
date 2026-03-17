@@ -48,8 +48,7 @@ class SessionViewer:
                 track_name,
                 car_model,
                 total_laps,
-                best_lap_time,
-                ai_enabled
+                best_lap_time
             FROM sessions
             ORDER BY start_time DESC
         """)
@@ -72,13 +71,12 @@ class SessionViewer:
             car = row["car_model"] or "Unknown Car"
             laps = row["total_laps"]
             best_lap = row["best_lap_time"]
-            ai = "Yes" if row["ai_enabled"] else "No"
 
             best_lap_str = f"{best_lap:.3f}s" if best_lap else "N/A"
 
             print(f"\nSession {session_id}: {start_time}")
             print(f"  Game: {game} | Track: {track} | Car: {car}")
-            print(f"  Laps: {laps} | Best Lap: {best_lap_str} | AI: {ai}")
+            print(f"  Laps: {laps} | Best Lap: {best_lap_str}")
 
         print("\n" + "="*100 + "\n")
 
@@ -104,7 +102,6 @@ class SessionViewer:
                 total_laps,
                 best_lap_time,
                 total_distance,
-                ai_enabled,
                 notes
             FROM sessions
             WHERE session_id = ?
@@ -129,7 +126,6 @@ class SessionViewer:
         print(f"\nTotal Laps: {session['total_laps']}")
         print(f"Best Lap Time: {session['best_lap_time']:.3f}s" if session['best_lap_time'] else "N/A")
         print(f"Total Distance: {session['total_distance']:.2f}m" if session['total_distance'] else "N/A")
-        print(f"AI Race Engineer: {'Yes' if session['ai_enabled'] else 'No'}")
 
         # Count telemetry samples
         cursor.execute("SELECT COUNT(*) as count FROM telemetry WHERE session_id = ?", (session_id,))

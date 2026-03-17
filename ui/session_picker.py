@@ -74,9 +74,9 @@ class SessionPickerDialog(QtWidgets.QDialog):
 
         # Session table
         self.table = QtWidgets.QTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Name", "Date", "Track", "Car", "Mode", "Duration", "Laps", "Best Lap", "AI"
+            "ID", "Name", "Date", "Track", "Car", "Mode", "Duration", "Laps", "Best Lap"
         ])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -254,12 +254,6 @@ class SessionPickerDialog(QtWidgets.QDialog):
             best_item = QtWidgets.QTableWidgetItem(best_str)
             best_item.setTextAlignment(QtCore.Qt.AlignCenter)
             self.table.setItem(row_idx, 8, best_item)
-
-            # AI
-            ai_str = "Yes" if session["ai_enabled"] else "No"
-            ai_item = QtWidgets.QTableWidgetItem(ai_str)
-            ai_item.setTextAlignment(QtCore.Qt.AlignCenter)
-            self.table.setItem(row_idx, 9, ai_item)
 
     def _on_selection_changed(self):
         selected = self.table.selectedItems()

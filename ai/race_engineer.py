@@ -299,6 +299,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     "We're not on track right now. Get out there and I'll have your data ready.",
                     "driver_query", 2
                 )
+                self.status_update.emit("AI Race Engineer ready")
                 return
 
             logger.info(f"Processing driver query: {query}")
@@ -338,6 +339,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     "driver_query_timeout",
                     1
                 )
+                self.status_update.emit("AI Race Engineer ready")
                 return
             except Exception as llm_error:
                 logger.error(f"LLM error: {llm_error}", exc_info=True)
@@ -366,6 +368,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             # Emit as AI commentary with special trigger
             self.ai_commentary.emit(response, "driver_query", 2)  # MEDIUM priority
             logger.info(f"AI response to query: {response[:50]}...")
+            self.status_update.emit("AI Race Engineer ready")
 
         except asyncio.TimeoutError:
             # No query, that's ok
@@ -377,6 +380,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 "driver_query_error",
                 1  # HIGH priority for errors
             )
+            self.status_update.emit("AI Race Engineer ready")
 
     def _dict_to_telemetry(self, data: Dict[str, Any]) -> TelemetryData:
         """
@@ -506,6 +510,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             gap_ahead=data.get("gap_ahead"),
             gap_behind=data.get("gap_behind"),
             opponents=opponents,
+            last_time_ms=data.get("last_time_ms"),
         )
 
     async def _handle_event(self, event: Event):
@@ -840,13 +845,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
             return "Tire wear is critical. Box this lap."
 
         if event_type in {"wheel_slip_critical", "wheel_slip_warning"}:
-            slip = data.get("slip")
             pos = _pos_label(data.get("position", ""))
-            if slip is not None:
-                if event_type == "wheel_slip_critical":
-                    return f"Critical wheel slip on {pos}, value {slip:.2f}. Smooth throttle now."
-                return f"Wheel slip rising on {pos}, value {slip:.2f}. Be progressive on throttle."
-            return "Wheel slip detected. Smooth your inputs."
+            if event_type == "wheel_slip_critical":
+                return f"Big slide on {pos}. Smooth throttle now."
+            return f"Wheel slip on {pos}. Be progressive on throttle."
 
         if event_type == "gap_change":
             direction = data.get("direction", "ahead")

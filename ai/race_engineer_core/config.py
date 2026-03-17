@@ -15,5 +15,5 @@ class ThresholdsConfig(BaseModel):
     fuel_warning_laps: int = Field(default=5)
     fuel_critical_laps: int = Field(default=2)
     gap_change_threshold: float = Field(default=1.0)
-    wheel_slip_warning: float = Field(default=5.0)
-    wheel_slip_critical: float = Field(default=10.0)
+    wheel_slip_warning: float = Field(default=50.0)
+    wheel_slip_critical: float = Field(default=100.0)

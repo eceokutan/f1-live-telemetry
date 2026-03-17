@@ -118,7 +118,8 @@ class LiveSessionContext:
     last_proactive_message_time: Optional[datetime] = None
 
     # Internal tracking for fuel consumption calculation
-    _lap_start_fuel: float = field(default=100.0, repr=False)
+    # Starts at -1 to indicate "not yet initialized from telemetry"
+    _lap_start_fuel: float = field(default=-1.0, repr=False)
 
     # Internal tracking for lap time calculation from telemetry timestamps
     _lap_start_time: float = field(default=0.0, repr=False)
@@ -138,7 +139,10 @@ class LiveSessionContext:
         self.brake = telemetry.brake
 
         # Resources
-        self.fuel_remaining = telemetry.fuel if telemetry.fuel is not None else 0.0  # AC uses 'fuel' not 'fuel_remaining'
+        self.fuel_remaining = telemetry.fuel if telemetry.fuel is not None else 0.0
+        # Initialize lap start fuel from first real telemetry reading
+        if self._lap_start_fuel < 0 and self.fuel_remaining > 0:
+            self._lap_start_fuel = self.fuel_remaining
         self.tire_temps = {
             "fl": telemetry.tire_temps.fl,
             "fr": telemetry.tire_temps.fr,
@@ -196,9 +200,14 @@ class LiveSessionContext:
 
         # Lap and sector (keep current values if None in AC)
         if telemetry.lap_number is not None:
-            # Detect lap transition and record lap time from timestamps
+            # Detect lap transition and record lap time
             if telemetry.lap_number > self.current_lap and self.current_lap > 0:
-                lap_time = telemetry.t - self._lap_start_time
+                # Prefer the game's authoritative lap time (lastTimeMs) over
+                # computed timestamps which are imprecise due to telemetry throttling.
+                if telemetry.last_time_ms and telemetry.last_time_ms > 0:
+                    lap_time = telemetry.last_time_ms / 1000.0
+                else:
+                    lap_time = telemetry.t - self._lap_start_time
                 if lap_time > 0:
                     self.record_lap_time(lap_time)
             # Reset lap start time on any lap change (including first lap)
@@ -258,10 +267,11 @@ class LiveSessionContext:
         if self.best_lap is None or lap_time < self.best_lap:
             self.best_lap = lap_time
 
-        # Calculate fuel consumption
+        # Calculate fuel consumption (only if we have a valid start reading)
         if self._lap_start_fuel > 0:
             fuel_used = self._lap_start_fuel - self.fuel_remaining
-            if fuel_used > 0:
+            # Sanity check: consumption should be reasonable (< 20L/lap for any car)
+            if 0 < fuel_used < 20:
                 self.fuel_consumption_per_lap = fuel_used
 
         # Reset lap start fuel for next lap

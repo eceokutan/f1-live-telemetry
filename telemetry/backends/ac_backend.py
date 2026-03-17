@@ -520,6 +520,7 @@ class AcTelemetryWorker(QtCore.QThread):
                         "car_damage_centre": phys.carDamage[4],
                         "tyres_out": phys.numberOfTyresOut,
                         "lap_valid": lap_valid,
+                        "last_time_ms": gfx.lastTimeMs,
                     }
 
                     lap_buffer.add_sample(
