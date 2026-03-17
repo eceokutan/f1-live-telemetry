@@ -12,6 +12,18 @@ from telemetry.lap_buffer import LapBuffer
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_ac_time_str(raw: str) -> str:
+    """Clean AC shared-memory time strings.
+
+    AC stores lap times as c_wchar[15]. Before a lap is completed the
+    buffer may contain uninitialised memory, which surfaces as random
+    Unicode (often CJK) characters.  Strip anything that isn't a digit,
+    colon, period, or minus sign.
+    """
+    cleaned = "".join(ch for ch in raw if ch in "0123456789:.-")
+    return cleaned
+
+
 # ===================== PHYSICS SHARED MEMORY =====================
 
 class SPageFilePhysics(ct.Structure):
@@ -349,7 +361,7 @@ class AcTelemetryWorker(QtCore.QThread):
                                 "position": gfx.position, "is_in_pit": gfx.isInPit,
                                 "ac_status": ac_status,
                                 "current_time": gfx.currentTime,
-                                "last_time": gfx.lastTime, "best_time": gfx.bestTime,
+                                "last_time": _sanitize_ac_time_str(gfx.lastTime), "best_time": _sanitize_ac_time_str(gfx.bestTime),
                                 "last_time_ms": gfx.lastTimeMs, "best_time_ms": gfx.bestTimeMs,
                                 "completed_laps": gfx.completedLaps,
                             })
@@ -538,8 +550,8 @@ class AcTelemetryWorker(QtCore.QThread):
                             "is_in_pit": gfx.isInPit,
                             "ac_status": gfx.status,
                             "current_time": gfx.currentTime,
-                            "last_time": gfx.lastTime,
-                            "best_time": gfx.bestTime,
+                            "last_time": _sanitize_ac_time_str(gfx.lastTime),
+                            "best_time": _sanitize_ac_time_str(gfx.bestTime),
                             "last_time_ms": gfx.lastTimeMs,
                             "best_time_ms": gfx.bestTimeMs,
                             "completed_laps": gfx.completedLaps,

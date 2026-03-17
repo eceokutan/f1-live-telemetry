@@ -68,8 +68,8 @@ class LauncherWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Jarvis Granite - Setup & Settings")
-        self.setMinimumSize(780, 640)
-        self.resize(820, 680)
+        self.setMinimumSize(520, 420)
+        self.resize(600, 520)
         self.setModal(True)
 
         self.config = load_config()
@@ -84,34 +84,35 @@ class LauncherWindow(QtWidgets.QDialog):
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+        layout.setContentsMargins(24, 20, 24, 20)
 
         # ---- Title ----
         title = QtWidgets.QLabel("SETUP & SETTINGS")
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setStyleSheet(f"""
             font-family: '{FONT_HEADING}';
-            font-size: 26px;
-            padding: 4px;
+            font-size: 24px;
+            padding: 2px;
             background-color: transparent;
         """)
         layout.addWidget(title)
 
-        # Keep content scrollable so action buttons are always reachable.
+        # Keep content scrollable so buttons are always reachable.
         content_scroll = QtWidgets.QScrollArea()
         content_scroll.setWidgetResizable(True)
         content_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
 
         content = QtWidgets.QWidget()
+        content.setObjectName("scrollContent")
         content_layout = QtWidgets.QVBoxLayout(content)
-        content_layout.setSpacing(10)
+        content_layout.setSpacing(12)
         content_layout.setContentsMargins(0, 0, 0, 0)
 
         # ---- About ----
         about_group = QtWidgets.QGroupBox("ABOUT")
         about_layout = QtWidgets.QVBoxLayout(about_group)
-        about_layout.setContentsMargins(12, 16, 12, 10)
+        about_layout.setContentsMargins(14, 20, 14, 12)
         about_text = QtWidgets.QLabel(
             "<b>F1 Jarvis Granite</b> is a real-time telemetry visualisation "
             "tool for Assetto Corsa. It displays live lap data, track maps, "
@@ -132,24 +133,13 @@ class LauncherWindow(QtWidgets.QDialog):
         )
         about_text.setOpenExternalLinks(True)
         about_text.setWordWrap(True)
-        about_text.setMinimumHeight(130)
-        about_text.setStyleSheet(f"""
-            color: {TEXT_COLOR};
-            font-family: '{FONT_BODY}';
-            font-size: 10pt;
-            background-color: transparent;
-        """)
         about_layout.addWidget(about_text)
         content_layout.addWidget(about_group)
-
-        # ---- Lower settings row ----
-        lower_row = QtWidgets.QHBoxLayout()
-        lower_row.setSpacing(10)
 
         # ---- Voice mode ----
         voice_group = QtWidgets.QGroupBox("VOICE INPUT")
         voice_layout = QtWidgets.QVBoxLayout(voice_group)
-        voice_layout.setContentsMargins(12, 16, 12, 10)
+        voice_layout.setContentsMargins(14, 20, 14, 12)
 
         self.voice_disabled_radio = QtWidgets.QRadioButton("Disabled")
         self.voice_ptt_radio = QtWidgets.QRadioButton("Push-to-Talk")
@@ -167,7 +157,7 @@ class LauncherWindow(QtWidgets.QDialog):
         # PTT keyboard selector
         self.ptt_key_widget = QtWidgets.QWidget()
         ptt_key_layout = QtWidgets.QVBoxLayout(self.ptt_key_widget)
-        ptt_key_layout.setContentsMargins(20, 4, 0, 0)
+        ptt_key_layout.setContentsMargins(24, 6, 0, 0)
         ptt_key_layout.setSpacing(4)
 
         ptt_key_row = QtWidgets.QHBoxLayout()
@@ -178,12 +168,9 @@ class LauncherWindow(QtWidgets.QDialog):
         ptt_key_layout.addLayout(ptt_key_row)
 
         self.ptt_key_hint_label = QtWidgets.QLabel(
-            "This picker changes keyboard PTT only. "
+            "This picker changes keyboard PTT only."
         )
         self.ptt_key_hint_label.setWordWrap(True)
-        self.ptt_key_hint_label.setStyleSheet(
-            f"color: {TEXT_COLOR}; font-size: 10pt;"
-        )
         ptt_key_layout.addWidget(self.ptt_key_hint_label)
         voice_layout.addWidget(self.ptt_key_widget)
 
@@ -191,32 +178,18 @@ class LauncherWindow(QtWidgets.QDialog):
         self.voice_ptt_radio.toggled.connect(self.ptt_key_widget.setVisible)
         self.ptt_key_widget.setVisible(False)
 
-        lower_row.addWidget(voice_group, 1)
-
-        content_layout.addLayout(lower_row)
+        content_layout.addWidget(voice_group)
         content_layout.addStretch()
         content_scroll.setWidget(content)
         layout.addWidget(content_scroll, 1)
 
-        # ---- Buttons ----
+        # ---- Buttons (always visible, outside scroll) ----
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addStretch()
 
         self.cancel_button = QtWidgets.QPushButton("Cancel")
         self.cancel_button.setFixedSize(140, 44)
-        self.cancel_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {BG_COLOR_LIGHT};
-                color: {TEXT_COLOR};
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 12pt;
-            }}
-            QPushButton:hover {{ background-color: #333333; }}
-            QPushButton:pressed {{ background-color: #2a2a2a; }}
-        """)
+        self.cancel_button.setObjectName("cancelBtn")
         self.cancel_button.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_button)
 
@@ -287,47 +260,74 @@ class LauncherWindow(QtWidgets.QDialog):
                 color: {TEXT_COLOR};
                 font-family: '{FONT_BODY}';
             }}
+            /* Ensure scroll area and its contents inherit dark background */
+            QScrollArea {{
+                background-color: {BG_COLOR};
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget#scrollContent {{
+                background-color: {BG_COLOR};
+            }}
+            QWidget {{
+                background-color: {BG_COLOR};
+            }}
             QGroupBox {{
                 background-color: {BG_COLOR};
                 border: 1px solid {BORDER_COLOR};
-                border-radius: 4px;
-                margin-top: 10px;
-                padding-top: 8px;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding: 18px 14px 14px 14px;
                 font-family: '{FONT_HEADING}';
-                font-size: 16pt;
+                font-size: 18pt;
                 color: {TEXT_COLOR};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 8px;
+                left: 10px;
                 top: 8px;
                 padding: 0 6px;
             }}
             QLabel {{
                 color: {TEXT_COLOR};
-                font-size: 11pt;
+                font-size: 13pt;
                 background-color: transparent;
             }}
             QCheckBox, QRadioButton {{
                 color: {TEXT_COLOR};
-                font-size: 11pt;
-                spacing: 8px;
+                font-size: 13pt;
+                spacing: 10px;
+                padding: 4px 0;
                 background-color: transparent;
+            }}
+            QCheckBox::indicator, QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
             }}
             QPushButton {{
                 background-color: {ACCENT_PRIMARY};
                 color: #FFFFFF;
                 border: none;
                 border-radius: 4px;
-                padding: 8px 16px;
+                padding: 10px 20px;
                 font-weight: bold;
-                font-size: 12pt;
+                font-size: 13pt;
             }}
             QPushButton:hover {{
                 background-color: #C00500;
             }}
             QPushButton:pressed {{
                 background-color: #A00400;
+            }}
+            QPushButton#cancelBtn {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+            }}
+            QPushButton#cancelBtn:hover {{
+                background-color: #333333;
+            }}
+            QPushButton#cancelBtn:pressed {{
+                background-color: #2a2a2a;
             }}
         """)
