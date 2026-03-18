@@ -51,6 +51,10 @@ data/exports/
 # Local test utilities
 list_audio_devices.py
 
+# PyInstaller build output
+dist/
+build/
+
 # Installers
 *.exe
 

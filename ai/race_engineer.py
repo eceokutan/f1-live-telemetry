@@ -179,6 +179,16 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 )
                 force_rule_based_fallback = True
 
+        # Pre-download post-race model too so it's ready when the user opens Jarvis Post
+        try:
+            from ai.model_downloader import ensure_postrace_model, is_model_available, POSTRACE_LOCAL_PATH
+            if not is_model_available(POSTRACE_LOCAL_PATH):
+                self.status_update.emit("Downloading Post-Race model (first run)...")
+                ensure_postrace_model()
+                logger.info("Post-race model downloaded")
+        except Exception as dl_err:
+            logger.warning("Post-race model download failed: %s (will retry on first use)", dl_err)
+
         llm_client = LLMClient(
             max_tokens=live_max_tokens,
             temperature=live_temperature,

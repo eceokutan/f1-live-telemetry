@@ -5,15 +5,13 @@ Usage:
     python scripts/build_exe.py
 
 Steps:
-    1. Converts SVG icon to ICO (if not already done)
-    2. Runs PyInstaller with jarvis.spec
-    3. Creates a zip archive for distribution
+    1. Runs PyInstaller with jarvis.spec
+    2. Creates a zip archive for distribution
 
-Requires: PyInstaller, Pillow, cairosvg
-    pip install pyinstaller Pillow cairosvg
+Requires: PyInstaller
+    pip install pyinstaller
 """
 
-import os
 import shutil
 import subprocess
 import sys
@@ -22,25 +20,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SPEC_FILE = PROJECT_ROOT / "jarvis.spec"
 DIST_DIR = PROJECT_ROOT / "dist"
-ICO_PATH = PROJECT_ROOT / "ui" / "img" / "jarvis.ico"
-
-
-def step_convert_icon():
-    """Convert SVG to ICO if needed."""
-    if ICO_PATH.exists():
-        print(f"[OK] Icon already exists: {ICO_PATH}")
-        return
-
-    print("[BUILD] Converting SVG icon to ICO...")
-    try:
-        subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "scripts" / "convert_icon.py")],
-            check=True,
-        )
-    except subprocess.CalledProcessError:
-        print("[WARN] Icon conversion failed - building without icon")
-    except Exception as e:
-        print(f"[WARN] Icon conversion failed: {e} - building without icon")
 
 
 def step_build():
@@ -76,7 +55,6 @@ def main():
     print("  Jarvis F1 Telemetry Suite - Build Script")
     print("=" * 60)
 
-    step_convert_icon()
     step_build()
     step_zip()
 
