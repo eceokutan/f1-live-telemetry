@@ -46,6 +46,30 @@ class UnifiedLauncher(QtWidgets.QDialog):
         layout.setSpacing(12)
         layout.setContentsMargins(40, 36, 40, 28)
 
+        header_row = QtWidgets.QHBoxLayout()
+        header_row.addStretch()
+
+        self.quit_btn = QtWidgets.QPushButton("Quit")
+        self.quit_btn.setFixedSize(72, 32)
+        self.quit_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.quit_btn.setToolTip("Exit Jarvis")
+        self.quit_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-family: '{FONT_BODY}';
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR_DIM};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 6px;
+                font-size: 10pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #252525; color: {TEXT_COLOR}; }}
+            QPushButton:pressed {{ background-color: #202020; }}
+        """)
+        self.quit_btn.clicked.connect(self._on_quit)
+        header_row.addWidget(self.quit_btn)
+        layout.addLayout(header_row)
+
         # Logo
         logo_path = os.path.join(os.path.dirname(__file__), "img", "f1_jarvis_topdown_massive_tyres.svg")
         logo = QtSvg.QSvgWidget(logo_path)
@@ -148,6 +172,10 @@ class UnifiedLauncher(QtWidgets.QDialog):
 
     def _on_settings(self):
         self._action = self.ACTION_SETTINGS
+        self.accept()
+
+    def _on_quit(self):
+        self._action = self.ACTION_QUIT
         self.accept()
 
     def get_action(self) -> str:
