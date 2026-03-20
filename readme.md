@@ -34,7 +34,6 @@ Review and analyse completed sessions:
 - **Configurable graph layout** — choose up to 6 graphs at once from: speed, RPM, gear, fuel, throttle & brake, tire temps, tire pressures, tire wear, wheel slip, suspension travel, g-forces, ride height, car damage, steering angle
 - **Track map replay** — car position marker moves along the speed-colored path in sync with the timeline
 - **AI coaching** — dual-model analysis (coach + analyst) powered by Hugging Face, with detailed per-lap feedback on driving and telemetry
-- **Export/import laps** — share individual laps as `.jlap` files
 - **Export/import sessions** — share full sessions as `.jsession` files
 - **Fullscreen mode** (F11)
 
@@ -44,7 +43,7 @@ Review and analyse completed sessions:
 - **Session browser** — view all sessions with track, car, player, duration, best lap, session type
 - **Rename sessions** for organisation
 - **Delete sessions** you no longer need
-- **Export sessions or Individual Laps** — raw telemetry, lap data, and AI commentary as CSV files
+- **Export sessions** — raw telemetry, lap data, and AI commentary as CSV files
 
 ---
 
@@ -159,7 +158,6 @@ jarvis-granite/
 
 | Format | Extension | Contents |
 |--------|-----------|----------|
-| Lap file | `.jlap` | Single lap telemetry + metadata (JSON) |
 | Session file | `.jsession` | Full session: all laps, telemetry, AI commentary (JSON) |
 | CSV export | `.csv` | Raw telemetry, lap summaries, AI commentary |
 | Database | `.db` | SQLite with all recorded sessions |

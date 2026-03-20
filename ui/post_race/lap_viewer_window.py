@@ -148,23 +148,13 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         file_menu.addSeparator()
 
-        import_action = QtWidgets.QAction("Import Lap...", self)
-        import_action.setShortcut("Ctrl+I")
-        import_action.triggered.connect(self.import_lap)
-        file_menu.addAction(import_action)
-
-        export_action = QtWidgets.QAction("Export Lap...", self)
-        export_action.setShortcut("Ctrl+E")
-        export_action.triggered.connect(self.export_lap)
-        file_menu.addAction(export_action)
-
-        file_menu.addSeparator()
-
         import_session_action = QtWidgets.QAction("Import Session...", self)
+        import_session_action.setShortcut("Ctrl+I")
         import_session_action.triggered.connect(self.import_session)
         file_menu.addAction(import_session_action)
 
         export_session_action = QtWidgets.QAction("Export Session...", self)
+        export_session_action.setShortcut("Ctrl+E")
         export_session_action.triggered.connect(self.export_session)
         file_menu.addAction(export_session_action)
 
@@ -1086,124 +1076,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline_widget.setVisible(is_lap_review)
         if not is_lap_review:
             self.timeline.pause()
-
-    def export_lap(self) -> None:
-        """Export the currently selected lap to a .jlap file for sharing."""
-        if not self.session or not self.current_lap:
-            QtWidgets.QMessageBox.warning(self, "Export", "No lap loaded to export.")
-            return
-
-        lap = self.current_lap
-        default_name = f"lap_{lap.lap_number}_{self.session.metadata.track_name}.jlap"
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export Lap", default_name,
-            "Jarvis Lap File (*.jlap);;All Files (*)"
-        )
-        if not file_path:
-            return
-
-        try:
-            export_data = {
-                "version": 1,
-                "metadata": {
-                    "track_name": self.session.metadata.track_name,
-                    "car_model": self.session.metadata.car_model,
-                    "player_name": self.session.metadata.player_name,
-                    "game": self.session.metadata.game,
-                },
-                "lap_number": lap.lap_number,
-                "lap_time": lap.lap_time,
-                "telemetry": lap.telemetry.to_dict(orient="list"),
-            }
-            if lap.summary:
-                export_data["summary"] = {
-                    "avg_speed": lap.summary.avg_speed,
-                    "max_speed": lap.summary.max_speed,
-                    "min_speed": lap.summary.min_speed,
-                    "fuel_start": lap.summary.fuel_start,
-                    "fuel_end": lap.summary.fuel_end,
-                    "valid": lap.summary.valid,
-                }
-
-            with open(file_path, 'w') as f:
-                json.dump(export_data, f)
-
-            self.status_bar.showMessage(f"Exported Lap {lap.lap_number} to {os.path.basename(file_path)}")
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Export Error", f"Failed to export lap:\n{str(e)}")
-
-    def import_lap(self) -> None:
-        """Import a .jlap file and load it for viewing."""
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Import Lap", "",
-            "Jarvis Lap File (*.jlap);;All Files (*)"
-        )
-        if not file_path:
-            return
-
-        try:
-            import pandas as pd
-            from data import Session, Lap, SessionMetadata, LapSummary
-
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-
-            telemetry_df = pd.DataFrame(data["telemetry"])
-
-            summary = None
-            if "summary" in data:
-                s = data["summary"]
-                summary = LapSummary(
-                    lap_number=data["lap_number"],
-                    lap_time=data["lap_time"],
-                    avg_speed=s.get("avg_speed", 0.0),
-                    max_speed=s.get("max_speed", 0.0),
-                    min_speed=s.get("min_speed", 0.0),
-                    fuel_start=s.get("fuel_start", 0.0),
-                    fuel_end=s.get("fuel_end", 0.0),
-                    valid=s.get("valid", True),
-                )
-
-            lap = Lap(
-                lap_number=data["lap_number"],
-                telemetry=telemetry_df,
-                summary=summary,
-            )
-
-            meta = data.get("metadata", {})
-            metadata = SessionMetadata(
-                session_id=0,
-                game=meta.get("game", "unknown"),
-                track_name=meta.get("track_name", "Unknown Track"),
-                car_model=meta.get("car_model", "Unknown Car"),
-                player_name=meta.get("player_name", "Unknown"),
-                start_time=None,
-                end_time=None,
-                total_laps=1,
-                ai_enabled=False,
-            )
-
-            self.session = Session(
-                metadata=metadata,
-                laps=[lap],
-                telemetry=telemetry_df,
-                ai_commentary=[],
-            )
-
-            self.lap_list.clear()
-            item = QtWidgets.QListWidgetItem(
-                f"Lap {lap.lap_number} - {lap.lap_time:.3f}s  ({meta.get('player_name', '?')})"
-            )
-            item.setData(QtCore.Qt.UserRole, lap.lap_number)
-            self.lap_list.addItem(item)
-
-            self.load_lap(lap.lap_number)
-            self.status_bar.showMessage(
-                f"Imported lap from {meta.get('player_name', '?')} - "
-                f"{meta.get('track_name', '?')} ({meta.get('car_model', '?')})"
-            )
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Import Error", f"Failed to import lap:\n{str(e)}")
 
     def export_session(self) -> None:
         """Export the full loaded session to a .jsession file."""
