@@ -55,8 +55,8 @@ class LocalGGUFClient:
         if env_n_threads:
             self._n_threads = max(1, int(env_n_threads))
         else:
-            # Default to "all logical CPUs minus 2" to keep some headroom for UI/OS.
-            self._n_threads = max(1, (os.cpu_count() or 2) - 2)
+            # Match live mode default: half of available logical CPUs.
+            self._n_threads = max(1, (os.cpu_count() or 2) // 2)
 
         logger.info(
             "Post-race GGUF threading configured: n_threads=%d (logical_cpus=%s, env_override=%s)",
