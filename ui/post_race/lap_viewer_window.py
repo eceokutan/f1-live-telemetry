@@ -386,6 +386,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.play_button.clicked.connect(self.timeline.toggle_play_pause)
         controls_row.addWidget(self.play_button)
 
+        controls_row.addSpacing(24)
         controls_row.addWidget(QtWidgets.QLabel("Speed:"))
         self.speed_combo = QtWidgets.QComboBox()
         self.speed_combo.addItems(["0.25x", "0.5x", "1x", "2x", "4x"])
@@ -393,15 +394,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.speed_combo.currentTextChanged.connect(self.on_speed_changed)
         controls_row.addWidget(self.speed_combo)
 
-        controls_row.addSpacing(20)
-        controls_row.addWidget(QtWidgets.QLabel("Zoom:"))
+        controls_row.addStretch()
+        controls_row.addWidget(QtWidgets.QLabel("Graphs X Zoom:"))
         self.zoom_combo = QtWidgets.QComboBox()
         self.zoom_combo.addItems(["15s", "30s", "45s", "60s", "Full Lap"])
         self.zoom_combo.setCurrentText("45s")
         self.zoom_combo.currentTextChanged.connect(self.on_zoom_changed)
         controls_row.addWidget(self.zoom_combo)
 
-        controls_row.addStretch()
         layout.addLayout(controls_row)
 
         self.timeline.playback_started.connect(lambda: self.play_button.setText("Pause"))
