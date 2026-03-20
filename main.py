@@ -208,7 +208,7 @@ def _start_background_model_prewarm(_settings: dict):
     threading.Thread(target=_worker, name="model-prewarm", daemon=True).start()
 
 
-def run_jarvis_live(settings: dict):
+def run_jarvis_live(settings: dict) -> bool:
     """
     Launch Jarvis Live - real-time telemetry dashboard.
 
@@ -651,9 +651,10 @@ def run_jarvis_live(settings: dict):
             logger.warning("Error stopping recorder thread: %s", e)
 
     logger.info("Jarvis Live shutdown complete")
+    return bool(getattr(window, "exit_application_requested", False))
 
 
-def run_jarvis_post(session_id: int):
+def run_jarvis_post(session_id: int) -> bool:
     """
     Launch Jarvis Post - post-race telemetry analysis.
 
@@ -676,7 +677,7 @@ def run_jarvis_post(session_id: int):
             None, "Export Error",
             f"Failed to export session {session_id}:\n{str(e)}"
         )
-        return
+        return False
 
     # Launch post-race viewer
     window = LapViewerWindow()
@@ -690,6 +691,7 @@ def run_jarvis_post(session_id: int):
     app.exec_()
 
     logger.info("Jarvis Post shutdown complete")
+    return bool(getattr(window, "exit_application_requested", False))
 
 
 if __name__ == "__main__":
@@ -721,7 +723,9 @@ if __name__ == "__main__":
             # Launch Jarvis Live with current settings
             logger.info("User chose: Start Jarvis Live")
             try:
-                run_jarvis_live(settings)
+                exit_requested = run_jarvis_live(settings)
+                if exit_requested:
+                    break
             except Exception as e:
                 logger.critical("Jarvis Live error: %s", e, exc_info=True)
             # After live window closes, loop back to launcher
@@ -736,7 +740,9 @@ if __name__ == "__main__":
                 session_id = picker.get_selected_session_id()
                 logger.info("Selected session: %d", session_id)
                 try:
-                    run_jarvis_post(session_id)
+                    exit_requested = run_jarvis_post(session_id)
+                    if exit_requested:
+                        break
                 except Exception as e:
                     logger.critical("Jarvis Post error: %s", e, exc_info=True)
             # After post window closes (or picker cancelled), loop back to launcher

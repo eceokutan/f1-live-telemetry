@@ -152,6 +152,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Jarvis Live - F1 Telemetry Dashboard")
         self.resize(1600, 900)
+        self.exit_application_requested = False
 
         # Real-time data buffers for current lap
         self.current_lap_samples = []
@@ -203,15 +204,28 @@ class MainWindow(QMainWindow):
 
         back_action = QtWidgets.QAction("Back to Launcher", self)
         back_action.setShortcut("Ctrl+W")
-        back_action.triggered.connect(self.close)
+        back_action.triggered.connect(self._back_to_launcher)
         file_menu.addAction(back_action)
 
         file_menu.addSeparator()
 
         exit_action = QtWidgets.QAction("Exit Application", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(QtWidgets.QApplication.quit)
+        exit_action.triggered.connect(self._exit_application)
         file_menu.addAction(exit_action)
+
+    def _back_to_launcher(self):
+        """Close live window and return to launcher loop."""
+        self.exit_application_requested = False
+        self.close()
+
+    def _exit_application(self):
+        """Close live window and request full app shutdown."""
+        self.exit_application_requested = True
+        self.close()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _build_left_column(self):
         """Build left column: track map + lap times table."""

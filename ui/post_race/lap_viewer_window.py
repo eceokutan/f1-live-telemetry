@@ -89,6 +89,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self._coach_input: Optional[QtWidgets.QLineEdit] = None
         self._coach_send_button: Optional[QtWidgets.QPushButton] = None
         self._current_stream_text: list[str] = []
+        self.exit_application_requested: bool = False
 
         # Build UI
         self.setWindowTitle("Jarvis Post - Post-Race Telemetry Analysis")
@@ -165,7 +166,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         exit_action = QtWidgets.QAction("Exit Application", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(QtWidgets.QApplication.quit)
+        exit_action.triggered.connect(self._exit_application)
         file_menu.addAction(exit_action)
 
         view_menu = menu_bar.addMenu("View")
@@ -458,6 +459,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _apply_dark_theme(self) -> None:
         self.setStyleSheet(DARK_STYLESHEET)
+
+    def _exit_application(self) -> None:
+        """Close this window and request full app shutdown."""
+        self.exit_application_requested = True
+        self.close()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.quit()
 
     # Slots
     def on_time_changed(self, time: float) -> None:
