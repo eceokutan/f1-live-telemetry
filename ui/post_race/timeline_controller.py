@@ -28,8 +28,11 @@ class TimelineController(QtCore.QObject):
         self._playback_speed: float = 1.0
 
         self._timer = QtCore.QTimer(self)
+        self._timer.setTimerType(QtCore.Qt.PreciseTimer)
         self._timer.timeout.connect(self._on_timer_tick)
         self._timer_interval = 16  # ~60 FPS
+        self._elapsed_timer = QtCore.QElapsedTimer()
+        self._last_tick_ms: int = 0
 
     def set_duration(self, duration: float) -> None:
         """Set total lap duration."""
@@ -48,6 +51,8 @@ class TimelineController(QtCore.QObject):
         """Start playback from current position."""
         if not self._is_playing:
             self._is_playing = True
+            self._elapsed_timer.start()
+            self._last_tick_ms = 0
             self._timer.start(self._timer_interval)
             self.playback_started.emit()
 
@@ -76,7 +81,16 @@ class TimelineController(QtCore.QObject):
 
     def _on_timer_tick(self) -> None:
         """Called on each timer tick during playback."""
-        delta = (self._timer_interval / 1000.0) * self._playback_speed
+        if not self._elapsed_timer.isValid():
+            self._elapsed_timer.start()
+            self._last_tick_ms = 0
+            return
+
+        elapsed_ms = self._elapsed_timer.elapsed()
+        delta_ms = max(0, elapsed_ms - self._last_tick_ms)
+        self._last_tick_ms = elapsed_ms
+
+        delta = (delta_ms / 1000.0) * self._playback_speed
         new_time = self._current_time + delta
 
         if new_time >= self._duration:
