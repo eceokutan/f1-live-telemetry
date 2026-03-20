@@ -11,7 +11,18 @@ from typing import Optional
 from data import Session, Lap
 from analysis import AIPipelineBridge
 from .timeline_controller import TimelineController
-from ui.styles import DARK_STYLESHEET, TIRE_COLORS, TIRE_LABELS, FONT_HEADING
+from ui.styles import (
+    ACCENT_PRIMARY,
+    BG_COLOR,
+    BG_COLOR_LIGHT,
+    BORDER_COLOR,
+    DARK_STYLESHEET,
+    FONT_HEADING,
+    TEXT_COLOR,
+    TEXT_COLOR_DIM,
+    TIRE_COLORS,
+    TIRE_LABELS,
+)
 from .canvases import TrackMapCanvas, TimeSeriesCanvas
 
 
@@ -206,7 +217,36 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline_widget = self._create_timeline_widget()
         main_layout.addWidget(self.timeline_widget)
 
+        self._style_main_tabs()
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
+
+    def _style_main_tabs(self) -> None:
+        """Make active tab state obvious for Lap Review vs Analysis."""
+        self.tab_widget.setStyleSheet(
+            f"""
+            QTabBar::tab {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR_DIM};
+                border: 1px solid {BORDER_COLOR};
+                border-bottom: 2px solid {BORDER_COLOR};
+                padding: 10px 22px;
+                margin-right: 4px;
+                font-size: 8pt;
+                font-weight: 600;
+            }}
+            QTabBar::tab:hover:!selected {{
+                color: {TEXT_COLOR};
+                border-bottom: 2px solid {TEXT_COLOR_DIM};
+            }}
+            QTabBar::tab:selected {{
+                background-color: {BG_COLOR};
+                color: {TEXT_COLOR};
+                border: 1px solid {ACCENT_PRIMARY};
+                border-bottom: 3px solid {ACCENT_PRIMARY};
+                font-weight: 700;
+            }}
+            """
+        )
 
     def _create_lap_review_tab(self) -> QtWidgets.QWidget:
         tab = QtWidgets.QWidget()
@@ -235,9 +275,10 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         header_row.addStretch()
         layout.addLayout(header_row)
 
-        self.analysis_source_label = QtWidgets.QLabel("Source: --")
-        self.analysis_source_label.setStyleSheet("font-size: 13pt; color: #888888;")
-        layout.addWidget(self.analysis_source_label)
+        # Analyst source section hidden per UI request.
+        # self.analysis_source_label = QtWidgets.QLabel("Source: --")
+        # self.analysis_source_label.setStyleSheet("font-size: 13pt; color: #888888;")
+        # layout.addWidget(self.analysis_source_label)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
 
