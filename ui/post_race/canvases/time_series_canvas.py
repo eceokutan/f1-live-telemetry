@@ -68,6 +68,7 @@ class TimeSeriesCanvas(FigureCanvas):
         self.ax.yaxis.label.set_color(TEXT_COLOR_DIM)
         self.ax.title.set_color("#FFFFFF")
 
+        self.timeline_marker = None
         self.line = self.ax.plot(times, values, color=color, linewidth=2)[0]
 
         self.ax.set_xlabel("Time [s]", fontsize=9)
@@ -98,6 +99,7 @@ class TimeSeriesCanvas(FigureCanvas):
         self.ax.yaxis.label.set_color(TEXT_COLOR_DIM)
         self.ax.title.set_color("#FFFFFF")
 
+        self.timeline_marker = None
         for values, label, color in zip(values_list, labels, colors):
             self.ax.plot(times, values, color=color, linewidth=2, label=label)
 
@@ -123,7 +125,10 @@ class TimeSeriesCanvas(FigureCanvas):
 
         # No sliding window — always show full lap
         if not self.window_duration:
-            self.ax.set_xlim(0, self.lap_duration)
+            x_min, x_max = self.ax.get_xlim()
+            target_min, target_max = 0.0, float(self.lap_duration)
+            if abs(x_min - target_min) > 1e-6 or abs(x_max - target_max) > 1e-6:
+                self.ax.set_xlim(target_min, target_max)
             return
 
         half_window = self.window_duration / 2.0
@@ -138,27 +143,26 @@ class TimeSeriesCanvas(FigureCanvas):
             x_max = self.lap_duration
             x_min = max(0, self.lap_duration - self.window_duration)
 
-        self.ax.set_xlim(x_min, x_max)
+        cur_min, cur_max = self.ax.get_xlim()
+        if abs(cur_min - x_min) > 1e-6 or abs(cur_max - x_max) > 1e-6:
+            self.ax.set_xlim(x_min, x_max)
 
     def update_timeline_marker(self, current_time: float):
         """Update vertical line marker and sliding window to current time."""
         if self.times is None:
             return
 
-        if self.timeline_marker is not None:
-            try:
-                self.timeline_marker.remove()
-            except:
-                pass
-
-        self.timeline_marker = self.ax.axvline(
-            current_time,
-            color=ACCENT_RED,
-            linewidth=2,
-            linestyle='--',
-            alpha=0.7,
-            zorder=10
-        )
+        if self.timeline_marker is None:
+            self.timeline_marker = self.ax.axvline(
+                current_time,
+                color=ACCENT_RED,
+                linewidth=2,
+                linestyle='--',
+                alpha=0.7,
+                zorder=10
+            )
+        else:
+            self.timeline_marker.set_xdata([current_time, current_time])
 
         self.update_sliding_window(current_time)
         self.draw_idle()

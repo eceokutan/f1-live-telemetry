@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import os
 import threading
+import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 from typing import Optional
 
@@ -59,6 +60,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Data
         self.session: Optional[Session] = None
         self.current_lap: Optional[Lap] = None
+        self._elapsed_times: Optional[np.ndarray] = None
+        self._telemetry_columns: dict[str, Optional[np.ndarray]] = {}
+        self._last_sample_index: int = -1
 
         # Canvases (created when lap is loaded)
         self.track_map: Optional[TrackMapCanvas] = None
@@ -90,6 +94,11 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self._coach_send_button: Optional[QtWidgets.QPushButton] = None
         self._current_stream_text: list[str] = []
         self.exit_application_requested: bool = False
+        self._pending_scrub_time: Optional[float] = None
+        self._scrub_timer = QtCore.QTimer(self)
+        self._scrub_timer.setSingleShot(True)
+        self._scrub_timer.setInterval(33)  # cap scrub redraw rate to ~30 FPS
+        self._scrub_timer.timeout.connect(self._flush_pending_scrub_seek)
 
         # Build UI
         self.setWindowTitle("Jarvis Post - Post-Race Telemetry Analysis")
@@ -419,6 +428,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline_slider.setMaximum(10000)
         self.timeline_slider.setValue(0)
         self.timeline_slider.sliderMoved.connect(self.on_slider_moved)
+        self.timeline_slider.sliderReleased.connect(self.on_slider_released)
         layout.addWidget(self.timeline_slider)
 
         controls_row = QtWidgets.QHBoxLayout()
@@ -485,7 +495,27 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     def on_slider_moved(self, value: int) -> None:
         if self.timeline.duration > 0:
             time = (value / 10000.0) * self.timeline.duration
-            self.timeline.seek(time)
+            self._request_scrub_seek(time)
+
+    def on_slider_released(self) -> None:
+        self._scrub_timer.stop()
+        self._flush_pending_scrub_seek()
+
+    def _request_scrub_seek(self, time: float) -> None:
+        self._pending_scrub_time = time
+        if not self._scrub_timer.isActive():
+            # Apply immediately for low perceived latency, then throttle follow-ups.
+            self._flush_pending_scrub_seek()
+            self._scrub_timer.start()
+
+    def _flush_pending_scrub_seek(self) -> None:
+        if self._pending_scrub_time is None:
+            return
+        time = self._pending_scrub_time
+        self._pending_scrub_time = None
+        self.timeline.seek(time)
+        if self._pending_scrub_time is not None and not self._scrub_timer.isActive():
+            self._scrub_timer.start()
 
     def on_speed_changed(self, text: str) -> None:
         speed_map = {"0.25x": 0.25, "0.5x": 0.5, "1x": 1.0, "2x": 2.0, "4x": 4.0}
@@ -564,6 +594,23 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.current_lap = self.session.get_lap(lap_number)
         if not self.current_lap:
             return
+
+        self._scrub_timer.stop()
+        self._pending_scrub_time = None
+        self._last_sample_index = -1
+        telemetry_df = self.current_lap.telemetry
+        self._elapsed_times = (
+            telemetry_df["elapsed_time"].to_numpy(copy=False)
+            if "elapsed_time" in telemetry_df.columns
+            else None
+        )
+        self._telemetry_columns = {
+            "speed": telemetry_df["speed"].to_numpy(copy=False) if "speed" in telemetry_df.columns else None,
+            "gear": telemetry_df["gear"].to_numpy(copy=False) if "gear" in telemetry_df.columns else None,
+            "rpm": telemetry_df["rpm"].to_numpy(copy=False) if "rpm" in telemetry_df.columns else None,
+            "throttle": telemetry_df["throttle"].to_numpy(copy=False) if "throttle" in telemetry_df.columns else None,
+            "brake": telemetry_df["brake"].to_numpy(copy=False) if "brake" in telemetry_df.columns else None,
+        }
 
         self.timeline.set_duration(self.current_lap.lap_time)
         self.duration_label.setText(self._format_time(self.current_lap.lap_time))
@@ -947,25 +994,56 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _update_visualizations_at_time(self, time: float) -> None:
         """Update all visualizations to show data at the given timestamp."""
-        if not self.current_lap:
+        if not self.current_lap or self._elapsed_times is None or self._elapsed_times.size == 0:
             return
 
-        df = self.current_lap.telemetry
-        idx = (df['elapsed_time'] - time).abs().idxmin()
-        sample = df.loc[idx]
-        sample_index = df.index.get_loc(idx)
+        sample_index = self._find_nearest_sample_index(time)
+        if sample_index < 0:
+            return
 
-        self.speed_label.setText(f"Speed: {sample['speed']:.1f} km/h")
-        self.gear_label.setText(f"Gear: {int(sample['gear'])}")
-        self.rpm_label.setText(f"RPM: {int(sample['rpm'])}")
-        self.throttle_label.setText(f"Throttle: {sample['throttle']*100:.0f}%")
-        self.brake_label.setText(f"Brake: {sample['brake']*100:.0f}%")
+        speed_vals = self._telemetry_columns.get("speed")
+        if speed_vals is not None:
+            self.speed_label.setText(f"Speed: {float(speed_vals[sample_index]):.1f} km/h")
 
-        if self.track_map:
+        gear_vals = self._telemetry_columns.get("gear")
+        if gear_vals is not None:
+            self.gear_label.setText(f"Gear: {int(gear_vals[sample_index])}")
+
+        rpm_vals = self._telemetry_columns.get("rpm")
+        if rpm_vals is not None:
+            self.rpm_label.setText(f"RPM: {int(rpm_vals[sample_index])}")
+
+        throttle_vals = self._telemetry_columns.get("throttle")
+        if throttle_vals is not None:
+            self.throttle_label.setText(f"Throttle: {float(throttle_vals[sample_index]) * 100:.0f}%")
+
+        brake_vals = self._telemetry_columns.get("brake")
+        if brake_vals is not None:
+            self.brake_label.setText(f"Brake: {float(brake_vals[sample_index]) * 100:.0f}%")
+
+        if self.track_map and sample_index != self._last_sample_index:
             self.track_map.update_position(sample_index)
+            self._last_sample_index = sample_index
 
         for canvas in self._active_canvases:
             canvas.update_timeline_marker(time)
+
+    def _find_nearest_sample_index(self, time: float) -> int:
+        """Find nearest telemetry sample index in O(log n) using cached elapsed times."""
+        if self._elapsed_times is None or self._elapsed_times.size == 0:
+            return -1
+
+        insert_pos = int(np.searchsorted(self._elapsed_times, time, side="left"))
+        if insert_pos <= 0:
+            return 0
+        if insert_pos >= self._elapsed_times.size:
+            return int(self._elapsed_times.size - 1)
+
+        prev_time = float(self._elapsed_times[insert_pos - 1])
+        next_time = float(self._elapsed_times[insert_pos])
+        if abs(next_time - time) < abs(time - prev_time):
+            return insert_pos
+        return insert_pos - 1
 
     def _on_tab_changed(self, index: int) -> None:
         """Show timeline only on Lap Review tab."""

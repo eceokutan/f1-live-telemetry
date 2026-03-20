@@ -52,6 +52,7 @@ class TrackMapCanvas(FigureCanvas):
         self.line_collection = None
         self.colorbar = None
         self.position_marker = None
+        self._position_index = -1
 
         self.fig.tight_layout(pad=0.3)
 
@@ -73,6 +74,7 @@ class TrackMapCanvas(FigureCanvas):
             except:
                 pass
             self.position_marker = None
+        self._position_index = -1
 
         if xs.size < 2:
             self.draw_idle()
@@ -116,25 +118,26 @@ class TrackMapCanvas(FigureCanvas):
             return
 
         sample_index = max(0, min(sample_index, len(self.xs) - 1))
-
-        if self.position_marker is not None:
-            try:
-                self.position_marker.remove()
-            except:
-                pass
+        if sample_index == self._position_index and self.position_marker is not None:
+            return
 
         x = self.xs[sample_index]
         z = self.zs[sample_index]
 
-        self.position_marker = self.ax.plot(
-            x, z,
-            marker='o',
-            markersize=12,
-            color=ACCENT_RED,
-            markeredgecolor='white',
-            markeredgewidth=2,
-            zorder=10
-        )[0]
+        if self.position_marker is None:
+            self.position_marker = self.ax.plot(
+                x, z,
+                marker='o',
+                markersize=12,
+                color=ACCENT_RED,
+                markeredgecolor='white',
+                markeredgewidth=2,
+                zorder=10
+            )[0]
+        else:
+            self.position_marker.set_data([x], [z])
+
+        self._position_index = sample_index
 
         self.draw_idle()
 
@@ -153,5 +156,6 @@ class TrackMapCanvas(FigureCanvas):
         self.line_collection = None
         self.position_marker = None
         self.colorbar = None
+        self._position_index = -1
 
         self.draw_idle()
