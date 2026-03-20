@@ -49,8 +49,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     - Lap selection
     - Play/pause controls
     """
-    analyst_finished = QtCore.pyqtSignal(str, str)  # (analyst_text, source)
-    analyst_chunk = QtCore.pyqtSignal(str)
+    analyst_finished = QtCore.pyqtSignal(int, str, str)  # (request_id, analyst_text, source)
+    analyst_chunk = QtCore.pyqtSignal(int, str)  # (request_id, text)
     coach_finished = QtCore.pyqtSignal(int, str, str)  # (request_id, coach_text, error)
     coach_chunk = QtCore.pyqtSignal(int, str)   # (request_id, text)
 
@@ -77,9 +77,11 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.coach_finished.connect(self._on_coach_finished)
         self.coach_chunk.connect(self._on_coach_chunk)
         self._analysis_request_id = 0
+        self._analyst_request_id = 0
         self._analyst_running = False
         self._analyst_done_event = threading.Event()
         self._analyst_done_event.set()  # not blocking initially
+        self._analyst_cancel_event = threading.Event()
 
         # Analysis tab widgets
         self.analysis_context_label: Optional[QtWidgets.QLabel] = None
@@ -569,6 +571,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     def load_session_from_file(self, file_path: str) -> None:
         """Load session from CSV file."""
         try:
+            # New session always supersedes any in-flight analyst run.
+            self._cancel_analyst_run()
             from data import TelemetryLoader
             self.session = TelemetryLoader.load_session(file_path)
             self.status_bar.showMessage(f"Loaded session: {self.session.metadata.track_name}")
@@ -631,8 +635,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
     def _start_session_analyst(self) -> None:
         """Kick off session-level analyst in background as soon as session loads."""
-        if not self.session or self._analyst_running:
+        if not self.session:
             return
+
+        self._cancel_analyst_run()
+        self._analyst_cancel_event = threading.Event()
+        request_id = self._analyst_request_id
         self._analyst_running = True
         self._analyst_done_event.clear()
         if self.analyst_output:
@@ -640,30 +648,53 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         session = self.session
         threading.Thread(
             target=self._run_analyst_worker,
-            args=(session,),
+            args=(request_id, session, self._analyst_cancel_event),
             daemon=True,
         ).start()
 
-    def _run_analyst_worker(self, session: Session) -> None:
+    def _cancel_analyst_run(self) -> None:
+        """Cancel the current analyst run and invalidate stale callbacks."""
+        self._analyst_request_id += 1
+        self._analyst_cancel_event.set()
+        self._analyst_running = False
+        self._analyst_done_event.set()
+
+    def _run_analyst_worker(
+        self,
+        request_id: int,
+        session: Session,
+        cancel_event: threading.Event,
+    ) -> None:
         try:
             stream = self.ai_pipeline.generate_analyst_stream(session)
             if stream is not None:
                 for chunk in stream:
-                    self.analyst_chunk.emit(chunk)
+                    if cancel_event.is_set() or request_id != self._analyst_request_id:
+                        close_fn = getattr(stream, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+                        return
+                    self.analyst_chunk.emit(request_id, chunk)
                 source = f"external:{self.ai_pipeline._external_source}"
-                self.analyst_finished.emit("", source)
+                self.analyst_finished.emit(request_id, "", source)
             else:
                 # Streaming unavailable — fall back to non-streaming
                 text = self.ai_pipeline.generate_analyst(session)
+                if cancel_event.is_set() or request_id != self._analyst_request_id:
+                    return
                 if text:
                     source = f"external:{self.ai_pipeline._external_source}"
-                    self.analyst_finished.emit(text, source)
+                    self.analyst_finished.emit(request_id, text, source)
                 else:
-                    self.analyst_finished.emit("", "")
+                    self.analyst_finished.emit(request_id, "", "")
         except Exception as exc:
-            self.analyst_finished.emit(f"Analyst failed:\n{exc}", "error")
+            if cancel_event.is_set() or request_id != self._analyst_request_id:
+                return
+            self.analyst_finished.emit(request_id, f"Analyst failed:\n{exc}", "error")
 
-    def _on_analyst_chunk(self, text: str) -> None:
+    def _on_analyst_chunk(self, request_id: int, text: str) -> None:
+        if request_id != self._analyst_request_id:
+            return
         if self.analyst_output:
             self.analyst_output.moveCursor(QtGui.QTextCursor.End)
             self.analyst_output.insertPlainText(text)
@@ -676,7 +707,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.coach_output.moveCursor(QtGui.QTextCursor.End)
             self.coach_output.insertPlainText(text)
 
-    def _on_analyst_finished(self, analyst_text: str, source: str) -> None:
+    def _on_analyst_finished(self, request_id: int, analyst_text: str, source: str) -> None:
+        if request_id != self._analyst_request_id:
+            return
         self._analyst_running = False
         self._analyst_done_event.set()
         if analyst_text:
@@ -1187,9 +1220,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            from data.session_exporter import SessionExporter
-            exporter = SessionExporter()
-            exporter.export_session_bundle(self.session.metadata.session_id, file_path)
+            bundle = self._build_session_bundle_from_memory()
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(bundle, f)
             self.status_bar.showMessage(f"Session exported to {os.path.basename(file_path)}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Export Error", f"Failed to export session:\n{str(e)}")
@@ -1214,6 +1247,98 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.status_bar.showMessage(f"Imported session {new_id} from {os.path.basename(file_path)}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Import Error", f"Failed to import session:\n{str(e)}")
+
+    def _build_session_bundle_from_memory(self) -> dict:
+        """Build a .jsession payload from the currently loaded in-memory session."""
+        if not self.session:
+            raise ValueError("No session loaded")
+
+        metadata = self.session.metadata
+        fastest_lap = self.session.get_fastest_lap()
+
+        laps_payload = []
+        for lap in self.session.laps:
+            summary = lap.summary
+            laps_payload.append(
+                {
+                    "lap_number": int(lap.lap_number),
+                    "lap_time": float(lap.lap_time),
+                    "fuel_start": float(summary.fuel_start),
+                    "fuel_end": float(summary.fuel_end),
+                    "avg_speed": float(summary.avg_speed),
+                    "max_speed": float(summary.max_speed),
+                    "min_speed": float(summary.min_speed),
+                    "valid": bool(summary.valid),
+                }
+            )
+
+        telemetry_payload: dict[str, list] = {}
+        if self.session.telemetry is not None and not self.session.telemetry.empty:
+            for col in self.session.telemetry.columns:
+                if col in {"telemetry_id", "session_id", "timestamp"}:
+                    continue
+                telemetry_payload[col] = [
+                    self._to_json_compatible(value)
+                    for value in self.session.telemetry[col].tolist()
+                ]
+
+        ai_payload = []
+        for comment in self.session.ai_commentary:
+            timestamp = getattr(comment, "timestamp", None)
+            if isinstance(timestamp, datetime):
+                timestamp_value = float(timestamp.timestamp())
+            elif hasattr(timestamp, "timestamp"):
+                timestamp_value = float(timestamp.timestamp())
+            else:
+                timestamp_value = self._to_json_compatible(timestamp)
+
+            ai_payload.append(
+                {
+                    "timestamp": timestamp_value,
+                    "message": str(getattr(comment, "message", "")),
+                    "trigger": str(getattr(comment, "trigger", "")),
+                    "priority": int(getattr(comment, "priority", 2) or 2),
+                    "lap_number": int(getattr(comment, "lap_number", 0) or 0),
+                }
+            )
+
+        return {
+            "version": 1,
+            "metadata": {
+                "game": metadata.game,
+                "track_name": metadata.track_name,
+                "car_model": metadata.car_model,
+                "player_name": metadata.player_name,
+                "total_laps": len(self.session.laps),
+                "best_lap_time": float(fastest_lap.lap_time) if fastest_lap else None,
+                "notes": "",
+            },
+            "laps": laps_payload,
+            "telemetry": telemetry_payload,
+            "ai_commentary": ai_payload,
+        }
+
+    @staticmethod
+    def _to_json_compatible(value):
+        """Convert numpy/pandas scalar types into plain JSON-compatible values."""
+        if value is None:
+            return None
+
+        if hasattr(value, "item"):
+            try:
+                value = value.item()
+            except Exception:
+                pass
+
+        if isinstance(value, datetime):
+            return float(value.timestamp())
+
+        if isinstance(value, float):
+            if np.isnan(value) or np.isinf(value):
+                return None
+            return value
+
+        return value
 
     def toggle_fullscreen(self) -> None:
         if self.isFullScreen():
