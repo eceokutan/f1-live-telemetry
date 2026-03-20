@@ -524,9 +524,11 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     def on_zoom_changed(self, text: str) -> None:
         zoom_map = {"15s": 15.0, "30s": 30.0, "45s": 45.0, "60s": 60.0, "Full Lap": None}
         window = zoom_map.get(text)
+        current_time = self.timeline.current_time if self.timeline else 0.0
         for canvas in self._active_canvases:
             canvas.window_duration = window
-            canvas.update_sliding_window(self.timeline.current_time if self.timeline else 0.0)
+            # Force immediate visual update even when playback is paused.
+            canvas.update_timeline_marker(current_time)
 
     MAX_GRAPHS = 6
 

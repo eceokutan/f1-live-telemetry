@@ -20,7 +20,7 @@ if getattr(sys, "frozen", False):
     os.chdir(os.path.dirname(sys.executable))
 
 # Pre-load native DLLs BEFORE PyQt5 to avoid DLL conflicts on Windows.
-# PyQt5 changes the DLL search path, which breaks onnxruntime if loaded after.
+# PyQt5 changes the DLL search path, which breaks onnxruntime/ctranslate2 if loaded after.
 for _mod in ("onnxruntime", "ctranslate2"):
     try:
         __import__(_mod)
@@ -44,168 +44,25 @@ load_dotenv()
 
 logger.info("Jarvis F1 Telemetry Suite starting")
 
-# Import UI
-from ui.main_window import MainWindow
+# Module-level placeholders — populated by the loading screen
+MainWindow = None
+AcTelemetryWorker = None
+AccTelemetryWorker = None
+AIRaceEngineerWorker = None
+AI_AVAILABLE = False
+VoiceInputWorker = None
+VOICE_AVAILABLE = False
+TTSOutputWorker = None
+TTS_AVAILABLE = False
+PTTController = None
+PTT_AVAILABLE = False
+SessionRecorder = None
+RECORDER_AVAILABLE = False
 
-# Import telemetry backends
-from telemetry.backends.ac_backend import AcTelemetryWorker
-from telemetry.backends.acc_backend import AccTelemetryWorker
-
-# Try to import AI worker (optional)
-try:
-    from ai.race_engineer import AIRaceEngineerWorker
-    AI_AVAILABLE = True
-    logger.info("AI Race Engineer module available")
-except Exception as e:
-    AI_AVAILABLE = False
-    logger.warning("AI Race Engineer not available: %s", e)
-
-# Try to import voice input worker (optional)
-try:
-    from ai.voice_input import VoiceInputWorker
-    VOICE_AVAILABLE = True
-    logger.info("Voice Input module available")
-except Exception as e:
-    VOICE_AVAILABLE = False
-    logger.warning("Voice Input not available: %s", e)
-
-# Try to import TTS output worker (optional)
-try:
-    from ai.tts_output import TTSOutputWorker
-    TTS_AVAILABLE = True
-    logger.info("TTS Output module available")
-except Exception as e:
-    TTS_AVAILABLE = False
-    logger.warning("TTS Output not available: %s", e)
-
-# Try to import PTT controller (optional)
-try:
-    from ai.ptt_controller import PTTController
-    PTT_AVAILABLE = True
-    logger.info("PTT Controller module available")
-except ImportError as e:
-    PTT_AVAILABLE = False
-    logger.warning("PTT Controller not available: %s", e)
-
-# Try to import session recorder (optional)
-try:
-    from data.session_recorder import SessionRecorder
-    RECORDER_AVAILABLE = True
-    logger.info("Session Recorder module available")
-except ImportError as e:
-    RECORDER_AVAILABLE = False
-    logger.warning("Session Recorder not available: %s", e)
-
-logger.info("All core modules imported")
-
-_prewarm_started = False
 KOKORO_VOICE_ID = "bm_lewis"
 KOKORO_LANG = "en-gb"
 KOKORO_SPEED = 1.3
 KOKORO_USE_CUDA = False
-
-
-def _should_prewarm_models() -> bool:
-    """Whether to run background model prewarm at startup."""
-    val = os.getenv("PREWARM_MODELS_ON_START", "1").strip().lower()
-    return val in {"1", "true", "yes", "on"}
-
-
-def _start_background_model_prewarm(_settings: dict):
-    """Prewarm STT/TTS model caches in background while user is in launcher."""
-    global _prewarm_started
-    if _prewarm_started or not _should_prewarm_models():
-        return
-
-    _prewarm_started = True
-
-    def _worker():
-        prewarm_stt = True
-        prewarm_tts = True
-        prewarm_llm = bool(_settings.get("ai_enabled", False))
-        local_model_path = _settings.get(
-            "local_model_path",
-            _settings.get("local_adapter_path", "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf"),
-        )
-        try:
-            # Run cache checks inside the worker so launcher creation is never
-            # blocked by optional model imports (e.g., faster_whisper).
-            try:
-                from ai.model_prewarm import (
-                    is_local_llm_model_available,
-                    needs_faster_whisper_prewarm,
-                    needs_kokoro_prewarm,
-                    needs_local_llm_prewarm,
-                )
-
-                prewarm_stt = needs_faster_whisper_prewarm(model_size="base")
-                prewarm_tts = needs_kokoro_prewarm()
-                if prewarm_llm:
-                    if not is_local_llm_model_available(local_model_path):
-                        logger.warning(
-                            "Background prewarm: GGUF model not found at %s, skipping LLM prewarm",
-                            local_model_path,
-                        )
-                        prewarm_llm = False
-                    else:
-                        prewarm_llm = needs_local_llm_prewarm()
-            except Exception as e:
-                logger.warning(
-                    "Could not inspect model cache state, falling back to full prewarm: %s",
-                    e,
-                )
-
-            if not prewarm_stt and not prewarm_tts and not prewarm_llm:
-                logger.info("Background model prewarm skipped (all required caches already warm)")
-                return
-
-            from ai.model_prewarm import prewarm_faster_whisper, prewarm_kokoro, prewarm_local_llm
-
-            logger.info(
-                "Background model prewarm started (stt=%s, tts=%s, llm=%s)",
-                prewarm_stt,
-                prewarm_tts,
-                prewarm_llm,
-            )
-
-            if prewarm_llm:
-                try:
-                    prewarm_local_llm(model_path=local_model_path)
-                    logger.info("Background prewarm: local LLM ready")
-                except Exception as e:
-                    logger.warning("Background prewarm: local LLM failed: %s", e)
-            else:
-                if _settings.get("ai_enabled", False):
-                    logger.info("Background prewarm: local LLM skipped (already loaded)")
-
-            if prewarm_stt:
-                try:
-                    prewarm_faster_whisper(model_size="base")
-                    logger.info("Background prewarm: faster-whisper ready")
-                except Exception as e:
-                    logger.warning("Background prewarm: faster-whisper failed: %s", e)
-            else:
-                logger.info("Background prewarm: faster-whisper skipped (cache warm)")
-
-            if prewarm_tts:
-                try:
-                    prewarm_kokoro(
-                        voice_id=KOKORO_VOICE_ID,
-                        lang=KOKORO_LANG,
-                        speed=KOKORO_SPEED,
-                        use_cuda=KOKORO_USE_CUDA,
-                    )
-                    logger.info("Background prewarm: Kokoro ready")
-                except Exception as e:
-                    logger.warning("Background prewarm: Kokoro failed: %s", e)
-            else:
-                logger.info("Background prewarm: Kokoro skipped (cache warm)")
-
-            logger.info("Background model prewarm finished")
-        except Exception as e:
-            logger.warning("Background prewarm initialization failed: %s", e)
-
-    threading.Thread(target=_worker, name="model-prewarm", daemon=True).start()
 
 
 def run_jarvis_live(settings: dict) -> bool:
@@ -215,6 +72,13 @@ def run_jarvis_live(settings: dict) -> bool:
     Args:
         settings: Configuration dict from the launcher.
     """
+    global MainWindow, AcTelemetryWorker, AccTelemetryWorker
+    global AI_AVAILABLE, AIRaceEngineerWorker
+    global VOICE_AVAILABLE, VoiceInputWorker
+    global TTS_AVAILABLE, TTSOutputWorker
+    global PTT_AVAILABLE, PTTController
+    global RECORDER_AVAILABLE, SessionRecorder
+
     game = "ac"
     enable_ai = settings.get("ai_enabled", False)
     enable_ptt = settings.get("voice_mode") == "push_to_talk"
@@ -695,20 +559,73 @@ def run_jarvis_post(session_id: int) -> bool:
 
 
 if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+
+    # Show loading screen immediately (~200ms from launch)
+    from ui.startup_loader import LoadingScreen, StartupLoaderThread
+
+    loading_screen = LoadingScreen()
+    loading_screen.show()
+    loading_screen.set_stage_status(0, "done", "Application shell ready")
+    app.processEvents()
+
+    loader_thread = StartupLoaderThread()
+    loader_thread.stage_update.connect(loading_screen.set_stage_status)
+    loader_thread.fatal_error.connect(loading_screen.show_fatal_error)
+
+    startup_results = [None]
+
+    def _on_all_done(r):
+        startup_results[0] = r
+        # Stage 10: Fonts & config (must run on main thread)
+        loading_screen.set_stage_status(9, "running", "Loading fonts...")
+        from ui.styles import load_fonts
+        load_fonts()
+        loading_screen.set_stage_status(9, "done", "Fonts and config loaded")
+
+        # Stage 11: Complete
+        loading_screen.set_stage_status(10, "done", "Startup complete")
+        QtCore.QTimer.singleShot(400, loading_screen.close)
+
+    loader_thread.all_done.connect(_on_all_done)
+    loader_thread.start()
+
+    # Process events until loading screen closes
+    while loading_screen.isVisible():
+        app.processEvents()
+        QtCore.QThread.msleep(10)
+
+    loader_thread.wait()
+
+    # Check for fatal error (loading screen closed by Quit button → sys.exit already called)
+    if startup_results[0] is None:
+        sys.exit(1)
+
+    # Populate module-level variables from loader results
+    r = startup_results[0]
+    MainWindow = r["MainWindow"]
+    AcTelemetryWorker = r["AcTelemetryWorker"]
+    AccTelemetryWorker = r["AccTelemetryWorker"]
+    AIRaceEngineerWorker = r["AIRaceEngineerWorker"]
+    AI_AVAILABLE = r["AI_AVAILABLE"]
+    VoiceInputWorker = r["VoiceInputWorker"]
+    VOICE_AVAILABLE = r["VOICE_AVAILABLE"]
+    TTSOutputWorker = r["TTSOutputWorker"]
+    TTS_AVAILABLE = r["TTS_AVAILABLE"]
+    SessionRecorder = r["SessionRecorder"]
+    RECORDER_AVAILABLE = r["RECORDER_AVAILABLE"]
+    PTTController = r["PTTController"]
+    PTT_AVAILABLE = r["PTT_AVAILABLE"]
+
+    logger.info("All core modules imported")
+
     from ui.unified_launcher import UnifiedLauncher
     from ui.launcher import LauncherWindow
     from ui.session_picker import SessionPickerDialog
     from ui.config_manager import load_config
 
-    app = QtWidgets.QApplication(sys.argv)
-
-    # Load custom fonts (Bebas Neue, Rajdhani) before any UI is shown
-    from ui.styles import load_fonts
-    load_fonts()
-
     # Load saved settings once
     settings = load_config()
-    _start_background_model_prewarm(settings)
 
     while True:
         # Show unified launcher

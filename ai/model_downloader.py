@@ -65,6 +65,10 @@ def _show_download_dialog(model_name: str, repo_id: str, filename: str, dest: Pa
             # No Qt app running — fall back to silent download
             return _download_silent(repo_id, filename, dest)
 
+        # If called from a background thread, skip the dialog to avoid crashes
+        if QtCore.QThread.currentThread() != app.thread():
+            return _download_silent(repo_id, filename, dest)
+
         dialog = QtWidgets.QProgressDialog(
             f"Downloading {model_name}...\n"
             f"This only happens once. The file is ~2 GB.",
