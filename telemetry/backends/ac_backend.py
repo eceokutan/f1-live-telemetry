@@ -199,12 +199,14 @@ class AcTelemetryWorker(QtCore.QThread):
     lap_completed = QtCore.pyqtSignal(int, list, bool, int)  # (lap_id, samples, valid, last_time_ms)
     status_update = QtCore.pyqtSignal(str)        # status message
     session_info_update = QtCore.pyqtSignal(dict) # session info (track, car, driver)
+    session_reset = QtCore.pyqtSignal()           # emitted when AC restarts (new session detected)
     live_data_update = QtCore.pyqtSignal(dict)    # live telemetry updates
     realtime_sample = QtCore.pyqtSignal(dict)     # realtime telemetry sample (every frame)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.running = False
+        self._last_session_key = None  # (track, car) tuple to detect AC restart
 
     def _close_handles(self, mm_phys, mm_graph, mm_static):
         """Safely close all shared memory handles."""
@@ -229,7 +231,12 @@ class AcTelemetryWorker(QtCore.QThread):
     AC_SESSION_TYPES = {0: "Practice", 1: "Qualify", 2: "Race", 3: "Hotlap"}
 
     def _read_session_info(self, mm_static, mm_graph=None):
-        """Read and emit static session info (track, car, driver, mode)."""
+        """Read and emit static session info (track, car, driver, mode).
+
+        Also detects AC session restarts by comparing against the previous
+        session identity. Emits session_reset before session_info_update
+        when a new AC session is detected.
+        """
         if mm_static is None:
             return
         try:
@@ -243,6 +250,16 @@ class AcTelemetryWorker(QtCore.QThread):
                     session_type = self.AC_SESSION_TYPES.get(gfx.session, f"Unknown ({gfx.session})")
                 except Exception:
                     pass
+
+            session_key = (static_data.track, static_data.carModel, session_type)
+
+            # Detect AC restart: if we had a previous session and the key
+            # matches or differs, either way AC was closed and reopened
+            if self._last_session_key is not None:
+                logger.info("AC reconnected — new session detected, resetting")
+                self.session_reset.emit()
+
+            self._last_session_key = session_key
 
             session_data = {
                 "track": static_data.track,

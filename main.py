@@ -108,6 +108,8 @@ def run_jarvis_live(settings: dict) -> bool:
         telemetry_thread.live_data_update.connect(window.update_live_data)
     if hasattr(telemetry_thread, 'realtime_sample'):
         telemetry_thread.realtime_sample.connect(window.handle_realtime_sample)
+    if hasattr(telemetry_thread, 'session_reset'):
+        telemetry_thread.session_reset.connect(window.reset_session)
 
     logger.info("Signals connected")
 
@@ -324,6 +326,15 @@ def run_jarvis_live(settings: dict) -> bool:
             recorder_thread.status_update.connect(lambda msg: logger.info("Recorder: %s", msg))
             recorder_thread.error_occurred.connect(lambda err: logger.error("Recorder: %s", err))
             recorder_thread.start()
+
+            def on_session_reset():
+                """End current recording session so the next session_info_update creates a new one."""
+                if recorder_thread and recorder_thread.session_id:
+                    logger.info("Session reset — ending recorder session %s", recorder_thread.session_id)
+                    recorder_thread.end_session()
+
+            if hasattr(telemetry_thread, 'session_reset'):
+                telemetry_thread.session_reset.connect(on_session_reset)
 
             def on_session_info(info: dict):
                 session_info["track"] = info.get("track", "")

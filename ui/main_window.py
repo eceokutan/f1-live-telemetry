@@ -420,6 +420,48 @@ class MainWindow(QMainWindow):
     # Data Update Methods
     # ==========================================================================
 
+    def reset_session(self):
+        """Reset all session state when AC restarts. Clears graphs, lap table, and buffers."""
+        logger.info("Session reset — clearing all state")
+
+        # Clear data buffers
+        self.current_lap_samples = []
+        self.current_lap_id = None
+        self._lap_times_ms = []
+        self._best_time_ms = 0
+        self._last_completed_laps = 0
+        self._lap_counter_initialized = False
+        self._best_lap_samples = None
+        self._best_lap_distances = None
+        self._best_lap_times = None
+        self._previous_lap_samples = None
+
+        # Clear lap table
+        self.lap_table.setRowCount(0)
+
+        # Clear graphs
+        for canvas in self._live_graphs:
+            if hasattr(canvas, 'line'):
+                canvas.line.set_data([], [])
+            if hasattr(canvas, 'lines'):
+                for line in canvas.lines:
+                    line.set_data([], [])
+            canvas.draw_idle()
+
+        # Clear track map
+        self.track_canvas.ax.clear()
+        self.track_canvas.draw_idle()
+        if hasattr(self.track_canvas, '_initialized'):
+            del self.track_canvas._initialized
+        if hasattr(self.track_canvas, '_ref_xlim'):
+            del self.track_canvas._ref_xlim
+        if hasattr(self.track_canvas, '_ref_ylim'):
+            del self.track_canvas._ref_ylim
+
+        # Clear delta
+        self.delta_canvas.ax.clear()
+        self.delta_canvas.draw_idle()
+
     def update_session_info(self, session_data):
         """
         Update session information panel.
