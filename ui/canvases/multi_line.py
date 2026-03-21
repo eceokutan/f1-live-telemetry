@@ -47,7 +47,7 @@ class MultiLineCanvas(FigureCanvas):
 
         # Configure plot
         self.title = title
-        self.ax.set_title(title, fontsize=8)
+        self.ax.set_title(title, fontsize=8, pad=3)
         self.ax.grid(True, color="#333333", alpha=0.6)
         self.ax.set_xlabel("Time [s]", fontsize=7)
 
@@ -59,7 +59,11 @@ class MultiLineCanvas(FigureCanvas):
             self.lines.append(line)
 
         self.ax.legend(loc="upper right", fontsize=6, framealpha=0.8)
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
+
+    def _apply_uniform_layout(self):
+        """Use fixed margins so all live telemetry graphs render consistently."""
+        self.fig.subplots_adjust(left=0.10, right=0.995, top=0.82, bottom=0.24)
 
     def update_data(self, t: np.ndarray, y_data: list):
         """

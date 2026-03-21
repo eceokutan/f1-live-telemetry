@@ -25,7 +25,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.collections import LineCollection
 
-from ui.canvases import TrackMapCanvas, TimeSeriesCanvas, MultiLineCanvas, CamberGainCanvas
+from ui.canvases import TrackMapCanvas, TimeSeriesCanvas, MultiLineCanvas
 from ui.styles import DARK_STYLESHEET, FONT_HEADING
 
 
@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
     def _build_middle_column(self):
         """Build middle column: telemetry graphs."""
         mid_col = QVBoxLayout()
-        mid_col.setSpacing(4)
+        mid_col.setSpacing(6)
 
         title_label = QLabel("Live Telemetry Analysis")
         title_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -291,16 +291,25 @@ class MainWindow(QMainWindow):
         self.tyre_temp_canvas = MultiLineCanvas(
             "Tyre Temperature [°C]", ["FL", "FR", "RL", "RR"], self
         )
-        self.camber_gain_canvas = CamberGainCanvas(self)
+
+        live_graphs = [
+            self.speed_canvas,
+            self.gear_canvas,
+            self.rpm_canvas,
+            self.brake_canvas,
+            self.tyre_pressure_canvas,
+            self.tyre_temp_canvas,
+        ]
+        for canvas in live_graphs:
+            canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         # Add to layout
-        mid_col.addWidget(self.speed_canvas)
-        mid_col.addWidget(self.gear_canvas)
-        mid_col.addWidget(self.rpm_canvas)
-        mid_col.addWidget(self.brake_canvas)
-        mid_col.addWidget(self.tyre_pressure_canvas)
-        mid_col.addWidget(self.tyre_temp_canvas)
-        mid_col.addWidget(self.camber_gain_canvas)
+        mid_col.addWidget(self.speed_canvas, 1)
+        mid_col.addWidget(self.gear_canvas, 1)
+        mid_col.addWidget(self.rpm_canvas, 1)
+        mid_col.addWidget(self.brake_canvas, 1)
+        mid_col.addWidget(self.tyre_pressure_canvas, 1)
+        mid_col.addWidget(self.tyre_temp_canvas, 1)
 
         return mid_col
 
@@ -635,21 +644,6 @@ class MainWindow(QMainWindow):
             self.tyre_temp_canvas.update_data(times, [
                 tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
             ])
-
-            # Camber gain: camber angle vs suspension travel
-            suspension = [
-                np.array([s.get("suspension_fl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("suspension_fr", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("suspension_rl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("suspension_rr", 0) for s in self.current_lap_samples], dtype=float),
-            ]
-            camber = [
-                np.array([s.get("camber_fl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("camber_fr", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("camber_rl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("camber_rr", 0) for s in self.current_lap_samples], dtype=float),
-            ]
-            self.camber_gain_canvas.update_data(suspension, camber)
 
             # Update delta to best lap
             if self._best_lap_distances is not None:
