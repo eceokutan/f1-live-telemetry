@@ -50,7 +50,6 @@ class AIRaceEngineerWorker(QtCore.QThread):
     """
 
     ai_commentary = QtCore.pyqtSignal(str, str, int)  # message, trigger, priority
-    ai_sentence_ready = QtCore.pyqtSignal(str, bool)  # sentence_text, is_final
     driver_query_received = QtCore.pyqtSignal(str)  # driver query text (for UI display)
     status_update = QtCore.pyqtSignal(str)
 
@@ -306,11 +305,6 @@ class AIRaceEngineerWorker(QtCore.QThread):
             # If not on track, don't waste an LLM call
             if not self._on_track:
                 msg = "We're not on track right now. Get out there and I'll have your data ready."
-                # Emit via streaming path so TTS speaks the response
-                # (ai_commentary with "driver_query" trigger is skipped by the
-                # TTS commentary handler).
-                self.ai_sentence_ready.emit(msg, False)
-                self.ai_sentence_ready.emit("", True)
                 self.ai_commentary.emit(msg, "driver_query", 2)
                 self.status_update.emit("AI Race Engineer ready")
                 return
@@ -318,70 +312,38 @@ class AIRaceEngineerWorker(QtCore.QThread):
             logger.info(f"Processing driver query: {query}")
             self.status_update.emit(f"Processing: \"{query}\"")
 
-            # Streaming clause callback: clean each clause and emit to TTS.
-            # Accumulate the cleaned clauses so the UI transcript matches.
-            spoken_clauses = []
-
-            def on_clause(clause: str):
-                if not clause or not clause.strip():
-                    return
-                cleaned = self._clean_llm_response(clause.strip())
-                if cleaned:
-                    spoken_clauses.append(cleaned)
-                    self.ai_sentence_ready.emit(cleaned, False)
-
-            # Generate AI response using streaming reactive mode
+            # Generate AI response (full response, then send to TTS)
             try:
                 query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "20.0"))
                 response = await asyncio.wait_for(
-                    self.race_engineer_agent.generate_reactive_response_streaming(
+                    self.race_engineer_agent.generate_reactive_response(
                         query=query,
                         context=self.context,
-                        on_clause=on_clause,
                     ),
                     timeout=query_timeout_seconds,
                 )
                 logger.debug(f"LLM response received: {response[:100]}...")
             except asyncio.TimeoutError:
                 logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
-                # Signal end of stream so TTS doesn't hang
-                self.ai_sentence_ready.emit("", True)
                 fallback = self._build_timeout_fallback_response(query)
-                self.ai_commentary.emit(
-                    fallback,
-                    "driver_query_timeout",
-                    1
-                )
+                self.ai_commentary.emit(fallback, "driver_query_timeout", 1)
                 self.status_update.emit("AI Race Engineer ready")
                 return
-            except Exception as llm_error:
-                logger.error(f"LLM error: {llm_error}", exc_info=True)
-                # Signal end of stream so TTS doesn't hang
-                self.ai_sentence_ready.emit("", True)
-                raise
 
-            # Signal end of streaming sentences
-            self.ai_sentence_ready.emit("", True)
-
-            # Build UI transcript from the same clauses TTS spoke
-            if spoken_clauses:
-                response = " ".join(spoken_clauses)
-            else:
-                response = self._clean_llm_response(response)
+            response = self._clean_llm_response(response)
 
             # Guardrail: log if model introduces numeric claims not present
-            # in current query/context.  Don't mutate the response text —
-            # TTS already spoke the clauses, so the transcript must match.
+            # in current query/context.
             labeled = self._label_estimate_if_ungrounded_numbers(response, query)
             if labeled != response:
-                logger.warning("Ungrounded numeric claims in streamed response")
+                logger.warning("Ungrounded numeric claims in response")
 
             # Check for empty response and provide fallback
             if not response or not response.strip():
                 logger.warning("LLM returned empty response, using fallback")
                 response = "I heard your question but I'm having trouble generating a response right now. Could you please rephrase your question about your race situation?"
 
-            # Emit as AI commentary with special trigger
+            # Emit as AI commentary — triggers both UI display and TTS
             self.ai_commentary.emit(response, "driver_query", 2)  # MEDIUM priority
             logger.info(f"AI response to query: {response[:50]}...")
             self.status_update.emit("AI Race Engineer ready")

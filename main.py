@@ -134,19 +134,7 @@ def run_jarvis_live(settings: dict) -> bool:
                 verbosity="moderate"
             )
 
-            # Pending driver query response — shown in UI only when TTS starts playing
-            pending_query_transcript = [None]
-
-            def on_ai_commentary_for_ui(msg, trigger, priority):
-                if trigger == "driver_query":
-                    # In the streaming path, playback_started has usually
-                    # already fired before this callback runs, so deferring
-                    # would lose the transcript.  Show immediately and clear
-                    # pending to avoid duplication by _show_pending_transcript.
-                    pending_query_transcript[0] = None
-                window.handle_ai_commentary(msg, trigger, priority)
-
-            ai_thread.ai_commentary.connect(on_ai_commentary_for_ui)
+            ai_thread.ai_commentary.connect(window.handle_ai_commentary)
             ai_thread.driver_query_received.connect(window.handle_driver_query)
             ai_thread.status_update.connect(window.handle_ai_status_update)
             ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
@@ -234,14 +222,13 @@ def run_jarvis_live(settings: dict) -> bool:
     # Initialize TTS output (Kokoro local TTS)
     if TTS_AVAILABLE and voice_mode_setting != "disabled":
         logger.info(
-            "Initializing TTS Output (kokoro, sentence pipelining mode, voice=%s, speed=%.2f)",
+            "Initializing TTS Output (kokoro, voice=%s, speed=%.2f)",
             KOKORO_VOICE_ID,
             KOKORO_SPEED,
         )
         try:
             def _build_tts_worker() -> TTSOutputWorker:
                 worker = TTSOutputWorker(
-                    use_sentence_pipelining=True,
                     kokoro_voice_id=KOKORO_VOICE_ID,
                     kokoro_lang=KOKORO_LANG,
                     kokoro_speed=KOKORO_SPEED,
@@ -259,14 +246,6 @@ def run_jarvis_live(settings: dict) -> bool:
                     worker.playback_started.connect(voice_thread.pause)
                     worker.playback_finished.connect(voice_thread.resume)
 
-                def _show_pending_transcript():
-                    """Show driver query transcript when TTS starts playing."""
-                    if pending_query_transcript[0]:
-                        msg, trigger, priority = pending_query_transcript[0]
-                        pending_query_transcript[0] = None
-                        window.handle_ai_commentary(msg, trigger, priority)
-
-                worker.playback_started.connect(_show_pending_transcript)
                 return worker
 
             def _ensure_tts_worker_running(reason: str) -> bool:
@@ -314,60 +293,10 @@ def run_jarvis_live(settings: dict) -> bool:
                 )
 
             def on_ai_commentary_for_tts(msg, trigger, priority):
-                # Skip driver_query triggers - handled by streaming path
-                if trigger == "driver_query":
-                    return
                 _speak_with_retry(msg, priority=priority)
-
-            def _speak_sentence_with_retry(sentence: str, retries_left: int = 6):
-                """Queue a streaming sentence for TTS with retry."""
-                worker = tts_runtime["worker"]
-                if worker and worker.isRunning():
-                    if worker.speak_sentence(sentence):
-                        return
-
-                if not _ensure_tts_worker_running("streaming-restart"):
-                    if retries_left <= 0:
-                        logger.error("Dropping streaming sentence after failed restart: %s", sentence[:80])
-                        return
-                    QtCore.QTimer.singleShot(
-                        200, lambda s=sentence, r=retries_left - 1: _speak_sentence_with_retry(s, r)
-                    )
-                    return
-
-                if retries_left <= 0:
-                    logger.error("Dropping streaming sentence; worker never became ready: %s", sentence[:80])
-                    return
-
-                QtCore.QTimer.singleShot(
-                    200, lambda s=sentence, r=retries_left - 1: _speak_sentence_with_retry(s, r)
-                )
-
-            def _signal_stream_end_with_retry(retries_left: int = 6):
-                """Signal end of stream with retry."""
-                worker = tts_runtime["worker"]
-                if worker and worker.isRunning():
-                    if worker.signal_stream_end():
-                        return
-
-                if retries_left <= 0:
-                    logger.warning("Dropping stream end signal after retries")
-                    return
-
-                QtCore.QTimer.singleShot(
-                    200, lambda r=retries_left - 1: _signal_stream_end_with_retry(r)
-                )
-
-            def on_ai_sentence_for_tts(sentence, is_final):
-                """Handle streaming LLM sentences for TTS."""
-                if is_final:
-                    _signal_stream_end_with_retry()
-                elif sentence and sentence.strip():
-                    _speak_sentence_with_retry(sentence)
 
             if ai_thread:
                 ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
-                ai_thread.ai_sentence_ready.connect(on_ai_sentence_for_tts)
 
             if _ensure_tts_worker_running("initialization"):
                 tts_thread = tts_runtime["worker"]

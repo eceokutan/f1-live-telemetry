@@ -5,11 +5,7 @@ Provides audio output for AI race engineer responses using:
 - Kokoro Text-to-Speech for synthesis (local, default)
 - PyAudio for audio playback (local)
 
-Supports three modes:
-- Batch mode (default): Full synthesis before playback
-- Sentence pipelining mode: Speak sentence-by-sentence (~500-1000ms faster for multi-sentence)
-
-Synthesizes AI responses and plays them through the default audio output device.
+Synthesizes the full AI response, then plays it through the default audio output device.
 """
 
 import asyncio
@@ -23,9 +19,6 @@ from typing import Any, Callable, Optional
 from PyQt5 import QtCore
 import pyaudio
 import numpy as np
-
-# Sentence pipelining
-from ai.sentence_pipelining import SentencePipelinedTTS
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +209,6 @@ class TTSOutputWorker(QtCore.QThread):
 
     def __init__(
         self,
-        use_sentence_pipelining: bool = False,
         kokoro_voice_id: str = DEFAULT_KOKORO_VOICE_ID,
         kokoro_lang: str = DEFAULT_KOKORO_LANG,
         kokoro_speed: float = DEFAULT_KOKORO_SPEED,
@@ -228,8 +220,6 @@ class TTSOutputWorker(QtCore.QThread):
         Initialize TTS output worker.
 
         Args:
-            use_sentence_pipelining: Speak sentence-by-sentence for multi-sentence
-                                     responses (~500-1000ms faster). Default: False.
             kokoro_voice_id: Kokoro voice id (e.g., "bm_lewis", "bf_emma", "af_nova").
             kokoro_lang: Kokoro language code (default "en-gb").
             kokoro_speed: Kokoro speaking speed multiplier.
@@ -245,14 +235,9 @@ class TTSOutputWorker(QtCore.QThread):
         self.kokoro_use_cuda = kokoro_use_cuda
         self.kokoro_cache_dir = kokoro_cache_dir.strip()
         self.playback_backend = playback_backend
-        self.tts_backend = "kokoro"
-        self.use_sentence_pipelining = use_sentence_pipelining
 
         # Active TTS client
         self.tts_client = None
-
-        # Sentence pipelining
-        self._pipelined_tts: Optional[SentencePipelinedTTS] = None
 
         # Audio playback
         self.audio = None
@@ -260,18 +245,14 @@ class TTSOutputWorker(QtCore.QThread):
         # State
         self._running = False
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._streaming_playback_active = False
 
         # Message queue (initialized in run() after event loop is created)
         self.message_queue: Optional[asyncio.Queue] = None
         self._enqueue_sequence = 0
 
-        mode_str = "pipelined" if use_sentence_pipelining else "batch"
         logger.info(
-            "TTSOutputWorker initialized with backend=%s voice=%s mode=%s",
-            self.tts_backend,
+            "TTSOutputWorker initialized with voice=%s",
             self.kokoro_voice_id,
-            mode_str,
         )
 
     def run(self):
@@ -288,15 +269,10 @@ class TTSOutputWorker(QtCore.QThread):
             self.message_queue = asyncio.PriorityQueue()
 
             # Initialize components
-            if self.use_sentence_pipelining:
-                self._initialize_tts_client()
-                self._initialize_pipelined_tts()
-            else:
-                self._initialize_tts_client()
+            self._initialize_tts_client()
             self._initialize_audio()
 
-            mode_str = "pipelined" if self.use_sentence_pipelining else "batch"
-            self.status_update.emit(f"TTS output ready ({mode_str})")
+            self.status_update.emit("TTS output ready")
 
             # Run async processing loop
             self._event_loop.run_until_complete(self._process_loop())
@@ -357,30 +333,11 @@ class TTSOutputWorker(QtCore.QThread):
                 # Priority queue item shape: (priority, sequence, payload)
                 message = queued_item[2] if isinstance(queued_item, tuple) and len(queued_item) == 3 else queued_item
 
-                # Handle streaming sentence tuples
-                if isinstance(message, tuple):
-                    msg_type = message[0]
-                    if msg_type == "sentence":
-                        sentence_text = message[1]
-                        if sentence_text and sentence_text.strip():
-                            if not self._streaming_playback_active:
-                                self._streaming_playback_active = True
-                                self.playback_started.emit()
-                            await self._speak_single_sentence(sentence_text)
-                    elif msg_type == "end_of_stream":
-                        if self._streaming_playback_active:
-                            self._streaming_playback_active = False
-                            self.playback_finished.emit()
+                if not isinstance(message, str) or not message.strip():
                     continue
 
-                # Legacy string path (proactive commentary, pipelined/batch)
                 logger.info(f"Synthesizing TTS for: {message[:50]}...")
-
-                # Use pipelined or batch mode.
-                if self.use_sentence_pipelining:
-                    await self._synthesize_and_play_pipelined(message)
-                else:
-                    await self._synthesize_and_play(message)
+                await self._synthesize_and_play(message)
 
             except asyncio.TimeoutError:
                 # No message, that's ok
@@ -538,70 +495,6 @@ class TTSOutputWorker(QtCore.QThread):
             # Can happen during shutdown races; do not crash caller thread.
             logger.warning("[TTS] Failed to queue message during shutdown: %s", e)
 
-    def speak_sentence(self, sentence: str, priority: int = 2) -> bool:
-        """
-        Queue a pre-split sentence for immediate synthesis+playback.
-
-        Used by the streaming LLM-to-TTS path. Each sentence is dispatched
-        directly for synthesis without re-splitting.
-
-        Args:
-            sentence: A single sentence to speak
-            priority: Message priority (0=critical, 3=low)
-
-        Returns:
-            True if the sentence was successfully queued, False otherwise.
-        """
-        loop = self._event_loop
-        text_ok = bool(sentence and sentence.strip())
-        loop_running = bool(loop and loop.is_running() and not loop.is_closed())
-        queue_ready = self.message_queue is not None
-        thread_running = self._running and self.isRunning()
-
-        if not (thread_running and loop_running and queue_ready and text_ok):
-            logger.warning("[TTS] Streaming sentence NOT queued - worker not ready")
-            return False
-
-        logger.info("[TTS] Queueing streaming sentence: %s", sentence[:50])
-        try:
-            asyncio.run_coroutine_threadsafe(
-                self.message_queue.put(self._make_queue_item(("sentence", sentence), priority)),
-                loop,
-            )
-            return True
-        except RuntimeError as e:
-            logger.warning("[TTS] Failed to queue streaming sentence: %s", e)
-            return False
-
-    def signal_stream_end(self, priority: int = 2) -> bool:
-        """
-        Signal that no more streaming sentences are coming.
-
-        Causes the TTS worker to emit playback_finished if a streaming
-        playback session was active.
-
-        Returns:
-            True if the signal was successfully queued, False otherwise.
-        """
-        loop = self._event_loop
-        loop_running = bool(loop and loop.is_running() and not loop.is_closed())
-        queue_ready = self.message_queue is not None
-        thread_running = self._running and self.isRunning()
-
-        if not (thread_running and loop_running and queue_ready):
-            return False
-
-        logger.info("[TTS] Signalling end of stream")
-        try:
-            asyncio.run_coroutine_threadsafe(
-                self.message_queue.put(self._make_queue_item(("end_of_stream", None), priority)),
-                loop,
-            )
-            return True
-        except RuntimeError as e:
-            logger.warning("[TTS] Failed to signal stream end: %s", e)
-            return False
-
     def _cleanup(self):
         """Clean up audio resources."""
         if self.tts_client and hasattr(self.tts_client, "close"):
@@ -622,82 +515,3 @@ class TTSOutputWorker(QtCore.QThread):
         """Stop the TTS output worker."""
         logger.info("Stopping TTS output...")
         self._running = False
-
-    # =========================================================================
-    # SENTENCE PIPELINING MODE METHODS
-    # =========================================================================
-
-    def _initialize_pipelined_tts(self):
-        """Initialize the sentence-pipelined TTS handler."""
-        try:
-            self.status_update.emit("Initializing sentence-pipelined TTS...")
-
-            # Create pipelined TTS with our sentence speak callback
-            self._pipelined_tts = SentencePipelinedTTS(
-                speak_callback=self._speak_single_sentence
-            )
-
-            # Set up callbacks
-            self._pipelined_tts.on_sentence_started(self._on_sentence_started)
-            self._pipelined_tts.on_sentence_completed(self._on_sentence_completed)
-            self._pipelined_tts.on_all_completed(self._on_all_sentences_completed)
-
-            logger.info("Sentence-pipelined TTS initialized")
-
-        except Exception as e:
-            logger.error(f"Failed to initialize pipelined TTS: {e}", exc_info=True)
-            raise RuntimeError(f"Pipelined TTS initialization failed: {e}")
-
-    async def _synthesize_and_play_pipelined(self, text: str):
-        """
-        Synthesize and play using sentence pipelining.
-
-        Splits text into sentences and speaks them one by one,
-        reducing perceived latency for multi-sentence responses.
-
-        Args:
-            text: Text to synthesize and play
-        """
-        try:
-            self.status_update.emit("Pipelined synthesis...")
-            self.playback_started.emit()
-
-            # Use pipelined TTS to speak sentence by sentence
-            await self._pipelined_tts.speak(text)
-
-        except Exception as e:
-            logger.error(f"Pipelined TTS error: {e}", exc_info=True)
-            self.error_occurred.emit(f"Pipelined TTS error: {e}")
-
-    async def _speak_single_sentence(self, sentence: str):
-        """
-        Speak a single sentence (callback for SentencePipelinedTTS).
-
-        Args:
-            sentence: Single sentence to synthesize and play
-        """
-        try:
-            audio_bytes = await self.tts_client.synthesize(sentence)
-
-            logger.debug(f"Synthesized sentence ({len(audio_bytes)} bytes): {sentence[:30]}...")
-
-            # Play audio
-            await self._play_audio_async(audio_bytes)
-
-        except Exception as e:
-            logger.error(f"Error speaking sentence: {e}", exc_info=True)
-            raise
-
-    def _on_sentence_started(self, sentence: str):
-        """Callback when a sentence starts speaking."""
-        logger.debug(f"[TTS Pipelined] Sentence started: {sentence[:30]}...")
-        self.status_update.emit(f"Speaking: {sentence[:25]}...")
-
-    def _on_sentence_completed(self, sentence: str):
-        """Callback when a sentence finishes speaking."""
-        logger.debug(f"[TTS Pipelined] Sentence completed: {sentence[:30]}...")
-
-    def _on_all_sentences_completed(self):
-        """Callback when all sentences are done."""
-        logger.info("[TTS Pipelined] All sentences complete")
-        self.playback_finished.emit()
