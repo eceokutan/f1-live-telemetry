@@ -139,9 +139,11 @@ def run_jarvis_live(settings: dict) -> bool:
 
             def on_ai_commentary_for_ui(msg, trigger, priority):
                 if trigger == "driver_query":
-                    # Defer until TTS playback starts so text and audio are in sync
-                    pending_query_transcript[0] = (msg, trigger, priority)
-                    return
+                    # In the streaming path, playback_started has usually
+                    # already fired before this callback runs, so deferring
+                    # would lose the transcript.  Show immediately and clear
+                    # pending to avoid duplication by _show_pending_transcript.
+                    pending_query_transcript[0] = None
                 window.handle_ai_commentary(msg, trigger, priority)
 
             ai_thread.ai_commentary.connect(on_ai_commentary_for_ui)
