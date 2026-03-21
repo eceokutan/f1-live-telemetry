@@ -413,7 +413,10 @@ class LiveSessionContext:
 
         # Pre-format values used by multiple lines
         fuel_laps = self.get_fuel_laps_remaining()
-        fuel_laps_str = f"{fuel_laps:.1f}" if fuel_laps != float('inf') else "N/A"
+        if fuel_laps == float('inf'):
+            fuel_laps_str = "unknown (no completed lap yet)"
+        else:
+            fuel_laps_str = f"{fuel_laps:.1f}"
         gap_ahead_str = f"{self.gap_ahead:.2f}s" if self.gap_ahead is not None else "N/A"
         gap_behind_str = f"{self.gap_behind:.2f}s" if self.gap_behind is not None else "N/A"
         nearby_str = self._format_nearby_opponents()

@@ -30,6 +30,7 @@ CRITICAL CONSTRAINTS:
 - Lead with the most important information
 - Use precise numbers when helpful
 - Match urgency to the situation
+- NEVER recommend pitting or warn about fuel if fuel laps remaining is "unknown" — this means no lap has been completed yet and consumption data is not available. Say you need more data.
 
 CURRENT SESSION:
 {session_context}
