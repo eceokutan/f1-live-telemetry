@@ -319,7 +319,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             # Generate AI response (full response, then send to TTS)
             try:
-                query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "20.0"))
+                query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "10.0"))
                 response = await asyncio.wait_for(
                     self.race_engineer_agent.generate_reactive_response(
                         query=query,
