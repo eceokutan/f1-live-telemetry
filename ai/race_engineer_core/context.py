@@ -378,7 +378,7 @@ class LiveSessionContext:
         """
         return _utcnow() - self.started_at
 
-    def to_prompt_context(self, query: Optional[str] = None) -> str:
+    def to_prompt_context(self, query: Optional[str] = None, grounding_only: bool = False) -> str:
         """
         Format context for LLM prompt injection.
 
@@ -410,10 +410,11 @@ class LiveSessionContext:
                         active_labels |= group["labels"]
                         matched_any = True
                         break
-            if not matched_any:
-                # No keyword match → include everything (safe fallback)
+            if not matched_any and not grounding_only:
+                # No keyword match → include everything (safe fallback for LLM prompts)
                 for group in _CONTEXT_GROUPS.values():
                     active_labels |= group["labels"]
+            # When grounding_only=True and no keywords matched, core labels only
 
         # Pre-format values used by multiple lines
         fuel_laps = self.get_fuel_laps_remaining()

@@ -333,11 +333,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             response = self._clean_llm_response(response)
 
-            # Guardrail: log if model introduces numeric claims not present
-            # in current query/context.
-            labeled = self._label_estimate_if_ungrounded_numbers(response, query)
-            if labeled != response:
-                logger.warning("Ungrounded numeric claims in response")
+            # Guardrail: label numeric claims not grounded in current context.
+            response = self._label_estimate_if_ungrounded_numbers(response, query)
 
             # Check for empty response and provide fallback
             if not response or not response.strip():
@@ -355,7 +352,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         except Exception as e:
             logger.error(f"Error processing query: {e}", exc_info=True)
             self.ai_commentary.emit(
-                f"Sorry, I couldn't process that question. Error: {str(e)}",
+                "Sorry, I couldn't process that. Ask again in a moment.",
                 "driver_query_error",
                 1  # HIGH priority for errors
             )
@@ -726,7 +723,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if not response_nums:
             return response
 
-        source_text = f"{query}\n{self.context.to_prompt_context(query=query)}"
+        source_text = f"{query}\n{self.context.to_prompt_context(query=query, grounding_only=True)}"
         source_nums = self._extract_numeric_values(source_text)
 
         ungrounded = False
