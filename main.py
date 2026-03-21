@@ -249,7 +249,12 @@ def run_jarvis_live(settings: dict) -> bool:
                 )
                 worker.status_update.connect(lambda msg: logger.info("TTS: %s", msg))
                 worker.error_occurred.connect(lambda err: logger.error("TTS: %s", err))
-                worker.finished.connect(lambda: logger.warning("TTS worker stopped"))
+                def _on_tts_worker_finished():
+                    logger.warning("TTS worker stopped")
+                    if voice_thread:
+                        voice_thread.resume()
+
+                worker.finished.connect(_on_tts_worker_finished)
                 if voice_thread:
                     worker.playback_started.connect(voice_thread.pause)
                     worker.playback_finished.connect(voice_thread.resume)
