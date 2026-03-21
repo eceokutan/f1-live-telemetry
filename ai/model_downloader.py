@@ -9,7 +9,6 @@ Shows a Qt progress dialog so the user knows what's happening.
 import logging
 import os
 import sys
-import threading
 from pathlib import Path
 from typing import Optional
 
@@ -52,64 +51,14 @@ def is_model_available(local_path: str = DEFAULT_LOCAL_PATH) -> bool:
 
 def _show_download_dialog(model_name: str, repo_id: str, filename: str, dest: Path) -> Path:
     """
-    Show a Qt progress dialog while downloading the model.
+    Download the model silently.
 
-    Runs the actual download in a background thread and updates
-    the dialog with a pulsing progress bar.
+    The startup loading screen (ui/startup_loader.py stage 6) now owns the
+    user-facing download progress, so a separate popup dialog is no longer
+    needed.  All late callers (post-race, fallback paths) just download
+    in the background without blocking the UI.
     """
-    try:
-        from PyQt5 import QtWidgets, QtCore
-
-        app = QtWidgets.QApplication.instance()
-        if app is None:
-            # No Qt app running — fall back to silent download
-            return _download_silent(repo_id, filename, dest)
-
-        # If called from a background thread, skip the dialog to avoid crashes
-        if QtCore.QThread.currentThread() != app.thread():
-            return _download_silent(repo_id, filename, dest)
-
-        dialog = QtWidgets.QProgressDialog(
-            f"Downloading {model_name}...\n"
-            f"This only happens once. The file is ~2 GB.",
-            None,  # No cancel button — download must complete
-            0, 0,  # Indeterminate (pulsing) progress bar
-        )
-        dialog.setWindowTitle("Jarvis — Downloading AI Model")
-        dialog.setWindowModality(QtCore.Qt.ApplicationModal)
-        dialog.setMinimumWidth(420)
-        dialog.setMinimumDuration(0)  # Show immediately
-        dialog.show()
-
-        # Force the dialog to paint before the download starts
-        app.processEvents()
-
-        result = [None]
-        error = [None]
-
-        def _worker():
-            try:
-                result[0] = _download_silent(repo_id, filename, dest)
-            except Exception as e:
-                error[0] = e
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-        # Keep the UI responsive while the download runs
-        while thread.is_alive():
-            app.processEvents()
-            thread.join(timeout=0.1)
-
-        dialog.close()
-
-        if error[0]:
-            raise error[0]
-        return result[0]
-
-    except ImportError:
-        # PyQt5 not available — silent download
-        return _download_silent(repo_id, filename, dest)
+    return _download_silent(repo_id, filename, dest)
 
 
 def _download_silent(repo_id: str, filename: str, dest: Path) -> Path:
