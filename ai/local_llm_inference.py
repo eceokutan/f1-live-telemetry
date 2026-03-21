@@ -146,7 +146,7 @@ class LocalLLMInference:
                 n_ctx=2048,
                 n_threads=self.n_threads,
                 n_gpu_layers=self.n_gpu_layers,
-                n_batch=256,
+                n_batch=512,
                 verbose=False,
             )
 
