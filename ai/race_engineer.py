@@ -9,7 +9,6 @@ Receives telemetry samples, detects events, generates AI commentary.
 
 import asyncio
 import logging
-import math
 import re
 import time
 from typing import Optional, Dict, Any
@@ -334,7 +333,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     logger.debug(f"LLM response received: {response[:100]}...")
                 except asyncio.TimeoutError:
                     logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
-                    fallback = self._build_timeout_fallback_response(query)
+                    # Build the same prompt that would have been sent to the LLM
+                    # so the rule-based fallback can keyword-match on full context.
+                    prompt = self._build_reactive_prompt(query)
+                    fallback = self.race_engineer_agent.llm_client._generate_fallback_response(prompt)
                     self.ai_commentary.emit(fallback, "driver_query_timeout", 1)
                     self.status_update.emit("AI Race Engineer ready")
                     return
@@ -772,56 +774,23 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
         return response
 
-    def _build_timeout_fallback_response(self, query: str) -> str:
+    def _build_reactive_prompt(self, query: str) -> str:
         """
-        Build a fast telemetry-based fallback when LLM query response times out.
+        Build the reactive prompt from query + session context.
 
-        Keeps driver comms useful and concise under latency pressure.
+        Used to generate the same prompt that would have been sent to the LLM,
+        so the rule-based fallback can keyword-match on full context.
         """
-        if not self.context:
-            return "No quick model reply. Ask again in a second."
+        from ai.race_engineer_core.prompts import format_conversation_history
 
-        q = (query or "").lower()
-        c = self.context
-
-        if "wear" in q and ("tire" in q or "tyre" in q):
-            return (
-                f"Tire wear is FL {c.tire_wear['fl']:.0f}, FR {c.tire_wear['fr']:.0f}, "
-                f"RL {c.tire_wear['rl']:.0f}, RR {c.tire_wear['rr']:.0f} percent."
-            )
-
-        if "temp" in q and ("tire" in q or "tyre" in q):
-            return (
-                f"Tire temps are FL {c.tire_temps['fl']:.0f}, FR {c.tire_temps['fr']:.0f}, "
-                f"RL {c.tire_temps['rl']:.0f}, RR {c.tire_temps['rr']:.0f} C."
-            )
-
-        if "pressure" in q and ("tire" in q or "tyre" in q):
-            return (
-                f"Tire pressures are FL {c.tire_pressures['fl']:.1f}, FR {c.tire_pressures['fr']:.1f}, "
-                f"RL {c.tire_pressures['rl']:.1f}, RR {c.tire_pressures['rr']:.1f} PSI."
-            )
-
-        if "fuel" in q:
-            fuel_laps = c.get_fuel_laps_remaining()
-            if math.isfinite(fuel_laps):
-                return f"Fuel is {c.fuel_remaining:.1f} liters, about {fuel_laps:.1f} laps remaining."
-            return f"Fuel is {c.fuel_remaining:.1f} liters. Consumption estimate is not ready yet."
-
-        if "damage" in q:
-            total_damage = sum(c.car_damage.values())
-            if total_damage <= 0:
-                return "Car looks clean, no damage reported."
-            return f"Damage detected, total around {total_damage:.0f} percent across zones."
-
-        if "gap" in q or "ahead" in q or "behind" in q:
-            gap_ahead = f"{c.gap_ahead:.2f}s" if c.gap_ahead is not None else "N/A"
-            gap_behind = f"{c.gap_behind:.2f}s" if c.gap_behind is not None else "N/A"
-            return f"Gap ahead {gap_ahead}, gap behind {gap_behind}."
-
-        return (
-            f"Model reply timed out. You're P{c.position}, fuel {c.fuel_remaining:.1f} liters, "
-            f"speed {c.speed_kmh:.0f}."
+        session_context_str = self.context.to_prompt_context(query=query) if self.context else ""
+        conversation_str = format_conversation_history(
+            list(self.context.conversation_history) if self.context else []
+        )
+        return self.race_engineer_agent.reactive_prompt.format(
+            query=query,
+            session_context=session_context_str,
+            conversation_history=conversation_str,
         )
 
     def _build_event_fallback_response(self, event: Event) -> str:
