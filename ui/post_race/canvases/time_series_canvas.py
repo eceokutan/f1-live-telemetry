@@ -122,6 +122,51 @@ class TimeSeriesCanvas(FigureCanvas):
         self._apply_uniform_layout()
         self.draw_idle()
 
+    def plot_delta(self, times, delta_values, title="Delta to Best Lap"):
+        """Plot delta time with green (ahead) / red (behind) fill."""
+        self.times = times
+        self.values = delta_values
+        self.lap_duration = float(times[-1]) if len(times) > 0 else 0.0
+
+        self.ax.clear()
+        self.ax.set_facecolor(BG_COLOR_LIGHT)
+        for spine in self.ax.spines.values():
+            spine.set_color(TEXT_COLOR_DIM)
+        self.ax.tick_params(colors=TEXT_COLOR_DIM, labelsize=8)
+        self.ax.xaxis.label.set_color(TEXT_COLOR_DIM)
+        self.ax.yaxis.label.set_color(TEXT_COLOR_DIM)
+        self.ax.title.set_color("#FFFFFF")
+
+        self.timeline_marker = None
+
+        # Plot the delta line
+        self.line = self.ax.plot(times, delta_values, color="#FFFFFF", linewidth=1.5)[0]
+
+        # Fill green when ahead (delta < 0), red when behind (delta > 0)
+        self.ax.fill_between(times, delta_values, 0,
+                             where=(delta_values <= 0), interpolate=True,
+                             color=ACCENT_GREEN, alpha=0.3)
+        self.ax.fill_between(times, delta_values, 0,
+                             where=(delta_values >= 0), interpolate=True,
+                             color=ACCENT_RED, alpha=0.3)
+
+        # Zero line
+        self.ax.axhline(0, color=TEXT_COLOR_DIM, linewidth=0.8, linestyle='-', alpha=0.5)
+
+        self.ax.set_xlabel("Time [s]", fontsize=9)
+        self.ax.set_ylabel("Delta [s]", fontsize=9)
+        if title:
+            self.ax.set_title(title, fontsize=10, fontweight="bold")
+        self.ax.grid(True, color=GRID_COLOR, alpha=0.6)
+
+        if self.window_duration and self.lap_duration > self.window_duration:
+            self.ax.set_xlim(0, self.window_duration)
+        else:
+            self.ax.set_xlim(0, self.lap_duration)
+
+        self._apply_uniform_layout()
+        self.draw_idle()
+
     def update_sliding_window(self, current_time: float):
         """Update x-axis limits to show a window centered on current_time."""
         if self.times is None or self.lap_duration <= 0:

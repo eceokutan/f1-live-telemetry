@@ -132,6 +132,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         ("suspension", "Suspension Travel", "multi_tyre", {"prefix": "suspension", "ylabel": "Travel [m]"}),
         ("ride_height", "Ride Height", "multi_rh", {}),
         ("car_damage", "Car Damage", "multi_damage", {}),
+        ("delta_best", "Delta to Best Lap", "delta_best", {}),
     ]
 
     # Default enabled graphs
@@ -1106,6 +1107,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                     labels=dmg_labels, colors=dmg_colors,
                     ylabel="Damage", title=title
                 )
+
+            elif gtype == "delta_best":
+                delta = self._compute_delta_to_best(df)
+                if delta is None:
+                    continue
+                delta_times, delta_values = delta
+                canvas.plot_delta(delta_times, delta_values, title=title)
+
             else:
                 continue
 
@@ -1124,6 +1133,80 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.graph_layout_left.addWidget(canvas)
         for canvas in canvases[mid:]:
             self.graph_layout_right.addWidget(canvas)
+
+    def _compute_delta_to_best(self, df):
+        """Compute delta-to-best-lap using distance-based interpolation.
+
+        Returns (times, delta_values) arrays or None if not possible.
+        """
+        if not self.session or not self.current_lap:
+            return None
+        if len(self.session.laps) < 2:
+            return None
+
+        # Find best lap (lowest lap_time, excluding current)
+        best_lap = None
+        for lap in self.session.laps:
+            if lap.lap_number == self.current_lap.lap_number:
+                continue
+            if best_lap is None or lap.lap_time < best_lap.lap_time:
+                best_lap = lap
+
+        if best_lap is None:
+            return None
+
+        # If current lap IS the best lap, compare against second best
+        if self.current_lap.lap_time <= best_lap.lap_time:
+            # Current is best — find second best
+            second_best = None
+            for lap in self.session.laps:
+                if lap.lap_number == self.current_lap.lap_number:
+                    continue
+                if second_best is None or lap.lap_time < second_best.lap_time:
+                    second_best = lap
+            best_lap = second_best
+            if best_lap is None:
+                return None
+
+        best_df = best_lap.telemetry
+        if best_df is None or best_df.empty:
+            return None
+
+        required_cols = {"elapsed_time", "pos_x", "pos_z"}
+        if not required_cols.issubset(df.columns) or not required_cols.issubset(best_df.columns):
+            return None
+
+        def cumulative_distance(pos_x, pos_z):
+            dx = np.diff(pos_x)
+            dz = np.diff(pos_z)
+            ds = np.sqrt(dx**2 + dz**2)
+            return np.concatenate([[0], np.cumsum(ds)])
+
+        # Current lap
+        cur_t = df["elapsed_time"].values
+        cur_dist = cumulative_distance(df["pos_x"].values, df["pos_z"].values)
+
+        # Best lap
+        best_t = best_df["elapsed_time"].values
+        best_dist = cumulative_distance(best_df["pos_x"].values, best_df["pos_z"].values)
+
+        if cur_dist[-1] < 1.0 or best_dist[-1] < 1.0:
+            return None
+
+        # Interpolate: at each distance point of the current lap,
+        # find what time the best lap was at that distance
+        max_dist = min(cur_dist[-1], best_dist[-1])
+        mask = cur_dist <= max_dist
+        cur_dist_masked = cur_dist[mask]
+        cur_t_masked = cur_t[mask]
+
+        best_t_at_cur_dist = np.interp(cur_dist_masked, best_dist, best_t)
+        delta = cur_t_masked - best_t_at_cur_dist
+
+        if delta.size == 0:
+            return None
+
+        return cur_t_masked, delta
 
     def _update_visualizations_at_time(self, time: float) -> None:
         """Update all visualizations to show data at the given timestamp."""
