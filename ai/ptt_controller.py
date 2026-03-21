@@ -39,20 +39,40 @@ class PTTController(QtCore.QObject):
     ptt_released = QtCore.pyqtSignal()
     status_update = QtCore.pyqtSignal(str)
 
-    def __init__(self, joystick_button_index: int = 11, keyboard_key: str = "v", parent=None):
+    def __init__(self, joystick_button_index: int = 11, keyboard_key: str = "v",
+                 keyboard_keys: list = None, joystick_button_indices: list = None,
+                 parent=None):
         """
         Initialize PTT controller.
 
         Args:
             joystick_button_index: Joystick button index for PTT (default 11,
-                                   Thrustmaster T128X RSB). Use --ptt-button to override.
+                                   Thrustmaster T128X RSB). Legacy single-value arg.
             keyboard_key: Keyboard key name captured from launcher settings
-                          (e.g. "v", "space", "f1").
+                          (e.g. "v", "space", "f1"). Legacy single-value arg.
+            keyboard_keys: List of keyboard key names for PTT. Overrides keyboard_key.
+            joystick_button_indices: List of joystick button indices. Overrides joystick_button_index.
         """
         super().__init__(parent)
 
-        self._joystick_button_index = joystick_button_index
-        self._keyboard_key = (keyboard_key or "v").strip().lower()
+        # Build lists from new-style or legacy args
+        if keyboard_keys is not None:
+            self._keyboard_keys = [k.strip().lower() for k in keyboard_keys if k]
+        else:
+            self._keyboard_keys = [(keyboard_key or "v").strip().lower()]
+
+        if joystick_button_indices is not None:
+            self._joystick_button_indices = list(joystick_button_indices)
+        else:
+            self._joystick_button_indices = [joystick_button_index]
+
+        # Legacy compat — first keyboard key used for display/logging
+        self._keyboard_key = self._keyboard_keys[0] if self._keyboard_keys else "v"
+        self._joystick_button_index = self._joystick_button_indices[0] if self._joystick_button_indices else 11
+
+        self._keyboard_vks = {self._resolve_virtual_key(k) for k in self._keyboard_keys}
+        self._keyboard_vks.discard(None)
+        # Legacy single VK
         self._keyboard_vk = self._resolve_virtual_key(self._keyboard_key)
 
         # State (protected by _lock)
@@ -73,13 +93,14 @@ class PTTController(QtCore.QObject):
         self._start_keyboard_listener()
         self._start_keyboard_polling_fallback()
         self._start_joystick_polling()
+        kb_str = ", ".join(k.upper() for k in self._keyboard_keys) if self._keyboard_keys else "none"
+        js_str = ", ".join(str(b) for b in self._joystick_button_indices) if self._joystick_button_indices else "none"
         logger.info(
-            "PTT controller started (keyboard=%s, joystick=button %d)",
-            self._keyboard_key,
-            self._joystick_button_index,
+            "PTT controller started (keyboard=[%s], joystick=buttons [%s])",
+            kb_str, js_str,
         )
         self.status_update.emit(
-            f"PTT ready (hold {self._keyboard_key.upper()} key or joystick button)"
+            f"PTT ready (keyboard: {kb_str}, joystick: {js_str})"
         )
 
     def stop(self):
@@ -96,12 +117,16 @@ class PTTController(QtCore.QObject):
         logger.info("PTT controller stopped")
 
     def _start_keyboard_listener(self):
-        """Start global keyboard listener for configured key using pynput.
+        """Start global keyboard listener for configured keys using pynput.
 
         On macOS, pynput requires Accessibility permissions and may crash the
         process with SIGTRAP if not granted.  We detect macOS and skip pynput
         entirely, relying on the Qt key-event fallback instead.
         """
+        if not self._keyboard_keys:
+            logger.info("No keyboard keys configured — skipping keyboard listener")
+            return
+
         import sys
 
         if sys.platform == "darwin":
@@ -148,6 +173,9 @@ class PTTController(QtCore.QObject):
 
     def _start_joystick_polling(self):
         """Start joystick polling in a daemon thread. Gracefully degrades if pygame is unavailable."""
+        if not self._joystick_button_indices:
+            logger.info("No joystick buttons configured — skipping joystick polling")
+            return
         try:
             import pygame  # noqa: F401 — test import only
         except ImportError:
@@ -165,15 +193,15 @@ class PTTController(QtCore.QObject):
 
     def _start_keyboard_polling_fallback(self):
         """
-        Start a Windows key-state polling fallback for the configured key.
+        Start a Windows key-state polling fallback for the configured keys.
 
         This improves reliability in scenarios where global keyboard hooks are
         throttled or intermittently blocked by game focus/state.
         """
-        if self._keyboard_vk is None:
+        if not self._keyboard_vks:
             logger.info(
-                "Keyboard polling fallback disabled for key '%s' (no Win32 VK mapping)",
-                self._keyboard_key,
+                "Keyboard polling fallback disabled (no Win32 VK mappings for %s)",
+                self._keyboard_keys,
             )
             return
         self._keyboard_poll_thread = threading.Thread(
@@ -184,16 +212,18 @@ class PTTController(QtCore.QObject):
         self._keyboard_poll_thread.start()
 
     def _keyboard_poll_loop(self):
-        """Poll configured key state via Win32 API as fallback."""
+        """Poll configured key states via Win32 API as fallback."""
         if not hasattr(ctypes, "windll"):
             return
 
         while self._running:
             try:
-                pressed = bool(ctypes.windll.user32.GetAsyncKeyState(self._keyboard_vk) & 0x8000)
+                pressed = any(
+                    bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+                    for vk in self._keyboard_vks
+                )
                 self._update_state(keyboard_held=pressed)
             except Exception:
-                # Keep hook-based mode alive even if fallback polling fails.
                 pass
             time.sleep(0.016)  # ~60Hz polling
 
@@ -221,17 +251,18 @@ class PTTController(QtCore.QObject):
                     joystick.init()
                     name = joystick.get_name()
                     num_buttons = joystick.get_numbuttons()
+                    btn_str = ", ".join(str(b) for b in self._joystick_button_indices)
                     logger.info("Joystick connected: %s (%d buttons)", name, num_buttons)
                     self.status_update.emit(
-                        f"Joystick: {name} (PTT=button {self._joystick_button_index})"
+                        f"Joystick: {name} (PTT=buttons [{btn_str}])"
                     )
 
-                    if self._joystick_button_index >= num_buttons:
-                        logger.warning(
-                            "Button index %d out of range (joystick has %d buttons). "
-                            "Use --ptt-button to set correct index.",
-                            self._joystick_button_index, num_buttons
-                        )
+                    for bi in self._joystick_button_indices:
+                        if bi >= num_buttons:
+                            logger.warning(
+                                "Button index %d out of range (joystick has %d buttons).",
+                                bi, num_buttons
+                            )
                 else:
                     time.sleep(2.0)  # Check for joystick every 2 seconds
                     continue
@@ -247,8 +278,12 @@ class PTTController(QtCore.QObject):
                         if joystick.get_button(i):
                             logger.debug("Joystick button %d pressed", i)
 
-                # Check PTT button
-                pressed = joystick.get_button(self._joystick_button_index)
+                # Check PTT buttons
+                pressed = any(
+                    joystick.get_button(bi)
+                    for bi in self._joystick_button_indices
+                    if bi < joystick.get_numbuttons()
+                )
                 self._update_state(joystick_held=bool(pressed))
 
             except Exception:
@@ -330,7 +365,7 @@ class PTTController(QtCore.QObject):
 
         Called by MainWindow.keyPressEvent when PTT is active on macOS.
         """
-        if qt_key_text.lower() == self._keyboard_key:
+        if qt_key_text.lower() in self._keyboard_keys:
             self._update_state(keyboard_held=True)
 
     def handle_key_release(self, qt_key_text: str):
@@ -338,22 +373,22 @@ class PTTController(QtCore.QObject):
 
         Called by MainWindow.keyReleaseEvent when PTT is active on macOS.
         """
-        if qt_key_text.lower() == self._keyboard_key:
+        if qt_key_text.lower() in self._keyboard_keys:
             self._update_state(keyboard_held=False)
 
     def _matches_keyboard_key(self, key) -> bool:
-        """Return True when pynput key object matches configured keyboard key."""
+        """Return True when pynput key object matches any configured keyboard key."""
         try:
             char = getattr(key, "char", None)
-            if char and char.lower() == self._keyboard_key:
+            if char and char.lower() in self._keyboard_keys:
                 return True
 
             name = getattr(key, "name", None)
-            if name and name.lower() == self._keyboard_key:
+            if name and name.lower() in self._keyboard_keys:
                 return True
 
             vk = getattr(key, "vk", None)
-            if vk is not None and self._keyboard_vk is not None and vk == self._keyboard_vk:
+            if vk is not None and vk in self._keyboard_vks:
                 return True
         except Exception:
             return False

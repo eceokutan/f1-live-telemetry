@@ -203,16 +203,30 @@ def run_jarvis_live(settings: dict) -> bool:
 
     # Initialize PTT controller
     if enable_ptt and voice_thread and PTT_AVAILABLE:
-        ptt_button_index = 11
+        # Build keyboard keys and joystick button lists from config slots
+        keyboard_keys = []
+        joystick_buttons = []
+        for slot_prefix in ("ptt_slot_1", "ptt_slot_2"):
+            stype = settings.get(f"{slot_prefix}_type", "disabled")
+            svalue = settings.get(f"{slot_prefix}_value", "")
+            if stype == "keyboard" and svalue:
+                keyboard_keys.append(svalue)
+            elif stype == "joystick" and svalue:
+                try:
+                    joystick_buttons.append(int(svalue))
+                except ValueError:
+                    pass
+        # Fallback: if no keyboard key configured, use legacy ptt_key
+        if not keyboard_keys:
+            keyboard_keys.append(ptt_key)
         logger.info(
-            "Initializing PTT Controller (keyboard=%s, joystick button=%d)",
-            ptt_key,
-            ptt_button_index,
+            "Initializing PTT Controller (keyboard=%s, joystick buttons=%s)",
+            keyboard_keys, joystick_buttons,
         )
         try:
             ptt_controller = PTTController(
-                joystick_button_index=ptt_button_index,
-                keyboard_key=ptt_key,
+                keyboard_keys=keyboard_keys,
+                joystick_button_indices=joystick_buttons,
             )
             ptt_controller.ptt_pressed.connect(voice_thread.start_recording)
             ptt_controller.ptt_released.connect(voice_thread.stop_recording)

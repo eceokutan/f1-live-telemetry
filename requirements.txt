@@ -41,7 +41,7 @@ pykokoro>=0.6.5
 # Push-to-Talk (hold V key or joystick button to talk)
 # =============================================================================
 pynput>=1.7.6           # Global keyboard hooks (works when game has focus)
-# pygame>=2.5.0         # Optional: joystick/gamepad PTT button (pip install pygame)
+pygame>=2.5.0           # Wheel/joystick PTT button detection
 
 # =============================================================================
 # Optional: LiveKit (Future - not currently used)

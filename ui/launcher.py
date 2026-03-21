@@ -62,6 +62,177 @@ class KeyCaptureButton(QtWidgets.QPushButton):
         super().focusOutEvent(event)
 
 
+class JoystickCaptureButton(QtWidgets.QPushButton):
+    """Button that captures the next wheel/joystick button press and displays its index."""
+
+    button_captured = QtCore.pyqtSignal(int)
+
+    def __init__(self, current_button: int = 11, parent=None):
+        super().__init__(parent)
+        self._capturing = False
+        self._poll_timer = None
+        self.button_index = current_button
+        self._pygame_available = False
+        self._joystick = None
+        self._update_text()
+
+    def _update_text(self):
+        if self._capturing:
+            self.setText("Press any wheel/joystick button...")
+        else:
+            self.setText(f"  Button {self.button_index}  (click to change)")
+
+    def mousePressEvent(self, event):
+        if self._capturing:
+            # Second click cancels capture
+            self._stop_capture()
+            return
+        self._start_capture()
+
+    def _start_capture(self):
+        """Initialize pygame and start polling for button presses."""
+        try:
+            import os
+            os.environ['SDL_VIDEODRIVER'] = 'dummy'
+            import pygame
+            pygame.init()
+            pygame.joystick.init()
+
+            if pygame.joystick.get_count() == 0:
+                self.setText("No device found!")
+                QtCore.QTimer.singleShot(2000, self._update_text)
+                return
+
+            self._joystick = pygame.joystick.Joystick(0)
+            self._joystick.init()
+            self._pygame_available = True
+
+        except ImportError:
+            self.setText("pygame not installed!")
+            QtCore.QTimer.singleShot(2000, self._update_text)
+            return
+        except Exception:
+            self.setText("Device error!")
+            QtCore.QTimer.singleShot(2000, self._update_text)
+            return
+
+        self._capturing = True
+        self._update_text()
+
+        # Drain any already-held buttons so we only detect fresh presses
+        try:
+            import pygame
+            pygame.event.pump()
+        except Exception:
+            pass
+
+        # Poll at 60Hz via QTimer (stays on the UI thread, no threading needed)
+        self._poll_timer = QtCore.QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_joystick)
+        self._poll_timer.start(16)
+
+    def _poll_joystick(self):
+        """Check if any joystick/wheel button was pressed."""
+        if not self._capturing or not self._joystick:
+            return
+        try:
+            import pygame
+            pygame.event.pump()
+            num_buttons = self._joystick.get_numbuttons()
+            for i in range(num_buttons):
+                if self._joystick.get_button(i):
+                    self.button_index = i
+                    self.button_captured.emit(i)
+                    self._stop_capture()
+                    return
+        except Exception:
+            self._stop_capture()
+
+    def _stop_capture(self):
+        """Stop polling and clean up pygame."""
+        self._capturing = False
+        if self._poll_timer:
+            self._poll_timer.stop()
+            self._poll_timer = None
+        if self._joystick:
+            try:
+                import pygame
+                pygame.joystick.quit()
+                pygame.quit()
+            except Exception:
+                pass
+            self._joystick = None
+        self._pygame_available = False
+        self._update_text()
+
+
+class PTTBindingWidget(QtWidgets.QWidget):
+    """A single PTT binding slot: type selector (Keyboard/Wheel-Joystick/Disabled) + value input."""
+
+    def __init__(self, label: str, allow_disabled: bool = False, parent=None):
+        super().__init__(parent)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        slot_label = QtWidgets.QLabel(label)
+        slot_label.setFixedWidth(46)
+        layout.addWidget(slot_label)
+
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.addItem("Keyboard", "keyboard")
+        self.type_combo.addItem("Wheel / Joystick", "joystick")
+        if allow_disabled:
+            self.type_combo.addItem("--", "disabled")
+        self.type_combo.setFixedWidth(150)
+        layout.addWidget(self.type_combo)
+
+        # Stacked widget: keyboard capture / joystick capture / disabled placeholder
+        self.stack = QtWidgets.QStackedWidget()
+
+        self.key_button = KeyCaptureButton("v")
+        self.stack.addWidget(self.key_button)  # index 0 = keyboard
+
+        self.joy_button = JoystickCaptureButton(11)
+        self.stack.addWidget(self.joy_button)  # index 1 = joystick
+
+        if allow_disabled:
+            disabled_label = QtWidgets.QLabel("  --")
+            self.stack.addWidget(disabled_label)  # index 2 = disabled
+
+        layout.addWidget(self.stack, 1)
+
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+
+    def _on_type_changed(self, index):
+        self.stack.setCurrentIndex(index)
+
+    def get_binding(self):
+        """Return (type_str, value_str)."""
+        btype = self.type_combo.currentData()
+        if btype == "keyboard":
+            return ("keyboard", self.key_button.key_name)
+        elif btype == "joystick":
+            return ("joystick", str(self.joy_button.button_index))
+        else:
+            return ("disabled", "")
+
+    def set_binding(self, btype: str, value: str):
+        """Set the binding type and value."""
+        idx = self.type_combo.findData(btype)
+        if idx >= 0:
+            self.type_combo.setCurrentIndex(idx)
+        if btype == "keyboard" and value:
+            self.key_button.key_name = value
+            self.key_button._update_text()
+        elif btype == "joystick" and value:
+            try:
+                self.joy_button.button_index = int(value)
+                self.joy_button._update_text()
+            except ValueError:
+                pass
+
+
 class LauncherWindow(QtWidgets.QDialog):
     """Setup & Settings dialog."""
 
@@ -154,24 +325,18 @@ class LauncherWindow(QtWidgets.QDialog):
         voice_layout.addWidget(self.voice_ptt_radio)
         voice_layout.addWidget(self.voice_continuous_radio)
 
-        # PTT keyboard selector
+        # PTT binding slots
         self.ptt_key_widget = QtWidgets.QWidget()
         ptt_key_layout = QtWidgets.QVBoxLayout(self.ptt_key_widget)
         ptt_key_layout.setContentsMargins(24, 6, 0, 0)
-        ptt_key_layout.setSpacing(4)
+        ptt_key_layout.setSpacing(6)
 
-        ptt_key_row = QtWidgets.QHBoxLayout()
-        ptt_key_row.addWidget(QtWidgets.QLabel("Keyboard Key:"))
-        self.ptt_key_button = KeyCaptureButton("v")
-        ptt_key_row.addWidget(self.ptt_key_button)
-        ptt_key_row.addStretch()
-        ptt_key_layout.addLayout(ptt_key_row)
+        self.ptt_slot_1 = PTTBindingWidget("Key 1:", allow_disabled=False)
+        ptt_key_layout.addWidget(self.ptt_slot_1)
 
-        self.ptt_key_hint_label = QtWidgets.QLabel(
-            "This picker changes keyboard PTT only."
-        )
-        self.ptt_key_hint_label.setWordWrap(True)
-        ptt_key_layout.addWidget(self.ptt_key_hint_label)
+        self.ptt_slot_2 = PTTBindingWidget("Key 2:", allow_disabled=True)
+        ptt_key_layout.addWidget(self.ptt_slot_2)
+
         voice_layout.addWidget(self.ptt_key_widget)
 
         # Show/hide PTT key based on radio selection
@@ -215,9 +380,14 @@ class LauncherWindow(QtWidgets.QDialog):
         else:
             self.voice_disabled_radio.setChecked(True)
 
-        ptt_key = c.get("ptt_key", "v")
-        self.ptt_key_button.key_name = ptt_key
-        self.ptt_key_button._update_text()
+        self.ptt_slot_1.set_binding(
+            c.get("ptt_slot_1_type", "keyboard"),
+            c.get("ptt_slot_1_value", c.get("ptt_key", "v")),
+        )
+        self.ptt_slot_2.set_binding(
+            c.get("ptt_slot_2_type", "disabled"),
+            c.get("ptt_slot_2_value", ""),
+        )
 
     def _save_to_config(self):
         if self.voice_ptt_radio.isChecked():
@@ -227,9 +397,16 @@ class LauncherWindow(QtWidgets.QDialog):
         else:
             voice_mode = "disabled"
 
+        s1_type, s1_value = self.ptt_slot_1.get_binding()
+        s2_type, s2_value = self.ptt_slot_2.get_binding()
+
         self.config.update({
             "voice_mode": voice_mode,
-            "ptt_key": self.ptt_key_button.key_name,
+            "ptt_slot_1_type": s1_type,
+            "ptt_slot_1_value": s1_value,
+            "ptt_slot_2_type": s2_type,
+            "ptt_slot_2_value": s2_value,
+            "ptt_key": s1_value if s1_type == "keyboard" else (s2_value if s2_type == "keyboard" else "v"),
         })
         save_config(self.config)
 

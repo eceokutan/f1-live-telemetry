@@ -16,7 +16,11 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS = {
     "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
-    "ptt_key": "v",                 # Key name for push-to-talk
+    "ptt_key": "v",                 # Key name for push-to-talk (legacy, slot 1 keyboard fallback)
+    "ptt_slot_1_type": "keyboard",  # "keyboard" or "joystick"
+    "ptt_slot_1_value": "v",        # key name (str) or button index (str of int)
+    "ptt_slot_2_type": "disabled",   # "keyboard", "joystick", or "disabled"
+    "ptt_slot_2_value": "",          # key name (str) or button index (str of int), empty if disabled
     "use_local_llm": True,
     "local_model_path": "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf",
 }
