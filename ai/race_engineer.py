@@ -305,10 +305,13 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             # If not on track, don't waste an LLM call
             if not self._on_track:
-                self.ai_commentary.emit(
-                    "We're not on track right now. Get out there and I'll have your data ready.",
-                    "driver_query", 2
-                )
+                msg = "We're not on track right now. Get out there and I'll have your data ready."
+                # Emit via streaming path so TTS speaks the response
+                # (ai_commentary with "driver_query" trigger is skipped by the
+                # TTS commentary handler).
+                self.ai_sentence_ready.emit(msg, False)
+                self.ai_sentence_ready.emit("", True)
+                self.ai_commentary.emit(msg, "driver_query", 2)
                 self.status_update.emit("AI Race Engineer ready")
                 return
 
