@@ -8,7 +8,7 @@ import logging
 from PyQt5 import QtWidgets, QtCore, QtGui
 from ui.config_manager import load_config, save_config
 from ui.styles import (
-    BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR,
+    BG_COLOR, BG_COLOR_LIGHT, TEXT_COLOR, TEXT_COLOR_DIM,
     BORDER_COLOR, ACCENT_PRIMARY, FONT_HEADING, FONT_BODY,
 )
 
@@ -22,6 +22,7 @@ class KeyCaptureButton(QtWidgets.QPushButton):
 
     def __init__(self, current_key: str = "v", parent=None):
         super().__init__(parent)
+        self.setObjectName("captureBtn")
         self._capturing = False
         self.key_name = current_key
         self._update_text()
@@ -69,6 +70,7 @@ class JoystickCaptureButton(QtWidgets.QPushButton):
 
     def __init__(self, current_button: int = 11, parent=None):
         super().__init__(parent)
+        self.setObjectName("captureBtn")
         self._capturing = False
         self._poll_timer = None
         self.button_index = current_button
@@ -506,5 +508,84 @@ class LauncherWindow(QtWidgets.QDialog):
             }}
             QPushButton#cancelBtn:pressed {{
                 background-color: #2a2a2a;
+            }}
+            /* PTT capture buttons — neutral dark style, not red */
+            QPushButton#captureBtn {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: normal;
+                font-size: 12pt;
+                text-align: left;
+            }}
+            QPushButton#captureBtn:hover {{
+                background-color: #2a2a2a;
+                border-color: {ACCENT_PRIMARY};
+            }}
+            QPushButton#captureBtn:pressed {{
+                background-color: #222222;
+            }}
+            /* Combo box */
+            QComboBox {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 4px;
+                padding: 5px 8px;
+                font-size: 12pt;
+                min-height: 24px;
+            }}
+            QComboBox:hover {{
+                border-color: {ACCENT_PRIMARY};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid {TEXT_COLOR_DIM};
+                margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                selection-background-color: {ACCENT_PRIMARY};
+                selection-color: #FFFFFF;
+                padding: 4px;
+                font-size: 12pt;
+            }}
+            /* Spin box */
+            QSpinBox {{
+                background-color: {BG_COLOR_LIGHT};
+                color: {TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 4px;
+                padding: 5px 8px;
+                font-size: 12pt;
+                min-height: 24px;
+            }}
+            QSpinBox:hover {{
+                border-color: {ACCENT_PRIMARY};
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background-color: {BG_COLOR_LIGHT};
+                border: none;
+                width: 20px;
+            }}
+            QSpinBox::up-arrow {{
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid {TEXT_COLOR_DIM};
+            }}
+            QSpinBox::down-arrow {{
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {TEXT_COLOR_DIM};
             }}
         """)
