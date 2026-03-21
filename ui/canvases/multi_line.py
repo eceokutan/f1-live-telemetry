@@ -94,6 +94,8 @@ class MultiLineCanvas(FigureCanvas):
 
             self.ax.relim()
             self.ax.autoscale_view()
+            if self.window_seconds > 0 and t.size > 0:
+                self.ax.set_xlim(t[0], t[-1])
             self.draw_idle()
         except Exception:
             # Matplotlib can throw errors during rendering in multithreaded environments
