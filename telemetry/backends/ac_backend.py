@@ -196,7 +196,7 @@ class AcTelemetryWorker(QtCore.QThread):
     Background thread that reads Assetto Corsa telemetry from shared memory
     and emits normalized packets to the GUI.
     """
-    lap_completed = QtCore.pyqtSignal(int, list)  # (lap_id, samples: List[Dict])
+    lap_completed = QtCore.pyqtSignal(int, list, bool, int)  # (lap_id, samples, valid, last_time_ms)
     status_update = QtCore.pyqtSignal(str)        # status message
     session_info_update = QtCore.pyqtSignal(dict) # session info (track, car, driver)
     live_data_update = QtCore.pyqtSignal(dict)    # live telemetry updates
@@ -311,8 +311,14 @@ class AcTelemetryWorker(QtCore.QThread):
             self._read_session_info(mm_static, mm_graph)
 
             # LapBuffer with callback that emits a Qt signal
+            completion_meta = {"valid": True, "last_time_ms": 0}
             lap_buffer = LapBuffer(
-                on_lap_complete=lambda lap_id, samples: self.lap_completed.emit(lap_id, samples)
+                on_lap_complete=lambda lap_id, samples: self.lap_completed.emit(
+                    lap_id,
+                    samples,
+                    bool(completion_meta["valid"]),
+                    int(completion_meta["last_time_ms"]),
+                )
             )
 
             t0 = time.time()
@@ -478,6 +484,8 @@ class AcTelemetryWorker(QtCore.QThread):
                     lap_valid = gfx.lastTimeMs > 0
 
                     if lap_id != last_lap_id and last_lap_id != -1:
+                        completion_meta["valid"] = lap_valid
+                        completion_meta["last_time_ms"] = int(gfx.lastTimeMs)
                         logger.info("Lap completed: %d -> %d (valid=%s, lastTimeMs=%d)",
                                     last_lap_id+1, lap_id+1, lap_valid, gfx.lastTimeMs)
                         integrated_x = 0.0

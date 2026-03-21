@@ -79,7 +79,6 @@ def run_jarvis_live(settings: dict) -> bool:
     global RECORDER_AVAILABLE, SessionRecorder
 
     game = "ac"
-    enable_ai = settings.get("ai_enabled", False)
     enable_ptt = settings.get("voice_mode") == "push_to_talk"
     ptt_key = settings.get("ptt_key", "v")
     local_model_path = settings.get(
@@ -112,64 +111,71 @@ def run_jarvis_live(settings: dict) -> bool:
 
     logger.info("Signals connected")
 
-    # Initialize AI race engineer (optional)
+    # Initialize mandatory AI race engineer
     ai_thread = None
     voice_thread = None
     tts_thread = None
     tts_runtime = {"worker": None, "restarting": False}
     ptt_controller = None
-    if enable_ai and AI_AVAILABLE:
-        logger.info("Initializing AI Race Engineer")
+    if not AI_AVAILABLE:
+        logger.critical("AI Race Engineer module is required but unavailable")
+        QtWidgets.QMessageBox.critical(
+            None,
+            "AI Required",
+            "Jarvis Live requires the AI Race Engineer module, but it is unavailable.",
+        )
+        return False
 
-        try:
-            ai_thread = AIRaceEngineerWorker(
-                track_name="Unknown Track",
-                session_id="ac_session_001",
-                verbosity="moderate"
-            )
+    logger.info("Initializing AI Race Engineer")
+    try:
+        ai_thread = AIRaceEngineerWorker(
+            track_name="Unknown Track",
+            session_id="ac_session_001",
+            verbosity="moderate"
+        )
 
-            ai_thread.ai_commentary.connect(window.handle_ai_commentary)
-            ai_thread.driver_query_received.connect(window.handle_driver_query)
-            ai_thread.status_update.connect(window.handle_ai_status_update)
-            ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
+        ai_thread.ai_commentary.connect(window.handle_ai_commentary)
+        ai_thread.driver_query_received.connect(window.handle_driver_query)
+        ai_thread.status_update.connect(window.handle_ai_status_update)
+        ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
 
-            ai_sample_counter = [0]
-            AI_SAMPLE_RATE = 12
+        ai_sample_counter = [0]
+        AI_SAMPLE_RATE = 12
 
-            def throttled_ai_telemetry(sample):
-                ai_sample_counter[0] += 1
-                if ai_sample_counter[0] >= AI_SAMPLE_RATE:
-                    ai_sample_counter[0] = 0
-                    try:
-                        ai_thread.process_telemetry(sample)
-                    except Exception:
-                        pass
+        def throttled_ai_telemetry(sample):
+            ai_sample_counter[0] += 1
+            if ai_sample_counter[0] >= AI_SAMPLE_RATE:
+                ai_sample_counter[0] = 0
+                try:
+                    ai_thread.process_telemetry(sample)
+                except Exception:
+                    pass
 
-            if hasattr(telemetry_thread, 'realtime_sample'):
-                telemetry_thread.realtime_sample.connect(throttled_ai_telemetry)
+        if hasattr(telemetry_thread, 'realtime_sample'):
+            telemetry_thread.realtime_sample.connect(throttled_ai_telemetry)
 
-            if hasattr(telemetry_thread, 'live_data_update'):
-                def on_live_data_for_ai(data: dict):
-                    if "ac_status" in data:
-                        ai_thread.update_ac_status(data.get("ac_status", 0))
-                    else:
-                        ai_thread.update_ac_status(2)
+        if hasattr(telemetry_thread, 'live_data_update'):
+            def on_live_data_for_ai(data: dict):
+                if "ac_status" in data:
+                    ai_thread.update_ac_status(data.get("ac_status", 0))
+                else:
+                    ai_thread.update_ac_status(2)
 
-                telemetry_thread.live_data_update.connect(on_live_data_for_ai)
+            telemetry_thread.live_data_update.connect(on_live_data_for_ai)
 
-            ai_thread.start()
-            logger.info("AI Race Engineer started")
+        ai_thread.start()
+        logger.info("AI Race Engineer started")
 
-        except Exception as e:
-            logger.error("Failed to initialize AI Race Engineer: %s", e, exc_info=True)
-            ai_thread = None
-    elif enable_ai:
-        logger.warning("AI requested but AIRaceEngineerWorker module not available")
-        window.handle_ai_status_update("AI module unavailable")
-    else:
-        window.handle_ai_status_update("AI disabled")
+    except Exception as e:
+        logger.error("Failed to initialize AI Race Engineer: %s", e, exc_info=True)
+        QtWidgets.QMessageBox.critical(
+            None,
+            "AI Initialization Failed",
+            f"Jarvis Live requires AI, but initialization failed:\n{e}",
+        )
+        return False
 
-    # Initialize voice input (independent of AI)
+    # Initialize voice input
     voice_mode_setting = settings.get("voice_mode", "disabled")
     if VOICE_AVAILABLE and voice_mode_setting != "disabled":
         voice_mode = "PTT" if enable_ptt else "VAD"
@@ -190,7 +196,7 @@ def run_jarvis_live(settings: dict) -> bool:
             logger.error("Failed to initialize Voice Input: %s", e, exc_info=True)
             voice_thread = None
 
-    # Initialize PTT controller (independent of AI)
+    # Initialize PTT controller
     if enable_ptt and voice_thread and PTT_AVAILABLE:
         ptt_button_index = 11
         logger.info(
@@ -329,7 +335,6 @@ def run_jarvis_live(settings: dict) -> bool:
                         track_name=session_info["track"],
                         car_model=session_info["car"],
                         player_name=session_info["player"],
-                        ai_enabled=enable_ai,
                         session_type=info.get("session_type", "")
                     )
 
@@ -341,7 +346,7 @@ def run_jarvis_live(settings: dict) -> bool:
                     lambda sample: recorder_thread.record_telemetry_sample(sample)
                 )
 
-            def on_lap_complete(lap_id: int, samples: list):
+            def on_lap_complete(lap_id: int, samples: list, lap_valid: bool = True, last_time_ms: int = 0):
                 if not samples:
                     return
                 current_lap_number[0] = lap_id
@@ -354,13 +359,7 @@ def run_jarvis_live(settings: dict) -> bool:
                 min_speed = min(speeds) if speeds else 0.0
                 fuel_start = samples[0].get("fuel", 0.0)
                 fuel_end = samples[-1].get("fuel", 0.0)
-
-                # NOTE: per-sample lap_valid (based on gfx.lastTimeMs) is
-                # unreliable — lastTimeMs only updates AFTER a lap completes,
-                # so during the first lap it's always 0 making every sample
-                # "invalid".  Default to valid=True; the AC backend already
-                # logs the correct lastTimeMs at the moment of completion.
-                lap_valid = True
+                resolved_lap_valid = bool(lap_valid)
 
                 if recorder_thread:
                     recorder_thread.record_lap(
@@ -371,7 +370,7 @@ def run_jarvis_live(settings: dict) -> bool:
                         avg_speed=avg_speed,
                         max_speed=max_speed,
                         min_speed=min_speed,
-                        valid=lap_valid
+                        valid=resolved_lap_valid
                     )
 
             telemetry_thread.lap_completed.connect(on_lap_complete)
@@ -639,8 +638,7 @@ if __name__ == "__main__":
             if settings_dialog.was_accepted():
                 settings = settings_dialog.get_settings()
                 logger.info(
-                    "Settings updated - AI: %s | Voice: %s",
-                    settings.get("ai_enabled"),
+                    "Settings updated - Voice: %s",
                     settings.get("voice_mode"),
                 )
             # Loop back to launcher

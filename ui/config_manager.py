@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS = {
-    "ai_enabled": True,
     "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
     "ptt_key": "v",                 # Key name for push-to-talk
     "use_local_llm": True,
@@ -30,7 +29,11 @@ def load_config() -> Dict[str, Any]:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, "r") as f:
                 saved = json.load(f)
-            config.update(saved)
+            if isinstance(saved, dict):
+                # Only accept recognized keys so stale settings are dropped.
+                for key in DEFAULTS:
+                    if key in saved:
+                        config[key] = saved[key]
     except Exception as e:
         logger.warning("Failed to load config: %s", e)
     return config

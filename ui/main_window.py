@@ -781,17 +781,25 @@ class MainWindow(QMainWindow):
 
         return eval_distances, deltas
 
-    def handle_lap_complete(self, lap_id, samples):
+    def handle_lap_complete(self, lap_id, samples, lap_valid=True, last_time_ms=0):
         """
         Handle lap completion event.
 
         Args:
             lap_id: Completed lap number
             samples: List of telemetry samples for the lap
+            lap_valid: Whether lap is valid according to AC
+            last_time_ms: AC last lap time in milliseconds
         """
         if not samples:
             return
-        logger.info("Lap %d completed with %d samples", lap_id, len(samples))
+        logger.info(
+            "Lap %d completed with %d samples (valid=%s, lastTimeMs=%d)",
+            lap_id,
+            len(samples),
+            bool(lap_valid),
+            int(last_time_ms or 0),
+        )
 
     def handle_ai_commentary(self, message: str, trigger: str, priority: int):
         """

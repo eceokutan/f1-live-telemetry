@@ -1,5 +1,4 @@
 {
-  "ai_enabled": false,
   "voice_mode": "disabled",
   "ptt_key": "v",
   "local_model_path": "race_engineer_gguf/granite-race-engineer-Q4_K_M.gguf"

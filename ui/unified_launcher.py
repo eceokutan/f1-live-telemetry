@@ -4,7 +4,7 @@ Unified launcher - starting point for Jarvis Live and Jarvis Post.
 Provides three options:
 1. Start Jarvis Live - Launch live telemetry dashboard
 2. Start Jarvis Post - Open session picker then post-race analysis
-3. Settings - Configure AI, voice, credentials
+3. Settings - Configure voice input and controls
 """
 import logging
 import os
@@ -155,7 +155,7 @@ class UnifiedLauncher(QtWidgets.QDialog):
             QPushButton:hover {{ background-color: #252525; color: {TEXT_COLOR}; }}
             QPushButton:pressed {{ background-color: #202020; }}
         """)
-        self.settings_btn.setToolTip("Setup & Settings - Configure AI Race Engineer, voice input, and API credentials")
+        self.settings_btn.setToolTip("Setup & Settings - Configure voice input and controls")
         self.settings_btn.clicked.connect(self._on_settings)
         layout.addWidget(self.settings_btn)
 

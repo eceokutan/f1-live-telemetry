@@ -274,7 +274,6 @@ class SessionRecorder(QtCore.QThread):
         track_name: str = "",
         car_model: str = "",
         player_name: str = "",
-        ai_enabled: bool = False,
         session_type: str = ""
     ) -> int:
         """
@@ -285,7 +284,6 @@ class SessionRecorder(QtCore.QThread):
             track_name: Track name
             car_model: Car model
             player_name: Player name
-            ai_enabled: Whether AI race engineer is enabled
             session_type: Game mode (e.g. "Hotlap", "Practice", "Race", "Qualify")
 
         Returns:
@@ -306,7 +304,7 @@ class SessionRecorder(QtCore.QThread):
                     track_name,
                     car_model,
                     player_name,
-                    1 if ai_enabled else 0,
+                    1,
                     session_type
                 ))
 
