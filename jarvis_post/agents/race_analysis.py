@@ -147,10 +147,10 @@ class RaceAnalysisAgent(BaseAgent):
 
         # --- session identity (so the model knows what it's analysing) ---
         session_context = {}
-        if metadata.get("track"):
-            session_context["track"] = metadata["track"]
-        if metadata.get("car"):
-            session_context["car"] = metadata["car"]
+        if metadata.get("track") or metadata.get("track_name"):
+            session_context["track"] = metadata.get("track") or metadata["track_name"]
+        if metadata.get("car") or metadata.get("car_model"):
+            session_context["car"] = metadata.get("car") or metadata["car_model"]
         if metadata.get("player_name"):
             session_context["driver"] = metadata["player_name"]
 

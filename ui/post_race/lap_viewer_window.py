@@ -1015,11 +1015,17 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             elif gtype == "multi_tb":
                 if not (self._col_exists(df, "throttle") or self._col_exists(df, "brake")):
                     continue
+                vals, labels, colors = [], [], []
+                if self._col_exists(df, "throttle"):
+                    vals.append(df['throttle'].values * 100)
+                    labels.append('Throttle')
+                    colors.append(ACCENT_GREEN)
+                if self._col_exists(df, "brake"):
+                    vals.append(df['brake'].values * 100)
+                    labels.append('Brake')
+                    colors.append(ACCENT_RED)
                 canvas.plot_multi_line(
-                    times,
-                    [df['throttle'].values * 100, df['brake'].values * 100],
-                    labels=['Throttle', 'Brake'],
-                    colors=[ACCENT_GREEN, ACCENT_RED],
+                    times, vals, labels=labels, colors=colors,
                     ylabel="Input [%]", title=title
                 )
 
