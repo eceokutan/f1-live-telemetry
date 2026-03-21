@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
     def _build_middle_column(self):
         """Build middle column: telemetry graphs."""
         mid_col = QVBoxLayout()
-        mid_col.setSpacing(4)
+        mid_col.setSpacing(6)
 
         title_label = QLabel("Live Telemetry Analysis")
         title_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -293,9 +293,7 @@ class MainWindow(QMainWindow):
             "Tyre Temperature [°C]", ["FL", "FR", "RL", "RR"], self
         )
 
-        # Add to layout with equal stretch so the available space is
-        # distributed across the remaining telemetry plots.
-        canvases = [
+        live_graphs = [
             self.speed_canvas,
             self.gear_canvas,
             self.rpm_canvas,
@@ -303,8 +301,16 @@ class MainWindow(QMainWindow):
             self.tyre_pressure_canvas,
             self.tyre_temp_canvas,
         ]
-        for canvas in canvases:
-            mid_col.addWidget(canvas, 1)
+        for canvas in live_graphs:
+            canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+
+        # Add to layout
+        mid_col.addWidget(self.speed_canvas, 1)
+        mid_col.addWidget(self.gear_canvas, 1)
+        mid_col.addWidget(self.rpm_canvas, 1)
+        mid_col.addWidget(self.brake_canvas, 1)
+        mid_col.addWidget(self.tyre_pressure_canvas, 1)
+        mid_col.addWidget(self.tyre_temp_canvas, 1)
 
         return mid_col
 

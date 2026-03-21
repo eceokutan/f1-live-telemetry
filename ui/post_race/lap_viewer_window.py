@@ -393,12 +393,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Left column: Speed, Gear, RPM
         self.graph_layout_left = QtWidgets.QVBoxLayout()
         self.graph_layout_left.setSpacing(6)
-        outer_layout.addLayout(self.graph_layout_left)
+        outer_layout.addLayout(self.graph_layout_left, 1)
 
         # Right column: Throttle/Brake, Tire Temps, Tire Pressures
         self.graph_layout_right = QtWidgets.QVBoxLayout()
         self.graph_layout_right.setSpacing(6)
-        outer_layout.addLayout(self.graph_layout_right)
+        outer_layout.addLayout(self.graph_layout_right, 1)
 
         # Placeholder (spans both columns initially)
         self.graph_placeholder = QtWidgets.QLabel("Load a session to view telemetry")
@@ -630,9 +630,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.refresh_analysis()
 
         if self.analysis_context_label:
-            self.analysis_context_label.setText(
-                f"Session {self.session.metadata.session_id} | Lap {self.current_lap.lap_number} | {self.current_lap.lap_time:.3f}s"
-            )
+            self.analysis_context_label.setText(self._get_analysis_session_name())
 
         self.status_bar.showMessage(f"Loaded Lap {lap_number}")
 
@@ -782,9 +780,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             return
 
         if self.analysis_context_label:
-            self.analysis_context_label.setText(
-                f"Session {self.session.metadata.session_id} | Lap {self.current_lap.lap_number} | {self.current_lap.lap_time:.3f}s"
-            )
+            self.analysis_context_label.setText(self._get_analysis_session_name())
 
         # Reset conversation state for new lap
         self._coach_conversation = []
@@ -808,6 +804,19 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             args=(request_id, session, lap),
             daemon=True,
         ).start()
+
+    def _get_analysis_session_name(self) -> str:
+        """Return the session name shown in the analysis header."""
+        if not self.session:
+            return "No session loaded"
+
+        metadata = self.session.metadata
+        for attr in ("session_name", "display_name", "name"):
+            value = getattr(metadata, attr, None)
+            if value:
+                return str(value)
+
+        return f"Session {metadata.session_id}"
 
     def _run_coach_worker(self, request_id: int, session: Session, lap: Lap) -> None:
         # Wait for analyst to finish so it always predates the coach.
@@ -986,6 +995,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 continue
 
             canvas = TimeSeriesCanvas(width=5, height=2.5)
+            canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
             if gtype == "single":
                 col = config["col"]

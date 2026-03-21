@@ -44,7 +44,11 @@ class CamberGainCanvas(FigureCanvas):
             self.lines.append(line)
 
         self.ax.legend(loc="upper right", fontsize=6, framealpha=0.8)
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
+
+    def _apply_uniform_layout(self):
+        """Use fixed margins so all live telemetry graphs render consistently."""
+        self.fig.subplots_adjust(left=0.10, right=0.995, top=0.88, bottom=0.23)
 
     def update_data(self, suspension: list, camber: list):
         """

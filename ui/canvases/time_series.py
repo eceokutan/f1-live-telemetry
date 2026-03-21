@@ -47,14 +47,18 @@ class TimeSeriesCanvas(FigureCanvas):
 
         # Configure plot
         self.title = title
-        self.ax.set_title(title, fontsize=8)
+        self.ax.set_title(title, fontsize=8, pad=3)
         self.ax.grid(True, color="#333333", alpha=0.6)
         self.ax.set_xlabel("Time [s]", fontsize=7)
 
         # Create line
         self.line, = self.ax.plot([], [], linewidth=1.5, color="#6FA8FF")
 
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
+
+    def _apply_uniform_layout(self):
+        """Use fixed margins so all live telemetry graphs render consistently."""
+        self.fig.subplots_adjust(left=0.10, right=0.995, top=0.82, bottom=0.24)
 
     def update_data(self, t: np.ndarray, y: np.ndarray):
         """

@@ -207,7 +207,8 @@ class SessionPickerDialog(QtWidgets.QDialog):
             self.table.setItem(row_idx, 0, id_item)
 
             # Name (from notes field)
-            name_str = session.get("notes", "") or ""
+            custom_name = (session.get("notes", "") or "").strip()
+            name_str = custom_name or f"Session {session['session_id']}"
             self.table.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(name_str))
 
             # Date
