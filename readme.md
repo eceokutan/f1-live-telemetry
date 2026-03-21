@@ -58,8 +58,6 @@ pip install -r requirements.txt
 ```bash
 python main.py          # Launch Jarvis (launcher opens first)
 python main.py --ai     # Launch with AI race engineer enabled
-python main.py --acc    # Launch with ACC backend
-python main.py --acc --ai  # ACC with AI
 ```
 
 ### Environment variables (for AI features)
@@ -94,7 +92,7 @@ AI features are optional — the app works without them for pure telemetry.
 ## Architecture Overview
 
 ```
-Game (AC/ACC)
+Game (AC)
     |
 Telemetry Worker (QThread @ 60Hz)
     |--- realtime_sample --> Live UI + Session Recorder
@@ -133,7 +131,6 @@ jarvis-granite/
 │   ├── lap_buffer.py               # Lap detection logic
 │   └── backends/
 │       ├── ac_backend.py           # Assetto Corsa (shared memory)
-│       └── acc_backend.py          # ACC (UDP broadcasting)
 │
 ├── ai/
 │   ├── race_engineer.py            # Live AI worker thread
@@ -210,7 +207,7 @@ All thresholds are configurable.
 - webrtcvad — voice activity detection
 - faster-whisper — speech-to-text
 - Hugging Face — LLM inference
-- Game APIs — AC shared memory, ACC UDP broadcasting
+- Game APIs — AC shared memory
 
 ---
 

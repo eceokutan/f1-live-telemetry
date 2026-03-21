@@ -281,7 +281,7 @@ class SessionRecorder(QtCore.QThread):
         Start a new recording session.
 
         Args:
-            game: Game name ("ac" or "acc")
+            game: Game name ("ac")
             track_name: Track name
             car_model: Car model
             player_name: Player name

@@ -1,5 +1,5 @@
 # F1 Telemetry Dashboard - Dependencies
-# Supports Assetto Corsa, ACC, and AI Race Engineering
+# Supports Assetto Corsa and AI Race Engineering
 
 # =============================================================================
 # UI Framework
@@ -9,9 +9,8 @@ matplotlib>=3.5.0
 numpy>=1.21.0
 
 # =============================================================================
-# Telemetry Backends
+# Telemetry Backend
 # =============================================================================
-accapi>=0.0.3  # ACC UDP broadcasting
 
 # =============================================================================
 # AI Race Engineer (Optional - Hugging Face LLM + local rules)

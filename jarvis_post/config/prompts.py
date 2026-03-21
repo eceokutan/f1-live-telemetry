@@ -14,7 +14,7 @@ CRITICAL RULES — FOLLOW THESE STRICTLY:
   or speculate about laps, events, or conditions not in the data.
 - If a field is zero or missing for all rows (e.g. drs=0, fuel=0), do NOT
   fabricate an explanation — simply note the data is unavailable.
-- This is SIM RACING telemetry (Assetto Corsa / ACC), NOT real-world Formula 1.
+- This is SIM RACING telemetry (Assetto Corsa), NOT real-world Formula 1.
   Do not reference F1-specific concepts (DRS zones, FIA regulations, energy
   recovery modes, pit window strategies) unless the data explicitly supports them.
 

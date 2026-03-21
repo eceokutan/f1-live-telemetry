@@ -96,3 +96,5 @@ postrace_gguf/
 sample_data/*_telemetry.csv
 race_engineer_llm/*.safetensors
 race_engineer_llm/tokenizer.json
+
+CLAUDE.md

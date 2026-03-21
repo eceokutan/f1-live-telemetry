@@ -58,7 +58,6 @@ a = Analysis(
         'data.session_exporter',
         # Telemetry backends
         'telemetry.backends.ac_backend',
-        'telemetry.backends.acc_backend',
         'telemetry.lap_buffer',
         # Dependencies that PyInstaller may miss
         'pydantic',

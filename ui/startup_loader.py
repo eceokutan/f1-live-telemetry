@@ -200,7 +200,6 @@ class StartupLoaderThread(QtCore.QThread):
         results = {
             "MainWindow": None,
             "AcTelemetryWorker": None,
-            "AccTelemetryWorker": None,
             "AIRaceEngineerWorker": None,
             "AI_AVAILABLE": False,
             "VoiceInputWorker": None,
@@ -268,14 +267,12 @@ class StartupLoaderThread(QtCore.QThread):
             return False
 
     def _run_stage_4(self, results: dict) -> bool:
-        """Telemetry backends — import AC and ACC workers."""
+        """Telemetry backend — import AC worker."""
         self.stage_update.emit(3, STATUS_RUNNING, "Loading telemetry backends...")
         try:
             from telemetry.backends.ac_backend import AcTelemetryWorker
-            from telemetry.backends.acc_backend import AccTelemetryWorker
             results["AcTelemetryWorker"] = AcTelemetryWorker
-            results["AccTelemetryWorker"] = AccTelemetryWorker
-            self.stage_update.emit(3, STATUS_DONE, "AC + ACC")
+            self.stage_update.emit(3, STATUS_DONE, "AC")
             return True
         except Exception as e:
             logger.error("Fatal: Failed to import telemetry backends: %s", e, exc_info=True)

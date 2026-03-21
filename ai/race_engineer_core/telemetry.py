@@ -139,7 +139,7 @@ class OpponentSnapshot(BaseModel):
     This is intentionally minimal and does not include full telemetry traces.
     """
 
-    car_index: int = Field(..., ge=0, description="ACC car index")
+    car_index: int = Field(..., ge=0, description="Car index")
     position: int = Field(..., ge=1, description="Race position")
     lap_number: int = Field(..., ge=0, description="Completed laps")
     speed: float = Field(..., ge=0, description="Current speed in km/h")

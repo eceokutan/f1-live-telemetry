@@ -47,7 +47,6 @@ logger.info("Jarvis F1 Telemetry Suite starting")
 # Module-level placeholders — populated by the loading screen
 MainWindow = None
 AcTelemetryWorker = None
-AccTelemetryWorker = None
 AIRaceEngineerWorker = None
 AI_AVAILABLE = False
 VoiceInputWorker = None
@@ -72,7 +71,7 @@ def run_jarvis_live(settings: dict) -> bool:
     Args:
         settings: Configuration dict from the launcher.
     """
-    global MainWindow, AcTelemetryWorker, AccTelemetryWorker
+    global MainWindow, AcTelemetryWorker
     global AI_AVAILABLE, AIRaceEngineerWorker
     global VOICE_AVAILABLE, VoiceInputWorker
     global TTS_AVAILABLE, TTSOutputWorker
@@ -96,14 +95,9 @@ def run_jarvis_live(settings: dict) -> bool:
 
     window = MainWindow()
 
-    # Choose backend
+    # AC-only backend
     logger.info("Initializing %s telemetry backend", game.upper())
-    if game == "ac":
-        telemetry_thread = AcTelemetryWorker()
-    elif game == "acc":
-        telemetry_thread = AccTelemetryWorker(host="127.0.0.1", port=9232, password="")
-    else:
-        raise ValueError(f"Unknown game '{game}'. Use 'ac' or 'acc'.")
+    telemetry_thread = AcTelemetryWorker()
 
     # Connect signals
     telemetry_thread.lap_completed.connect(window.handle_lap_complete)
@@ -578,7 +572,6 @@ if __name__ == "__main__":
     r = startup_results[0]
     MainWindow = r["MainWindow"]
     AcTelemetryWorker = r["AcTelemetryWorker"]
-    AccTelemetryWorker = r["AccTelemetryWorker"]
     AIRaceEngineerWorker = r["AIRaceEngineerWorker"]
     AI_AVAILABLE = r["AI_AVAILABLE"]
     VoiceInputWorker = r["VoiceInputWorker"]
