@@ -43,11 +43,11 @@ _CONTEXT_GROUPS = {
         "labels": {"fuel"},
     },
     "tires": {
-        "keywords": {"tire", "tyre", "temp", "temperature", "pressure", "wear", "grip", "deg", "degradation"},
+        "keywords": {"tire", "tyre", "temp", "temperature", "pressure", "wear", "grip", "deg", "degradation", "pit", "pitting", "box", "stop"},
         "labels": {"tire_temps", "tire_pressures", "tire_wear"},
     },
     "damage": {
-        "keywords": {"damage", "crash", "contact", "hit", "broken", "wing"},
+        "keywords": {"damage", "crash", "contact", "hit", "broken", "wing", "pit", "pitting", "box", "stop"},
         "labels": {"car_damage"},
     },
     "laptimes": {
@@ -401,20 +401,15 @@ class LiveSessionContext:
                 active_labels |= group["labels"]
         elif query is not None:
             query_lower = query.lower()
-            matched_any = False
             for group_name, group in _CONTEXT_GROUPS.items():
                 if group_name == "core":
                     continue
                 for kw in group["keywords"]:
                     if kw in query_lower:
                         active_labels |= group["labels"]
-                        matched_any = True
                         break
-            if not matched_any and not grounding_only:
-                # No keyword match → include everything (safe fallback for LLM prompts)
-                for group in _CONTEXT_GROUPS.values():
-                    active_labels |= group["labels"]
-            # When grounding_only=True and no keywords matched, core labels only
+            # No keyword match -> core labels only (query-agnostic minimum context).
+            # grounding_only has identical behavior in this case.
 
         # Pre-format values used by multiple lines
         fuel_laps = self.get_fuel_laps_remaining()

@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
         self._best_time_ms = 0        # best lap time in ms
         self._last_completed_laps = 0 # last seen completedLaps value
         self._lap_counter_initialized = False
-        self._mic_disabled_by_tts = False
+        self._mic_disabled_reasons = set()
 
         # Best lap reference for delta calculation
         self._best_lap_samples = None  # list of sample dicts from best lap
@@ -969,7 +969,7 @@ class MainWindow(QMainWindow):
         Args:
             is_speaking: True if driver is speaking, False if silent
         """
-        if self._mic_disabled_by_tts:
+        if self._mic_disabled_reasons:
             return
 
         if is_speaking:
@@ -979,11 +979,20 @@ class MainWindow(QMainWindow):
             self.mic_status_label.setText("🎤 Mic: Ready")
             self.mic_status_label.setStyleSheet("color: #888888;")  # Gray when idle
 
-    def set_mic_input_disabled(self, disabled: bool):
+    def set_mic_input_disabled(self, disabled: bool, reason: str = "TTS playback"):
         """Set microphone UI state when input is temporarily disabled."""
-        self._mic_disabled_by_tts = bool(disabled)
-        if self._mic_disabled_by_tts:
-            self.mic_status_label.setText("🎤 Mic: Disabled (TTS playback)")
+        disable_reason = (reason or "input lock").strip()
+        if disabled:
+            self._mic_disabled_reasons.add(disable_reason)
+        else:
+            self._mic_disabled_reasons.discard(disable_reason)
+
+        if self._mic_disabled_reasons:
+            if len(self._mic_disabled_reasons) == 1:
+                disable_text = next(iter(self._mic_disabled_reasons))
+            else:
+                disable_text = ", ".join(sorted(self._mic_disabled_reasons))
+            self.mic_status_label.setText(f"🎤 Mic: Disabled ({disable_text})")
             self.mic_status_label.setStyleSheet("color: #FFD166;")
         else:
             self.mic_status_label.setText("🎤 Mic: Ready")

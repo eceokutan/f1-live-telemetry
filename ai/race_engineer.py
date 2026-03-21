@@ -9,6 +9,7 @@ Receives telemetry samples, detects events, generates AI commentary.
 
 import asyncio
 import logging
+import math
 import re
 import time
 from typing import Optional, Dict, Any
@@ -345,6 +346,17 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
                 # Guardrail: label numeric claims not grounded in current context.
                 response = self._label_estimate_if_ungrounded_numbers(response, query)
+
+                # Guardrail: if the model says it lacks data for pit timing, provide
+                # deterministic pit guidance from current thresholds/context.
+                if self._is_pit_query(query) and self._signals_insufficient_data(response):
+                    logger.warning("LLM returned low-confidence pit answer; using pit fallback")
+                    response = self._build_pit_query_fallback_response()
+
+                # Guardrail: replace obviously broken outputs such as "0".
+                if self._is_low_quality_response(response):
+                    logger.warning("Low-quality reactive response detected; using deterministic fallback")
+                    response = self._build_reactive_fallback_response(query)
 
                 # Check for empty response and provide fallback
                 if not response or not response.strip():
@@ -792,6 +804,105 @@ class AIRaceEngineerWorker(QtCore.QThread):
             session_context=session_context_str,
             conversation_history=conversation_str,
         )
+
+    @staticmethod
+    def _is_pit_query(query: str) -> bool:
+        """Return True for pitting/strategy timing questions."""
+        if not query:
+            return False
+        query_lower = query.lower()
+        return any(token in query_lower for token in ("pit", "box", "stop", "stint", "refuel"))
+
+    @staticmethod
+    def _signals_insufficient_data(response: str) -> bool:
+        """Detect weak model replies that claim missing info."""
+        if not response:
+            return False
+        lowered = response.lower()
+        markers = (
+            "not enough information",
+            "not enough data",
+            "insufficient data",
+            "lack enough",
+            "can't determine",
+            "cannot determine",
+            "unable to determine",
+            "don't have enough",
+            "do not have enough",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _is_low_quality_response(response: str) -> bool:
+        """Detect unusable outputs like lone numbers or placeholders."""
+        if not response:
+            return True
+
+        cleaned = response.strip().lower()
+        if cleaned in {"0", "0.", "n/a", "na", "none", "null", "unknown", "idk", "..."}:
+            return True
+
+        if re.fullmatch(r"[0-9\W]+", cleaned):
+            return True
+
+        # Very short single-token outputs are almost always poor radio responses.
+        tokens = cleaned.split()
+        return len(tokens) == 1 and len(cleaned) <= 3
+
+    def _build_reactive_fallback_response(self, query: str) -> str:
+        """Deterministic fallback for failed/low-quality reactive responses."""
+        if self._is_pit_query(query):
+            return self._build_pit_query_fallback_response()
+
+        if not self.race_engineer_agent:
+            return "Copy that. Monitoring the situation."
+
+        prompt = self._build_reactive_prompt(query)
+        return self.race_engineer_agent.llm_client._generate_fallback_response(prompt)
+
+    def _build_pit_query_fallback_response(self) -> str:
+        """Deterministic pit guidance from live context and thresholds."""
+        if not self.context:
+            return "Hold for one lap while I gather data, then ask again for pit timing."
+
+        thresholds = self.telemetry_agent.thresholds if self.telemetry_agent else ThresholdsConfig()
+        fuel_laps = self.context.get_fuel_laps_remaining()
+
+        wear_values = list(self.context.tire_wear.values()) if self.context.tire_wear else []
+        has_wear_data = any(wear > 0 for wear in wear_values)
+        max_wear = max(wear_values) if wear_values else 0.0
+        max_temp = max(self.context.tire_temps.values()) if self.context.tire_temps else 0.0
+
+        if not math.isfinite(fuel_laps) or self.context.fuel_consumption_per_lap <= 0:
+            if has_wear_data and max_wear >= thresholds.tire_wear_critical:
+                return f"Tire wear is critical at {max_wear:.0f} percent. Box this lap."
+            if max_temp >= thresholds.tire_temp_critical:
+                return f"Tire temperatures are critical at {max_temp:.0f} C. Box this lap."
+            if has_wear_data and max_wear >= thresholds.tire_wear_warning:
+                return f"Tire wear is high at {max_wear:.0f} percent. Pit window is open."
+            if max_temp >= thresholds.tire_temp_warning:
+                return f"Tire temperatures are high at {max_temp:.0f} C. Pit soon if they do not recover."
+            return "Need one clean lap to calibrate fuel burn before I can call pit timing. Ask again next lap."
+
+        if fuel_laps <= thresholds.fuel_critical_laps:
+            return f"Fuel critical, box this lap. About {fuel_laps:.1f} laps remaining."
+
+        if fuel_laps <= thresholds.fuel_warning_laps:
+            return f"Pit window open now. Fuel projects {fuel_laps:.1f} laps."
+
+        if has_wear_data and max_wear >= thresholds.tire_wear_critical:
+            return f"Tire wear is critical at {max_wear:.0f} percent. Box this lap."
+
+        if max_temp >= thresholds.tire_temp_critical:
+            return f"Tire temperatures are critical at {max_temp:.0f} C. Box this lap."
+
+        if has_wear_data and max_wear >= thresholds.tire_wear_warning:
+            return f"Pit window open on tires, max wear {max_wear:.0f} percent."
+
+        if max_temp >= thresholds.tire_temp_warning:
+            return f"Tire temperatures are high at {max_temp:.0f} C. Manage pace and plan a stop."
+
+        return f"No stop needed yet. Fuel projects about {fuel_laps:.1f} laps remaining."
 
     def _build_event_fallback_response(self, event: Event) -> str:
         """

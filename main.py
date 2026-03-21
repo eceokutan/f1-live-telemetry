@@ -139,6 +139,9 @@ def run_jarvis_live(settings: dict) -> bool:
         ai_thread.ai_commentary.connect(window.handle_ai_commentary)
         ai_thread.driver_query_received.connect(window.handle_driver_query)
         ai_thread.status_update.connect(window.handle_ai_status_update)
+        ai_thread.processing_query.connect(
+            lambda busy: window.set_mic_input_disabled(busy, reason="AI processing query")
+        )
         ai_thread.status_update.connect(lambda msg: logger.info("AI: %s", msg))
 
         ai_sample_counter = [0]
@@ -259,14 +262,18 @@ def run_jarvis_live(settings: dict) -> bool:
                     logger.warning("TTS worker stopped")
                     if voice_thread:
                         voice_thread.resume()
-                    window.set_mic_input_disabled(False)
+                    window.set_mic_input_disabled(False, reason="TTS playback")
 
                 worker.finished.connect(_on_tts_worker_finished)
                 if voice_thread:
                     worker.playback_started.connect(voice_thread.pause)
                     worker.playback_finished.connect(voice_thread.resume)
-                    worker.playback_started.connect(lambda: window.set_mic_input_disabled(True))
-                    worker.playback_finished.connect(lambda: window.set_mic_input_disabled(False))
+                    worker.playback_started.connect(
+                        lambda: window.set_mic_input_disabled(True, reason="TTS playback")
+                    )
+                    worker.playback_finished.connect(
+                        lambda: window.set_mic_input_disabled(False, reason="TTS playback")
+                    )
 
                 return worker
 
