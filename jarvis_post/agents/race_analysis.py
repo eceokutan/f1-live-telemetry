@@ -57,7 +57,10 @@ class RaceAnalysisAgent(BaseAgent):
 
         # --- lap times list ---
         lap_times = [round(lap.get("lap_time", 0), 3) for lap in laps]
-        valid_times = [t for t in lap_times if t > 0]
+        valid_flags = [lap.get("valid", True) for lap in laps]
+        incomplete_laps = [i + 1 for i, v in enumerate(valid_flags) if not v]
+        # Exclude incomplete laps from summary statistics
+        valid_times = [t for t, v in zip(lap_times, valid_flags) if t > 0 and v]
 
         # --- lap_summary ---
         fastest_time = min(valid_times) if valid_times else 0
@@ -68,6 +71,8 @@ class RaceAnalysisAgent(BaseAgent):
 
         lap_summary = {
             "total": len(laps),
+            "completed": len(valid_times),
+            "incomplete": len(incomplete_laps),
             "avg": avg_time,
             "fastest": {"lap": fastest_lap, "time": fastest_time},
             "slowest": {"lap": slowest_lap, "time": slowest_time},
@@ -159,6 +164,7 @@ class RaceAnalysisAgent(BaseAgent):
             "result": result,
             "lap_summary": lap_summary,
             "laps": lap_times,
+            "incomplete_laps": incomplete_laps,
             "stints": stints,
             "pit_stops": pit_stops,
             "car_data_mode": "lap_aggregate",

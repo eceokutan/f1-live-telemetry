@@ -169,9 +169,11 @@ class CoachingAgent(BaseAgent):
 - Total Laps: {metadata.get('total_laps', 0)}
 - Best Lap: {metadata.get('best_lap_time', 'N/A')}s"""
 
-        # Build lap summary (focus on improvement)
+        # Build lap summary (focus on improvement, exclude incomplete laps)
         if laps:
-            lap_times = [lap.get('lap_time') for lap in laps if lap.get('lap_time')]
+            valid_laps = [lap for lap in laps if lap.get('valid', True)]
+            incomplete_count = len(laps) - len(valid_laps)
+            lap_times = [lap.get('lap_time') for lap in valid_laps if lap.get('lap_time')]
             if lap_times:
                 first_lap = lap_times[0]
                 best_lap = min(lap_times)
@@ -180,9 +182,13 @@ class CoachingAgent(BaseAgent):
 - First Lap: {first_lap:.3f}s
 - Best Lap: {best_lap:.3f}s
 - Improvement: {improvement:.3f}s
-- Lap Count: {len(lap_times)}"""
+- Completed Laps: {len(lap_times)}"""
+                if incomplete_count:
+                    lap_section += f"\n- Incomplete Laps: {incomplete_count} (excluded from statistics)"
             else:
-                lap_section = "LAP PERFORMANCE: No lap time data available"
+                lap_section = "LAP PERFORMANCE: No completed lap time data available"
+                if incomplete_count:
+                    lap_section += f" ({incomplete_count} incomplete laps recorded)"
         else:
             lap_section = "LAP PERFORMANCE: No lap data available"
 

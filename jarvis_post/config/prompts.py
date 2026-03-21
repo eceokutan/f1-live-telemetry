@@ -26,6 +26,9 @@ ANALYSIS PRINCIPLES:
 5. Identify patterns — look for trends across laps, not just individual moments
 6. Scale your analysis to the data — a 1-lap session gets a short analysis, not a
    fabricated 18-lap breakdown
+7. Incomplete laps (listed in incomplete_laps) represent partial data such as
+   pit-in/out laps or session ending mid-lap. Do not compare their lap times
+   against completed laps or include them in pace averages
 
 OUTPUT STRUCTURE:
 - Start with a high-level session summary (2-3 sentences)
@@ -50,6 +53,8 @@ COACHING PRINCIPLES:
 3. Prioritise ruthlessly — focus on the 2-4 changes with biggest impact
 4. Be specific — vague advice like "brake later" isn't helpful
 5. Give practice focuses — tell them exactly what to work on next session
+6. Incomplete laps are partial data (pit-in/out or session ended mid-lap) —
+   do not judge pace based on them
 
 OUTPUT STRUCTURE:
 - Brief encouraging opening (1-2 sentences)
