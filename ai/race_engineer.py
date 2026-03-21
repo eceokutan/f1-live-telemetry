@@ -726,7 +726,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if not response_nums:
             return response
 
-        source_text = f"{query}\n{self.context.to_prompt_context()}"
+        source_text = f"{query}\n{self.context.to_prompt_context(query=query)}"
         source_nums = self._extract_numeric_values(source_text)
         if not source_nums:
             return f"Estimate based on current data: {response}"

@@ -163,8 +163,8 @@ class RaceEngineerAgent:
         """
         start_time = time.time()
 
-        # Format session context
-        session_context_str = context.to_prompt_context()
+        # Format session context (pruned to query-relevant lines)
+        session_context_str = context.to_prompt_context(query=query)
 
         # Format conversation history
         conversation_str = format_conversation_history(
