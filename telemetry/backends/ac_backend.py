@@ -560,6 +560,8 @@ class AcTelemetryWorker(QtCore.QThread):
                         "car_damage_right": phys.carDamage[3],
                         "car_damage_centre": phys.carDamage[4],
                         "tyres_out": phys.numberOfTyresOut,
+                        "is_in_pit": gfx.isInPit,
+                        "pit_limiter": phys.pitLimiterOn,
                         "lap_valid": lap_valid,
                         "last_time_ms": gfx.lastTimeMs,
                     }

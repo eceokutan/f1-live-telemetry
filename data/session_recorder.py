@@ -196,6 +196,8 @@ class SessionRecorder(QtCore.QThread):
                     car_damage_left REAL,
                     car_damage_right REAL,
                     car_damage_centre REAL,
+                    is_in_pit INTEGER,
+                    pit_limiter INTEGER,
                     timestamp REAL NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
@@ -254,6 +256,8 @@ class SessionRecorder(QtCore.QThread):
                     ("car_damage_front", "REAL"), ("car_damage_rear", "REAL"),
                     ("car_damage_left", "REAL"), ("car_damage_right", "REAL"),
                     ("car_damage_centre", "REAL"),
+                    ("is_in_pit", "INTEGER"),
+                    ("pit_limiter", "INTEGER"),
                 ]
                 for col_name, col_type in new_telemetry_cols:
                     try:
@@ -513,6 +517,8 @@ class SessionRecorder(QtCore.QThread):
                     "car_damage_left": sample.get("car_damage_left", 0.0),
                     "car_damage_right": sample.get("car_damage_right", 0.0),
                     "car_damage_centre": sample.get("car_damage_centre", 0.0),
+                    "is_in_pit": sample.get("is_in_pit", 0),
+                    "pit_limiter": sample.get("pit_limiter", 0),
                     "timestamp": time.time()
                 })
 
@@ -544,6 +550,7 @@ class SessionRecorder(QtCore.QThread):
                     suspension_fl, suspension_fr, suspension_rl, suspension_rr,
                     ride_height_front, ride_height_rear,
                     car_damage_front, car_damage_rear, car_damage_left, car_damage_right, car_damage_centre,
+                    is_in_pit, pit_limiter,
                     timestamp
                 ) VALUES (
                     :session_id, :lap_number, :elapsed_time, :pos_x, :pos_z, :speed,
@@ -556,6 +563,7 @@ class SessionRecorder(QtCore.QThread):
                     :suspension_fl, :suspension_fr, :suspension_rl, :suspension_rr,
                     :ride_height_front, :ride_height_rear,
                     :car_damage_front, :car_damage_rear, :car_damage_left, :car_damage_right, :car_damage_centre,
+                    :is_in_pit, :pit_limiter,
                     :timestamp
                 )
                 """, self.telemetry_buffer)
