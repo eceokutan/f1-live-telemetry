@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem,
     QGroupBox,
     QTextEdit,
+    QComboBox,
 )
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -275,10 +276,21 @@ class MainWindow(QMainWindow):
         mid_col = QVBoxLayout()
         mid_col.setSpacing(6)
 
+        header_row = QHBoxLayout()
         title_label = QLabel("Live Telemetry Analysis")
         title_label.setAlignment(QtCore.Qt.AlignCenter)
         title_label.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 18px;")
-        mid_col.addWidget(title_label)
+        header_row.addWidget(title_label, stretch=1)
+
+        header_row.addWidget(QLabel("Window:"))
+        self.window_combo = QComboBox()
+        self.window_combo.addItems(["30s", "60s", "90s", "All"])
+        self.window_combo.setCurrentIndex(0)
+        self.window_combo.setFixedWidth(70)
+        self.window_combo.currentIndexChanged.connect(self._on_window_changed)
+        header_row.addWidget(self.window_combo)
+
+        mid_col.addLayout(header_row)
 
         # Create canvases
         self.speed_canvas = TimeSeriesCanvas("Speed [km/h]", self)
@@ -293,7 +305,7 @@ class MainWindow(QMainWindow):
             "Tyre Temperature [°C]", ["FL", "FR", "RL", "RR"], self
         )
 
-        live_graphs = [
+        self._live_graphs = [
             self.speed_canvas,
             self.gear_canvas,
             self.rpm_canvas,
@@ -301,7 +313,7 @@ class MainWindow(QMainWindow):
             self.tyre_pressure_canvas,
             self.tyre_temp_canvas,
         ]
-        for canvas in live_graphs:
+        for canvas in self._live_graphs:
             canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         # Add to layout
@@ -313,6 +325,13 @@ class MainWindow(QMainWindow):
         mid_col.addWidget(self.tyre_temp_canvas, 1)
 
         return mid_col
+
+    def _on_window_changed(self, index: int):
+        """Update sliding window duration for all live graphs."""
+        windows = [30.0, 60.0, 90.0, 0.0]  # 0 = show all
+        seconds = windows[index]
+        for canvas in self._live_graphs:
+            canvas.window_seconds = seconds
 
     def _build_right_column(self):
         """Build right column: session info + transcripts."""
