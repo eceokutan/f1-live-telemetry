@@ -162,6 +162,7 @@ class MainWindow(QMainWindow):
         self._lap_times_ms = []       # list of lap times in ms, index = lap-1
         self._best_time_ms = 0        # best lap time in ms
         self._last_completed_laps = 0 # last seen completedLaps value
+        self._lap_counter_initialized = False
 
         # Best lap reference for delta calculation
         self._best_lap_samples = None  # list of sample dicts from best lap
@@ -459,22 +460,71 @@ class MainWindow(QMainWindow):
         self.best_lap_label.setText(f"Best: {best_time if best_time else '--:--:---'}")
 
         # Detect lap completion from AC's completedLaps counter
-        completed_laps = live_data.get("completed_laps", 0)
-        last_time_ms = live_data.get("last_time_ms", 0)
-        best_time_ms = live_data.get("best_time_ms", 0)
+        try:
+            completed_laps = int(live_data.get("completed_laps", 0))
+        except (TypeError, ValueError):
+            completed_laps = 0
 
-        if completed_laps > self._last_completed_laps and last_time_ms > 0:
+        try:
+            last_time_ms = int(live_data.get("last_time_ms", 0) or 0)
+        except (TypeError, ValueError):
+            last_time_ms = 0
+
+        try:
+            best_time_ms = int(live_data.get("best_time_ms", 0) or 0)
+        except (TypeError, ValueError):
+            best_time_ms = 0
+
+        completed_laps = max(0, completed_laps)
+        last_seen = self._last_completed_laps
+
+        # Late join safety: first packet only establishes baseline so we don't
+        # backfill historical laps when opening mid-session.
+        if not self._lap_counter_initialized:
+            self._lap_counter_initialized = True
             self._last_completed_laps = completed_laps
+            return
 
-            # Check if this lap set a new best — save its samples as reference
-            is_new_best = (best_time_ms != self._best_time_ms and best_time_ms > 0
-                           and (self._best_time_ms == 0 or best_time_ms <= self._best_time_ms))
-            self._best_time_ms = best_time_ms
+        # Session reset/restart: resync baseline without creating table rows.
+        if completed_laps < last_seen:
+            logger.info(
+                "Lap counter reset detected (%d -> %d), resyncing baseline",
+                last_seen,
+                completed_laps,
+            )
+            self._last_completed_laps = completed_laps
+            return
 
-            if is_new_best and self._previous_lap_samples:
-                self._save_best_lap_reference(self._previous_lap_samples)
+        if completed_laps == last_seen:
+            return
 
-            self._add_lap_to_table(completed_laps, last_time_ms)
+        # Ignore jumps greater than one lap; treat as desync and resync.
+        if completed_laps > last_seen + 1:
+            logger.warning(
+                "Lap counter jump detected (%d -> %d), resyncing baseline",
+                last_seen,
+                completed_laps,
+            )
+            self._last_completed_laps = completed_laps
+            return
+
+        # Valid one-lap increment.
+        self._last_completed_laps = completed_laps
+        if last_time_ms <= 0:
+            return
+
+        # Check if this lap set a new best — save its samples as reference
+        is_new_best = (
+            best_time_ms != self._best_time_ms
+            and best_time_ms > 0
+            and (self._best_time_ms == 0 or best_time_ms <= self._best_time_ms)
+        )
+        self._best_time_ms = best_time_ms
+
+        if is_new_best and self._previous_lap_samples:
+            self._save_best_lap_reference(self._previous_lap_samples)
+
+        self._add_lap_to_table(completed_laps, last_time_ms)
 
     def handle_realtime_sample(self, sample):
         """

@@ -355,6 +355,13 @@ class AcTelemetryWorker(QtCore.QThread):
                             off_count = 0
 
                         if frame_count % 10 == 0:
+                            # Keep lap data consistent with the stabilized lap_id used by
+                            # realtime samples so late-join UI logic doesn't see raw spikes.
+                            completed_laps = (
+                                max(0, last_valid_raw_lap)
+                                if last_valid_raw_lap is not None
+                                else max(0, int(gfx.completedLaps))
+                            )
                             self.live_data_update.emit({
                                 "current_lap": (last_lap_id + 1) if last_lap_id >= 0 else 1,
                                 "speed": 0, "gear": 1, "rpm": 0, "fuel": 0,
@@ -363,7 +370,7 @@ class AcTelemetryWorker(QtCore.QThread):
                                 "current_time": gfx.currentTime,
                                 "last_time": _sanitize_ac_time_str(gfx.lastTime), "best_time": _sanitize_ac_time_str(gfx.bestTime),
                                 "last_time_ms": gfx.lastTimeMs, "best_time_ms": gfx.bestTimeMs,
-                                "completed_laps": gfx.completedLaps,
+                                "completed_laps": completed_laps,
                             })
                         time.sleep(0.5)
                         continue
@@ -565,7 +572,7 @@ class AcTelemetryWorker(QtCore.QThread):
                             "best_time": _sanitize_ac_time_str(gfx.bestTime),
                             "last_time_ms": gfx.lastTimeMs,
                             "best_time_ms": gfx.bestTimeMs,
-                            "completed_laps": gfx.completedLaps,
+                            "completed_laps": lap_id,
                         }
                         self.live_data_update.emit(live_data)
 
