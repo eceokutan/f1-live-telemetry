@@ -153,7 +153,7 @@ class SessionExporter:
         cursor.execute(
             """
             SELECT session_id, game, track_name, car_model, player_name,
-                   start_time, end_time, total_laps, ai_enabled
+                   start_time, end_time, total_laps, ai_enabled, notes
             FROM sessions
             WHERE session_id = ?
             """,
@@ -192,6 +192,7 @@ class SessionExporter:
             "end_time": session_row["end_time"],
             "total_laps": int(session_row["total_laps"] or 0),
             "ai_enabled": bool(session_row["ai_enabled"]),
+            "notes": session_row["notes"] or "",
         }
         with open(metadata_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)

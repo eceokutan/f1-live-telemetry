@@ -176,6 +176,7 @@ class TelemetryLoader:
             end_time=end_time,
             total_laps=int(metadata_payload.get("total_laps", total_laps) or total_laps),
             ai_enabled=bool(metadata_payload.get("ai_enabled", False)),
+            notes=str(metadata_payload.get("notes") or ""),
         )
 
     @staticmethod

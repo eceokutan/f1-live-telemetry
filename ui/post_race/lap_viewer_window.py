@@ -811,8 +811,10 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             return "No session loaded"
 
         metadata = self.session.metadata
-        for attr in ("session_name", "display_name", "name"):
+        for attr in ("notes", "session_name", "display_name", "name"):
             value = getattr(metadata, attr, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
             if value:
                 return str(value)
 
@@ -1250,7 +1252,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 "player_name": metadata.player_name,
                 "total_laps": len(self.session.laps),
                 "best_lap_time": float(fastest_lap.lap_time) if fastest_lap else None,
-                "notes": "",
+                "notes": str(getattr(metadata, "notes", "") or ""),
             },
             "laps": laps_payload,
             "telemetry": telemetry_payload,

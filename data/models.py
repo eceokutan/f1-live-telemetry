@@ -36,6 +36,7 @@ class SessionMetadata(BaseModel):
     end_time: Optional[datetime] = None
     total_laps: int = 0
     ai_enabled: bool = False
+    notes: str = ""
 
     def __repr__(self) -> str:
         return f"SessionMetadata({self.track_name}, {self.car_model}, {self.total_laps} laps)"
