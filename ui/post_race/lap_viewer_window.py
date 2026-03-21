@@ -578,7 +578,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.lap_list.clear()
             self.selected_lap_label.setText("Viewing: Lap --")
             for lap in self.session.laps:
-                item = QtWidgets.QListWidgetItem(f"Lap {lap.lap_number} - {lap.lap_time:.3f}s")
+                display_lap = self._display_lap_number(lap.lap_number)
+                item = QtWidgets.QListWidgetItem(f"Lap {display_lap} - {lap.lap_time:.3f}s")
                 item.setData(QtCore.Qt.UserRole, lap.lap_number)
                 self.lap_list.addItem(item)
 
@@ -601,7 +602,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             return
 
         self._sync_lap_list_selection(lap_number)
-        self.selected_lap_label.setText(f"Viewing: Lap {lap_number}")
+        display_lap = self._display_lap_number(lap_number)
+        self.selected_lap_label.setText(f"Viewing: Lap {display_lap}")
 
         self._scrub_timer.stop()
         self._pending_scrub_time = None
@@ -632,7 +634,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         if self.analysis_context_label:
             self.analysis_context_label.setText(self._get_analysis_session_name())
 
-        self.status_bar.showMessage(f"Loaded Lap {lap_number}")
+        self.status_bar.showMessage(f"Loaded Lap {display_lap}")
+
+    @staticmethod
+    def _display_lap_number(lap_number: int) -> int:
+        """Convert internal 0-based lap number to a 1-based UI label."""
+        return int(lap_number) + 1
 
     def _downsample_telemetry_for_render(self, telemetry_df):
         """Downsample lap telemetry for post-race rendering only (keeps recording fidelity unchanged)."""
