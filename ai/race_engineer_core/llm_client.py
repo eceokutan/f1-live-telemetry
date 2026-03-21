@@ -10,6 +10,7 @@ import asyncio
 import logging
 import queue
 import re
+import threading
 from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -301,10 +302,13 @@ class LLMClient:
         # Bridge synchronous generator → async via a thread-safe queue
         token_queue: queue.Queue = queue.Queue()
         _SENTINEL = None  # signals generator exhaustion
+        cancel_event = threading.Event()
 
         def _run_generator():
             try:
                 for token in local_llm.generate_stream(prompt):
+                    if cancel_event.is_set():
+                        break
                     token_queue.put(token)
             except Exception as e:
                 logger.error("Streaming generator error: %s", e)
@@ -318,42 +322,48 @@ class LLMClient:
         processed_count = 0  # raw parts already processed
         pending_short = ""   # short clause waiting for more text
 
-        while True:
-            token = await loop.run_in_executor(None, token_queue.get)
-            if token is _SENTINEL:
-                break
-            accumulated += token
+        try:
+            while True:
+                token = await loop.run_in_executor(None, token_queue.get)
+                if token is _SENTINEL:
+                    break
+                accumulated += token
 
-            # Raw split — no short-merge, so a boundary always produces
-            # a new part even if the preceding clause is tiny.
+                # Raw split — no short-merge, so a boundary always produces
+                # a new part even if the preceding clause is tiny.
+                raw_parts = [p.strip() for p in self._CLAUSE_BOUNDARY.split(accumulated) if p.strip()]
+
+                # All parts except the last are complete (a boundary was
+                # detected after them).  The last part is still forming.
+                while processed_count < len(raw_parts) - 1:
+                    part = raw_parts[processed_count]
+                    processed_count += 1
+
+                    # Combine with any buffered short clause
+                    candidate = (pending_short + " " + part).strip() if pending_short else part
+
+                    if len(candidate) >= self._MIN_CLAUSE_CHARS:
+                        on_clause(candidate)
+                        pending_short = ""
+                    else:
+                        pending_short = candidate
+
+            # Final: dispatch whatever remains (pending buffer + last raw part)
+            full_response = self._clean_response(accumulated)
             raw_parts = [p.strip() for p in self._CLAUSE_BOUNDARY.split(accumulated) if p.strip()]
+            remaining_parts = raw_parts[processed_count:]
+            remaining = pending_short
+            for part in remaining_parts:
+                remaining = (remaining + " " + part).strip() if remaining else part
+            if remaining:
+                on_clause(remaining)
 
-            # All parts except the last are complete (a boundary was
-            # detected after them).  The last part is still forming.
-            while processed_count < len(raw_parts) - 1:
-                part = raw_parts[processed_count]
-                processed_count += 1
-
-                # Combine with any buffered short clause
-                candidate = (pending_short + " " + part).strip() if pending_short else part
-
-                if len(candidate) >= self._MIN_CLAUSE_CHARS:
-                    on_clause(candidate)
-                    pending_short = ""
-                else:
-                    pending_short = candidate
-
-        # Final: dispatch whatever remains (pending buffer + last raw part)
-        full_response = self._clean_response(accumulated)
-        raw_parts = [p.strip() for p in self._CLAUSE_BOUNDARY.split(accumulated) if p.strip()]
-        remaining_parts = raw_parts[processed_count:]
-        remaining = pending_short
-        for part in remaining_parts:
-            remaining = (remaining + " " + part).strip() if remaining else part
-        if remaining:
-            on_clause(remaining)
-
-        return full_response
+            return full_response
+        finally:
+            # Signal the generator thread to stop producing tokens.
+            # This runs on coroutine cancellation (e.g. wait_for timeout)
+            # as well as normal completion.
+            cancel_event.set()
 
     def invoke_sync(self, prompt: str) -> str:
         """
