@@ -741,20 +741,31 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 return
             self.analyst_finished.emit(request_id, f"Analyst failed:\n{exc}", "error")
 
+    @staticmethod
+    def _is_scrolled_to_bottom(text_edit: QtWidgets.QTextEdit) -> bool:
+        sb = text_edit.verticalScrollBar()
+        return sb.value() >= sb.maximum() - 4
+
     def _on_analyst_chunk(self, request_id: int, text: str) -> None:
         if request_id != self._analyst_request_id:
             return
         if self.analyst_output:
+            at_bottom = self._is_scrolled_to_bottom(self.analyst_output)
             self.analyst_output.moveCursor(QtGui.QTextCursor.End)
             self.analyst_output.insertPlainText(text)
+            if at_bottom:
+                self.analyst_output.ensureCursorVisible()
 
     def _on_coach_chunk(self, request_id: int, text: str) -> None:
         if request_id != self._analysis_request_id:
             return
         self._current_stream_text.append(text)
         if self.coach_output:
+            at_bottom = self._is_scrolled_to_bottom(self.coach_output)
             self.coach_output.moveCursor(QtGui.QTextCursor.End)
             self.coach_output.insertPlainText(text)
+            if at_bottom:
+                self.coach_output.ensureCursorVisible()
 
     def _on_analyst_finished(self, request_id: int, analyst_text: str, source: str) -> None:
         if request_id != self._analyst_request_id:
