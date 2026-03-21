@@ -859,6 +859,7 @@ class AIPipelineBridge:
             "ride_height_front", "ride_height_rear",
             "car_damage_front", "car_damage_rear", "car_damage_left",
             "car_damage_right", "car_damage_centre",
+            "is_in_pit", "pit_limiter",
         ]
 
         lap_df = lap.telemetry
@@ -913,6 +914,7 @@ class AIPipelineBridge:
             "ride_height_front", "ride_height_rear",
             "car_damage_front", "car_damage_rear", "car_damage_left",
             "car_damage_right", "car_damage_centre",
+            "is_in_pit", "pit_limiter",
         ]
 
         full_df = session.telemetry
