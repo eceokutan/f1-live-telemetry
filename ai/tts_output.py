@@ -519,7 +519,7 @@ class TTSOutputWorker(QtCore.QThread):
             # Can happen during shutdown races; do not crash caller thread.
             logger.warning("[TTS] Failed to queue message during shutdown: %s", e)
 
-    def speak_sentence(self, sentence: str):
+    def speak_sentence(self, sentence: str) -> bool:
         """
         Queue a pre-split sentence for immediate synthesis+playback.
 
@@ -528,6 +528,9 @@ class TTSOutputWorker(QtCore.QThread):
 
         Args:
             sentence: A single sentence to speak
+
+        Returns:
+            True if the sentence was successfully queued, False otherwise.
         """
         loop = self._event_loop
         text_ok = bool(sentence and sentence.strip())
@@ -537,7 +540,7 @@ class TTSOutputWorker(QtCore.QThread):
 
         if not (thread_running and loop_running and queue_ready and text_ok):
             logger.warning("[TTS] Streaming sentence NOT queued - worker not ready")
-            return
+            return False
 
         logger.info("[TTS] Queueing streaming sentence: %s", sentence[:50])
         try:
@@ -545,15 +548,20 @@ class TTSOutputWorker(QtCore.QThread):
                 self.message_queue.put(("sentence", sentence)),
                 loop,
             )
+            return True
         except RuntimeError as e:
             logger.warning("[TTS] Failed to queue streaming sentence: %s", e)
+            return False
 
-    def signal_stream_end(self):
+    def signal_stream_end(self) -> bool:
         """
         Signal that no more streaming sentences are coming.
 
         Causes the TTS worker to emit playback_finished if a streaming
         playback session was active.
+
+        Returns:
+            True if the signal was successfully queued, False otherwise.
         """
         loop = self._event_loop
         loop_running = bool(loop and loop.is_running() and not loop.is_closed())
@@ -561,7 +569,7 @@ class TTSOutputWorker(QtCore.QThread):
         thread_running = self._running and self.isRunning()
 
         if not (thread_running and loop_running and queue_ready):
-            return
+            return False
 
         logger.info("[TTS] Signalling end of stream")
         try:
@@ -569,8 +577,10 @@ class TTSOutputWorker(QtCore.QThread):
                 self.message_queue.put(("end_of_stream", None)),
                 loop,
             )
+            return True
         except RuntimeError as e:
             logger.warning("[TTS] Failed to signal stream end: %s", e)
+            return False
 
     def _cleanup(self):
         """Clean up audio resources."""

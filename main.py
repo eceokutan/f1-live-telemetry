@@ -314,17 +314,51 @@ def run_jarvis_live(settings: dict) -> bool:
                     return
                 _speak_with_retry(msg)
 
+            def _speak_sentence_with_retry(sentence: str, retries_left: int = 6):
+                """Queue a streaming sentence for TTS with retry."""
+                worker = tts_runtime["worker"]
+                if worker and worker.isRunning():
+                    if worker.speak_sentence(sentence):
+                        return
+
+                if not _ensure_tts_worker_running("streaming-restart"):
+                    if retries_left <= 0:
+                        logger.error("Dropping streaming sentence after failed restart: %s", sentence[:80])
+                        return
+                    QtCore.QTimer.singleShot(
+                        200, lambda s=sentence, r=retries_left - 1: _speak_sentence_with_retry(s, r)
+                    )
+                    return
+
+                if retries_left <= 0:
+                    logger.error("Dropping streaming sentence; worker never became ready: %s", sentence[:80])
+                    return
+
+                QtCore.QTimer.singleShot(
+                    200, lambda s=sentence, r=retries_left - 1: _speak_sentence_with_retry(s, r)
+                )
+
+            def _signal_stream_end_with_retry(retries_left: int = 6):
+                """Signal end of stream with retry."""
+                worker = tts_runtime["worker"]
+                if worker and worker.isRunning():
+                    if worker.signal_stream_end():
+                        return
+
+                if retries_left <= 0:
+                    logger.warning("Dropping stream end signal after retries")
+                    return
+
+                QtCore.QTimer.singleShot(
+                    200, lambda r=retries_left - 1: _signal_stream_end_with_retry(r)
+                )
+
             def on_ai_sentence_for_tts(sentence, is_final):
                 """Handle streaming LLM sentences for TTS."""
-                worker = tts_runtime["worker"]
-                if not worker or not worker.isRunning():
-                    if not _ensure_tts_worker_running("streaming-restart"):
-                        return
-                    worker = tts_runtime["worker"]
                 if is_final:
-                    worker.signal_stream_end()
+                    _signal_stream_end_with_retry()
                 elif sentence and sentence.strip():
-                    worker.speak_sentence(sentence)
+                    _speak_sentence_with_retry(sentence)
 
             if ai_thread:
                 ai_thread.ai_commentary.connect(on_ai_commentary_for_tts)
