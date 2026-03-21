@@ -25,7 +25,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.collections import LineCollection
 
-from ui.canvases import TrackMapCanvas, TimeSeriesCanvas, MultiLineCanvas, CamberGainCanvas
+from ui.canvases import TrackMapCanvas, TimeSeriesCanvas, MultiLineCanvas
 from ui.styles import DARK_STYLESHEET, FONT_HEADING
 
 
@@ -291,16 +291,19 @@ class MainWindow(QMainWindow):
         self.tyre_temp_canvas = MultiLineCanvas(
             "Tyre Temperature [°C]", ["FL", "FR", "RL", "RR"], self
         )
-        self.camber_gain_canvas = CamberGainCanvas(self)
 
-        # Add to layout
-        mid_col.addWidget(self.speed_canvas)
-        mid_col.addWidget(self.gear_canvas)
-        mid_col.addWidget(self.rpm_canvas)
-        mid_col.addWidget(self.brake_canvas)
-        mid_col.addWidget(self.tyre_pressure_canvas)
-        mid_col.addWidget(self.tyre_temp_canvas)
-        mid_col.addWidget(self.camber_gain_canvas)
+        # Add to layout with equal stretch so the available space is
+        # distributed across the remaining telemetry plots.
+        canvases = [
+            self.speed_canvas,
+            self.gear_canvas,
+            self.rpm_canvas,
+            self.brake_canvas,
+            self.tyre_pressure_canvas,
+            self.tyre_temp_canvas,
+        ]
+        for canvas in canvases:
+            mid_col.addWidget(canvas, 1)
 
         return mid_col
 
@@ -635,21 +638,6 @@ class MainWindow(QMainWindow):
             self.tyre_temp_canvas.update_data(times, [
                 tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
             ])
-
-            # Camber gain: camber angle vs suspension travel
-            suspension = [
-                np.array([s.get("suspension_fl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("suspension_fr", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("suspension_rl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("suspension_rr", 0) for s in self.current_lap_samples], dtype=float),
-            ]
-            camber = [
-                np.array([s.get("camber_fl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("camber_fr", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("camber_rl", 0) for s in self.current_lap_samples], dtype=float),
-                np.array([s.get("camber_rr", 0) for s in self.current_lap_samples], dtype=float),
-            ]
-            self.camber_gain_canvas.update_data(suspension, camber)
 
             # Update delta to best lap
             if self._best_lap_distances is not None:
