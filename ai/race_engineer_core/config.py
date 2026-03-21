@@ -17,3 +17,8 @@ class ThresholdsConfig(BaseModel):
     gap_change_threshold: float = Field(default=1.0)
     wheel_slip_warning: float = Field(default=50.0)
     wheel_slip_critical: float = Field(default=100.0)
+    opponent_close_behind_gap: float = Field(default=0.8)
+    opponent_close_reset_gap: float = Field(default=1.2)
+    car_damage_warning_total: float = Field(default=5.0)
+    car_damage_critical_total: float = Field(default=20.0)
+    car_damage_delta_threshold: float = Field(default=2.0)

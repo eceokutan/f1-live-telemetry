@@ -18,8 +18,9 @@ Event Types:
 - wheel_slip_critical: Wheel slip > 10.0 (HIGH)
 - wheel_slip_warning: Wheel slip > 5.0 (MEDIUM)
 - gap_change: Gap changes > 1s (MEDIUM)
+- opponent_close_behind: Car behind is within close gap threshold (HIGH)
+- car_damage_alert: Car damage crossed warning/critical threshold (MEDIUM/HIGH)
 - lap_complete: Lap number increased (MEDIUM)
-- sector_complete: Sector changed (LOW)
 - pit_window_open: Fuel or tire wear at warning levels (HIGH)
 """
 
@@ -36,10 +37,11 @@ from ai.race_engineer_core.events import (
     create_tire_warning_event,
     create_gap_change_event,
     create_lap_complete_event,
-    create_sector_complete_event,
     create_pit_window_event,
     create_wheel_slip_warning_event,
     create_wheel_slip_critical_event,
+    create_opponent_close_behind_event,
+    create_car_damage_event,
 )
 from ai.race_engineer_core.telemetry import TelemetryData
 from ai.race_engineer_core.config import ThresholdsConfig
@@ -59,6 +61,8 @@ class TelemetryAgent:
     # Cooldown periods (seconds) to avoid spamming the driver
     FUEL_CRITICAL_COOLDOWN = 45.0
     FUEL_WARNING_COOLDOWN = 60.0
+    OPPONENT_CLOSE_COOLDOWN = 15.0
+    CAR_DAMAGE_COOLDOWN = 20.0
 
     def __init__(self, thresholds: Optional[ThresholdsConfig] = None):
         """
@@ -70,6 +74,9 @@ class TelemetryAgent:
         self.thresholds = thresholds or ThresholdsConfig()
         self._last_fuel_critical_time: float = 0.0
         self._last_fuel_warning_time: float = 0.0
+        self._last_opponent_close_time: float = 0.0
+        self._opponent_close_active: bool = False
+        self._last_car_damage_time: float = 0.0
 
     def detect_events(
         self,
@@ -111,13 +118,17 @@ class TelemetryAgent:
         gap_events = self._check_gap_events(telemetry, context)
         events.extend(gap_events)
 
+        # Check close-behind opponent threat
+        opponent_events = self._check_opponent_events(telemetry, context)
+        events.extend(opponent_events)
+
+        # Check car damage alerts
+        damage_events = self._check_car_damage_events(telemetry, context)
+        events.extend(damage_events)
+
         # Check lap completion
         lap_events = self._check_lap_completion(telemetry, context)
         events.extend(lap_events)
-
-        # Check sector completion
-        sector_events = self._check_sector_completion(telemetry, context)
-        events.extend(sector_events)
 
         # Check pit window
         pit_events = self._check_pit_window(telemetry, context, events)
@@ -315,32 +326,121 @@ class TelemetryAgent:
 
         return events
 
-    def _check_sector_completion(
+    def _check_opponent_events(
         self,
         telemetry: TelemetryData,
         context: LiveSessionContext
     ) -> List[Event]:
         """
-        Check for sector completion event.
+        Check for a close opponent behind.
 
         Returns:
-            List containing sector_complete event if sector changed
+            List containing opponent_close_behind event if conditions met
+        """
+        events = []
+        gap_behind = telemetry.gap_behind
+
+        if gap_behind is None:
+            return events
+
+        # Invalid/negative gaps are ignored.
+        if gap_behind < 0:
+            return events
+
+        if gap_behind <= self.thresholds.opponent_close_behind_gap:
+            now = time.time()
+            should_emit = (
+                not self._opponent_close_active
+                or now - self._last_opponent_close_time >= self.OPPONENT_CLOSE_COOLDOWN
+            )
+
+            if should_emit:
+                own_position = telemetry.position if telemetry.position is not None else context.position
+                car_index = None
+                opponent_position = None
+                opponent_speed = None
+
+                if telemetry.opponents:
+                    closest_behind = None
+                    if own_position is not None:
+                        candidates = [
+                            car for car in telemetry.opponents
+                            if car.position >= own_position + 1
+                        ]
+                        if candidates:
+                            closest_behind = min(candidates, key=lambda c: c.position)
+                    if closest_behind is None:
+                        closest_behind = min(
+                            telemetry.opponents,
+                            key=lambda c: c.position,
+                        )
+
+                    car_index = closest_behind.car_index
+                    opponent_position = closest_behind.position
+                    opponent_speed = closest_behind.speed
+
+                events.append(
+                    create_opponent_close_behind_event(
+                        gap=gap_behind,
+                        car_index=car_index,
+                        position=opponent_position,
+                        speed=opponent_speed,
+                    )
+                )
+                self._last_opponent_close_time = now
+
+            self._opponent_close_active = True
+        elif gap_behind >= self.thresholds.opponent_close_reset_gap:
+            # Rear threat has backed off enough to allow a fresh trigger next time.
+            self._opponent_close_active = False
+
+        return events
+
+    def _check_car_damage_events(
+        self,
+        telemetry: TelemetryData,
+        context: LiveSessionContext
+    ) -> List[Event]:
+        """
+        Check for new car damage that should be reported.
+
+        Returns:
+            List containing car_damage_alert event if thresholds are crossed
         """
         events = []
 
-        # Sector changed (skip if sector data not available in AC)
-        if telemetry.sector is not None and telemetry.sector != context.current_sector:
-            # The completed sector is the previous sector
-            completed_sector = context.current_sector
+        if telemetry.car_damage is None:
+            return events
 
-            # Handle wrap-around (sector 3 -> sector 1)
-            if telemetry.sector == 1 and context.current_sector == 3:
-                completed_sector = 3
+        zones = {zone: max(0.0, float(value)) for zone, value in telemetry.car_damage.items()}
+        total_damage = sum(zones.values())
+        previous_total = sum(max(0.0, float(value)) for value in context.car_damage.values())
+        damage_delta = max(0.0, total_damage - previous_total)
 
-            events.append(create_sector_complete_event(
-                sector=completed_sector,
-                sector_time=0.0  # Would need sector timing data
-            ))
+        warning_threshold = self.thresholds.car_damage_warning_total
+        critical_threshold = self.thresholds.car_damage_critical_total
+        delta_threshold = self.thresholds.car_damage_delta_threshold
+
+        crossed_warning = previous_total < warning_threshold <= total_damage
+        crossed_critical = previous_total < critical_threshold <= total_damage
+        significant_increase = damage_delta >= delta_threshold and total_damage >= warning_threshold
+
+        if not (crossed_warning or crossed_critical or significant_increase):
+            return events
+
+        now = time.time()
+        if now - self._last_car_damage_time < self.CAR_DAMAGE_COOLDOWN:
+            return events
+
+        severity = "critical" if total_damage >= critical_threshold else "warning"
+        events.append(
+            create_car_damage_event(
+                total_damage=total_damage,
+                zones=zones,
+                severity=severity,
+            )
+        )
+        self._last_car_damage_time = now
 
         return events
 

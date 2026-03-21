@@ -898,21 +898,40 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 return "Pit window open for tires. Prepare to box soon."
             return "Pit window open. Prepare to box."
 
+        if event_type == "opponent_close_behind":
+            gap = data.get("gap")
+            opp_pos = data.get("position")
+            if gap is not None and opp_pos is not None:
+                return f"Car behind in P{opp_pos}, gap {gap:.2f} seconds. Defend smart."
+            if gap is not None:
+                return f"Car close behind, gap {gap:.2f} seconds. Defend smart."
+            return "Car close behind. Defend smart."
+
+        if event_type == "car_damage_alert":
+            total = data.get("total")
+            severity = str(data.get("severity", "warning")).lower()
+            zones = data.get("zones") or {}
+            worst_zone = None
+            worst_value = None
+            if isinstance(zones, dict) and zones:
+                worst_zone, worst_value = max(
+                    zones.items(),
+                    key=lambda item: float(item[1]),
+                )
+            severity_label = "Critical" if severity == "critical" else "Damage"
+            if total is not None and worst_zone is not None and worst_value is not None and worst_value > 0:
+                zone_name = str(worst_zone).replace("_", " ")
+                return f"{severity_label} on {zone_name}, {worst_value:.0f} percent. Total damage {total:.0f}."
+            if total is not None:
+                return f"{severity_label} reported. Total damage {total:.0f} percent."
+            return "Damage reported. Adjust risk."
+
         if event_type == "lap_complete":
             lap = data.get("lap")
             lap_time = data.get("time")
             if lap is not None and lap_time is not None:
                 return f"Lap {lap} complete, {lap_time:.3f} seconds. Keep building."
             return "Lap complete. Keep building."
-
-        if event_type == "sector_complete":
-            sector = data.get("sector")
-            sector_time = data.get("time")
-            if sector is not None and isinstance(sector_time, (int, float)) and sector_time > 0:
-                return f"Sector {sector} complete in {sector_time:.3f} seconds."
-            if sector is not None:
-                return f"Sector {sector} complete."
-            return "Sector complete."
 
         return "Copy that. Monitoring."
 

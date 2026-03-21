@@ -8,7 +8,7 @@ Defines:
 """
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Dict, Optional
 
@@ -156,6 +156,42 @@ def create_gap_change_event(
     )
 
 
+def create_opponent_close_behind_event(
+    gap: Optional[float] = None,
+    car_index: Optional[int] = None,
+    position: Optional[int] = None,
+    speed: Optional[float] = None,
+) -> Event:
+    """
+    Create an opponent-close-behind event.
+
+    Args:
+        gap: Gap to the car behind in seconds (optional)
+        car_index: Opponent car index (optional)
+        position: Opponent race position (optional)
+        speed: Opponent speed in km/h (optional)
+
+    Returns:
+        Event with HIGH priority
+    """
+    data: Dict[str, Any] = {}
+    if gap is not None:
+        data["gap"] = gap
+    if car_index is not None:
+        data["car_index"] = car_index
+    if position is not None:
+        data["position"] = position
+    if speed is not None:
+        data["speed"] = speed
+
+    return Event(
+        type="opponent_close_behind",
+        priority=Priority.HIGH,
+        data=data,
+        timestamp=time.time(),
+    )
+
+
 def create_lap_complete_event(
     lap_number: int,
     lap_time: float,
@@ -277,4 +313,33 @@ def create_pit_window_event(
         priority=Priority.HIGH,
         data=data,
         timestamp=time.time()
+    )
+
+
+def create_car_damage_event(
+    total_damage: float,
+    zones: Dict[str, float],
+    severity: str = "warning",
+) -> Event:
+    """
+    Create a car-damage alert event.
+
+    Args:
+        total_damage: Total summed damage across zones
+        zones: Damage values per zone
+        severity: "warning" or "critical"
+
+    Returns:
+        Event with HIGH priority when critical, otherwise MEDIUM
+    """
+    priority = Priority.HIGH if severity == "critical" else Priority.MEDIUM
+    return Event(
+        type="car_damage_alert",
+        priority=priority,
+        data={
+            "total": total_damage,
+            "zones": zones,
+            "severity": severity,
+        },
+        timestamp=time.time(),
     )
