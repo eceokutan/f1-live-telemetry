@@ -79,7 +79,8 @@ class VoiceInputWorker(QtCore.QThread):
 
         # State
         self._running = False
-        self._paused = False  # Pause listening during TTS playback
+        self._pause_count = 0  # Reference-counted pause (TTS playback + AI processing)
+        self._pause_lock = threading.Lock()
         self._is_speaking = False
         self._speech_buffer = []
         self._silence_chunks = 0
@@ -124,8 +125,8 @@ class VoiceInputWorker(QtCore.QThread):
                 # Read audio chunk
                 audio_data = self.stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
 
-                # Skip processing if paused (TTS is playing)
-                if self._paused:
+                # Skip processing if paused (TTS playing or AI processing)
+                if self._pause_count > 0:
                     # Reset speech state when paused
                     if self._is_speaking:
                         self._is_speaking = False
@@ -190,8 +191,8 @@ class VoiceInputWorker(QtCore.QThread):
                 # Read audio chunk (keeps stream alive even when not recording)
                 audio_data = self.stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
 
-                # Skip if paused (TTS is playing)
-                if self._paused:
+                # Skip if paused (TTS playing or AI processing)
+                if self._pause_count > 0:
                     if self._is_speaking:
                         self._is_speaking = False
                         self._speech_buffer = []
@@ -240,7 +241,7 @@ class VoiceInputWorker(QtCore.QThread):
 
     def start_recording(self):
         """Start recording audio (called when PTT button is pressed). Thread-safe."""
-        if self._paused:
+        if self._pause_count > 0:
             logger.debug("PTT pressed but voice input is paused (TTS playing)")
             return
         with self._ptt_lock:
@@ -426,26 +427,30 @@ class VoiceInputWorker(QtCore.QThread):
 
     def pause(self):
         """
-        Pause voice input processing (e.g., during TTS playback).
-        Thread-safe - can be called from main thread via Qt signal.
+        Pause voice input processing (e.g., during TTS playback or AI processing).
+        Reference-counted: each pause() must be matched by a resume().
+        Thread-safe - can be called from any thread.
         """
-        if not self._paused:
-            self._paused = True
-            if self.ptt_mode:
-                # Force explicit re-press after TTS so an old held PTT state
-                # cannot restart recording automatically on resume.
-                with self._ptt_lock:
-                    self._ptt_recording = False
-            logger.debug("Voice input paused (TTS playing)")
+        with self._pause_lock:
+            self._pause_count += 1
+            count = self._pause_count
+        if count == 1 and self.ptt_mode:
+            # Force explicit re-press after pause so an old held PTT state
+            # cannot restart recording automatically on resume.
+            with self._ptt_lock:
+                self._ptt_recording = False
+        logger.debug("Voice input paused (pause_count=%d)", count)
 
     def resume(self):
         """
-        Resume voice input processing after TTS playback.
-        Thread-safe - can be called from main thread via Qt signal.
+        Resume voice input processing. Only actually resumes when all
+        pause sources have called resume (pause_count reaches 0).
+        Thread-safe - can be called from any thread.
         """
-        if self._paused:
-            self._paused = False
-            logger.debug("Voice input resumed (TTS finished)")
+        with self._pause_lock:
+            self._pause_count = max(0, self._pause_count - 1)
+            count = self._pause_count
+        logger.debug("Voice input resume requested (pause_count=%d)", count)
 
     def stop(self):
         """Stop the voice input worker."""

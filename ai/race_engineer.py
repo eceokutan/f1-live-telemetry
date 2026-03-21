@@ -53,6 +53,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
     ai_commentary = QtCore.pyqtSignal(str, str, int)  # message, trigger, priority
     driver_query_received = QtCore.pyqtSignal(str)  # driver query text (for UI display)
+    processing_query = QtCore.pyqtSignal(bool)  # True=LLM busy, False=done
     status_update = QtCore.pyqtSignal(str)
 
     def __init__(
@@ -317,38 +318,43 @@ class AIRaceEngineerWorker(QtCore.QThread):
             logger.info(f"Processing driver query: {query}")
             self.status_update.emit(f"Processing: \"{query}\"")
 
-            # Generate AI response (full response, then send to TTS)
+            # Signal voice input to pause during LLM processing
+            self.processing_query.emit(True)
             try:
-                query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "10.0"))
-                response = await asyncio.wait_for(
-                    self.race_engineer_agent.generate_reactive_response(
-                        query=query,
-                        context=self.context,
-                    ),
-                    timeout=query_timeout_seconds,
-                )
-                logger.debug(f"LLM response received: {response[:100]}...")
-            except asyncio.TimeoutError:
-                logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
-                fallback = self._build_timeout_fallback_response(query)
-                self.ai_commentary.emit(fallback, "driver_query_timeout", 1)
+                # Generate AI response (full response, then send to TTS)
+                try:
+                    query_timeout_seconds = float(os.getenv("LIVE_LLM_QUERY_TIMEOUT_SECONDS", "10.0"))
+                    response = await asyncio.wait_for(
+                        self.race_engineer_agent.generate_reactive_response(
+                            query=query,
+                            context=self.context,
+                        ),
+                        timeout=query_timeout_seconds,
+                    )
+                    logger.debug(f"LLM response received: {response[:100]}...")
+                except asyncio.TimeoutError:
+                    logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
+                    fallback = self._build_timeout_fallback_response(query)
+                    self.ai_commentary.emit(fallback, "driver_query_timeout", 1)
+                    self.status_update.emit("AI Race Engineer ready")
+                    return
+
+                response = self._clean_llm_response(response)
+
+                # Guardrail: label numeric claims not grounded in current context.
+                response = self._label_estimate_if_ungrounded_numbers(response, query)
+
+                # Check for empty response and provide fallback
+                if not response or not response.strip():
+                    logger.warning("LLM returned empty response, using fallback")
+                    response = "I heard your question but I'm having trouble generating a response right now. Could you please rephrase your question about your race situation?"
+
+                # Emit as AI commentary — triggers both UI display and TTS
+                self.ai_commentary.emit(response, "driver_query", 2)  # MEDIUM priority
+                logger.info(f"AI response to query: {response[:50]}...")
                 self.status_update.emit("AI Race Engineer ready")
-                return
-
-            response = self._clean_llm_response(response)
-
-            # Guardrail: label numeric claims not grounded in current context.
-            response = self._label_estimate_if_ungrounded_numbers(response, query)
-
-            # Check for empty response and provide fallback
-            if not response or not response.strip():
-                logger.warning("LLM returned empty response, using fallback")
-                response = "I heard your question but I'm having trouble generating a response right now. Could you please rephrase your question about your race situation?"
-
-            # Emit as AI commentary — triggers both UI display and TTS
-            self.ai_commentary.emit(response, "driver_query", 2)  # MEDIUM priority
-            logger.info(f"AI response to query: {response[:50]}...")
-            self.status_update.emit("AI Race Engineer ready")
+            finally:
+                self.processing_query.emit(False)
 
         except asyncio.TimeoutError:
             # No query, that's ok

@@ -8,6 +8,7 @@ for fast CPU or GPU inference without torch/transformers/peft dependencies.
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -131,6 +132,7 @@ class LocalLLMInference:
         # Lazy-loaded model
         self._model = None
         self._loaded = False
+        self._generate_lock = threading.Lock()
 
     def load(self) -> None:
         """Load the GGUF model into memory."""
@@ -187,6 +189,11 @@ class LocalLLMInference:
         """
         Generate a response for the given prompt.
 
+        Thread-safe: only one generation can run at a time. If a previous
+        generation is still in progress (e.g. a zombie thread after timeout),
+        raises RuntimeError immediately so the caller can fall back to
+        rule-based responses.
+
         Args:
             prompt: Input prompt
 
@@ -195,6 +202,10 @@ class LocalLLMInference:
         """
         if not self._loaded:
             raise RuntimeError("Model not loaded. Call load() first.")
+
+        if not self._generate_lock.acquire(blocking=False):
+            logger.warning("Model is busy — another generation is still running")
+            raise RuntimeError("Model is busy")
 
         try:
             # Wrap prompt in Granite chat template before tokenization
@@ -208,6 +219,8 @@ class LocalLLMInference:
 
             logger.debug("Formatted prompt (first 200 chars): %s", formatted_prompt[:200])
 
+            start_time = time.monotonic()
+
             response = self._model.create_completion(
                 formatted_prompt,
                 max_tokens=self.max_tokens,
@@ -217,11 +230,23 @@ class LocalLLMInference:
                 stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
             )
 
+            elapsed = time.monotonic() - start_time
+            if self.max_time_seconds > 0 and elapsed > self.max_time_seconds:
+                logger.warning(
+                    "Generation took %.1fs, exceeding max_time_seconds=%.1fs",
+                    elapsed,
+                    self.max_time_seconds,
+                )
+
             return response["choices"][0]["text"].strip()
 
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             raise RuntimeError(f"Generation failed: {e}") from e
+        finally:
+            self._generate_lock.release()
 
     def _prewarm_generation(self) -> None:
         """Run a representative generation to absorb first-inference overhead."""

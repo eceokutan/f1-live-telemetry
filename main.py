@@ -189,6 +189,9 @@ def run_jarvis_live(settings: dict) -> bool:
             )
             if ai_thread:
                 voice_thread.speech_detected.connect(ai_thread.process_driver_query)
+                ai_thread.processing_query.connect(
+                    lambda busy: voice_thread.pause() if busy else voice_thread.resume()
+                )
             voice_thread.vad_state_changed.connect(window.handle_vad_state_change)
             voice_thread.status_update.connect(lambda msg: logger.info("Voice: %s", msg))
             voice_thread.error_occurred.connect(lambda err: logger.error("Voice: %s", err))
