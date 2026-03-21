@@ -391,12 +391,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Left column: Speed, Gear, RPM
         self.graph_layout_left = QtWidgets.QVBoxLayout()
         self.graph_layout_left.setSpacing(6)
-        outer_layout.addLayout(self.graph_layout_left)
+        outer_layout.addLayout(self.graph_layout_left, 1)
 
         # Right column: Throttle/Brake, Tire Temps, Tire Pressures
         self.graph_layout_right = QtWidgets.QVBoxLayout()
         self.graph_layout_right.setSpacing(6)
-        outer_layout.addLayout(self.graph_layout_right)
+        outer_layout.addLayout(self.graph_layout_right, 1)
 
         # Placeholder (spans both columns initially)
         self.graph_placeholder = QtWidgets.QLabel("Load a session to view telemetry")
@@ -947,6 +947,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 continue
 
             canvas = TimeSeriesCanvas(width=5, height=2.5)
+            canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
             if gtype == "single":
                 col = config["col"]

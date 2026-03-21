@@ -51,7 +51,11 @@ class TimeSeriesCanvas(FigureCanvas):
         self.window_duration = 45.0  # seconds of lap visible at once
         self.lap_duration = 0.0
 
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
+
+    def _apply_uniform_layout(self):
+        """Apply fixed subplot margins so all graphs render at a consistent width."""
+        self.fig.subplots_adjust(left=0.12, right=0.99, top=0.88, bottom=0.22)
 
     def plot_single_line(self, times, values, ylabel, color=GRAPH_LINE_COLOR, title=""):
         """Plot a single time-series line."""
@@ -82,7 +86,7 @@ class TimeSeriesCanvas(FigureCanvas):
         else:
             self.ax.set_xlim(0, self.lap_duration)
 
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
         self.draw_idle()
 
     def plot_multi_line(self, times, values_list, labels, colors, ylabel, title=""):
@@ -115,7 +119,7 @@ class TimeSeriesCanvas(FigureCanvas):
         else:
             self.ax.set_xlim(0, self.lap_duration)
 
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
         self.draw_idle()
 
     def update_sliding_window(self, current_time: float):
@@ -185,5 +189,5 @@ class TimeSeriesCanvas(FigureCanvas):
         self.line = None
         self.timeline_marker = None
 
-        self.fig.tight_layout(pad=0.5)
+        self._apply_uniform_layout()
         self.draw_idle()
