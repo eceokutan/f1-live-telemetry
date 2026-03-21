@@ -477,9 +477,14 @@ class AcTelemetryWorker(QtCore.QThread):
                         integrated_z = 0.0
                     last_lap_id = lap_id
 
+                    # AC currentSectorIndex is 0-based; convert to 1-3 for AI layer.
+                    raw_sector = int(gfx.currentSectorIndex)
+                    sector = (raw_sector + 1) if 0 <= raw_sector <= 2 else None
+
                     sample_data = {
                         "lap_id": lap_id,
                         "t": elapsed,
+                        "sector": sector,
                         "x": x,
                         "z": z,
                         "speed": speed,
@@ -547,6 +552,7 @@ class AcTelemetryWorker(QtCore.QThread):
                     if frame_count % 10 == 0:
                         live_data = {
                             "current_lap": lap_id + 1,
+                            "sector": sector,
                             "speed": speed,
                             "gear": display_gear,
                             "rpm": phys.rpms,

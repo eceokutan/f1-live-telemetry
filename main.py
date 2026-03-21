@@ -290,10 +290,10 @@ def run_jarvis_live(settings: dict) -> bool:
                 finally:
                     tts_runtime["restarting"] = False
 
-            def _speak_with_retry(message: str, retries_left: int = 6):
+            def _speak_with_retry(message: str, priority: int = 2, retries_left: int = 6):
                 worker = tts_runtime["worker"]
                 if worker and worker.isRunning():
-                    worker.speak(message)
+                    worker.speak(message, priority=priority)
                     return
 
                 if not _ensure_tts_worker_running("auto-restart"):
@@ -301,7 +301,7 @@ def run_jarvis_live(settings: dict) -> bool:
                         logger.error("Dropping TTS message after failed restart: %s", message[:80])
                         return
                     QtCore.QTimer.singleShot(
-                        200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                        200, lambda m=message, p=priority, r=retries_left - 1: _speak_with_retry(m, p, r)
                     )
                     return
 
@@ -310,14 +310,14 @@ def run_jarvis_live(settings: dict) -> bool:
                     return
 
                 QtCore.QTimer.singleShot(
-                    200, lambda m=message, r=retries_left - 1: _speak_with_retry(m, r)
+                    200, lambda m=message, p=priority, r=retries_left - 1: _speak_with_retry(m, p, r)
                 )
 
             def on_ai_commentary_for_tts(msg, trigger, priority):
                 # Skip driver_query triggers - handled by streaming path
                 if trigger == "driver_query":
                     return
-                _speak_with_retry(msg)
+                _speak_with_retry(msg, priority=priority)
 
             def _speak_sentence_with_retry(sentence: str, retries_left: int = 6):
                 """Queue a streaming sentence for TTS with retry."""

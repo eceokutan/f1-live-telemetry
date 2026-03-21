@@ -501,6 +501,14 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     continue
 
         lap_id = data.get("lap_id", 0)
+        sector = data.get("sector")
+        try:
+            sector = int(sector) if sector is not None else None
+        except (TypeError, ValueError):
+            sector = None
+        if sector is not None and not (1 <= sector <= 3):
+            sector = None
+
         return TelemetryData(
             speed=data.get("speed", 0.0),
             rpms=data.get("rpms", 0),
@@ -522,6 +530,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             lap_id=lap_id,
             lap_number=lap_id,  # AI uses lap_number, AC provides lap_id
             t=data.get("t", 0.0),
+            sector=sector,
             position=data.get("position"),
             gap_ahead=data.get("gap_ahead"),
             gap_behind=data.get("gap_behind"),
@@ -550,9 +559,16 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     10.0,
                 )
 
-            if not self.context.can_send_proactive(min_interval):
+            # CRITICAL alerts must not be blocked by generic anti-spam cooldown.
+            is_critical = event.priority == Priority.CRITICAL
+            if not is_critical and not self.context.can_send_proactive(min_interval):
                 logger.debug("Skipping proactive message for %s - too soon", event.type)
                 return
+            if is_critical and not self.context.can_send_proactive(min_interval):
+                logger.warning(
+                    "Bypassing proactive cooldown for CRITICAL event: %s",
+                    event.type,
+                )
 
             response = self._build_event_fallback_response(event)
             response = self._clean_llm_response(response)
@@ -892,8 +908,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if event_type == "sector_complete":
             sector = data.get("sector")
             sector_time = data.get("time")
-            if sector is not None and sector_time is not None:
+            if sector is not None and isinstance(sector_time, (int, float)) and sector_time > 0:
                 return f"Sector {sector} complete in {sector_time:.3f} seconds."
+            if sector is not None:
+                return f"Sector {sector} complete."
             return "Sector complete."
 
         return "Copy that. Monitoring."

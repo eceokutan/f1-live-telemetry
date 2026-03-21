@@ -123,7 +123,9 @@ class TelemetryAgent:
         pit_events = self._check_pit_window(telemetry, context, events)
         events.extend(pit_events)
 
-        return events
+        # Enforce priority ordering before handing off to the worker.
+        # Lower enum values are higher priority (CRITICAL=0).
+        return sorted(events, key=lambda e: (int(e.priority), e.timestamp))
 
     def _check_fuel_events(
         self,

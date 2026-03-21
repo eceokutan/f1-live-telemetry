@@ -19,7 +19,7 @@ import time
 import wave
 import platform
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from PyQt5 import QtCore
 import pyaudio
 import numpy as np
@@ -264,6 +264,7 @@ class TTSOutputWorker(QtCore.QThread):
 
         # Message queue (initialized in run() after event loop is created)
         self.message_queue: Optional[asyncio.Queue] = None
+        self._enqueue_sequence = 0
 
         mode_str = "pipelined" if use_sentence_pipelining else "batch"
         logger.info(
@@ -284,7 +285,7 @@ class TTSOutputWorker(QtCore.QThread):
             asyncio.set_event_loop(self._event_loop)
 
             # Create message queue (must be done AFTER event loop is set)
-            self.message_queue = asyncio.Queue()
+            self.message_queue = asyncio.PriorityQueue()
 
             # Initialize components
             if self.use_sentence_pipelining:
@@ -349,10 +350,12 @@ class TTSOutputWorker(QtCore.QThread):
         while self._running:
             try:
                 # Get message from queue (with timeout)
-                message = await asyncio.wait_for(
+                queued_item = await asyncio.wait_for(
                     self.message_queue.get(),
                     timeout=1.0
                 )
+                # Priority queue item shape: (priority, sequence, payload)
+                message = queued_item[2] if isinstance(queued_item, tuple) and len(queued_item) == 3 else queued_item
 
                 # Handle streaming sentence tuples
                 if isinstance(message, tuple):
@@ -482,14 +485,30 @@ class TTSOutputWorker(QtCore.QThread):
             logger.error(f"Error playing audio: {e}", exc_info=True)
             raise
 
-    def speak(self, text: str):
+    @staticmethod
+    def _normalize_priority(priority: Optional[int]) -> int:
+        """Normalize priority to 0..3 where 0 is highest urgency."""
+        try:
+            value = int(priority) if priority is not None else 2
+        except (TypeError, ValueError):
+            value = 2
+        return max(0, min(3, value))
+
+    def _make_queue_item(self, payload: Any, priority: Optional[int] = None) -> tuple[int, int, Any]:
+        """Build a stable priority-queue tuple."""
+        normalized = self._normalize_priority(priority)
+        self._enqueue_sequence += 1
+        return (normalized, self._enqueue_sequence, payload)
+
+    def speak(self, text: str, priority: int = 2):
         """
         Queue text for TTS synthesis and playback (called from main thread).
 
         Args:
             text: Text to speak
+            priority: Message priority (0=critical, 3=low)
         """
-        logger.info(f"[TTS] speak() called with: {text[:50]}...")
+        logger.info(f"[TTS] speak() called with priority={priority}: {text[:50]}...")
         loop = self._event_loop
         text_ok = bool(text and text.strip())
         loop_running = bool(loop and loop.is_running() and not loop.is_closed())
@@ -512,14 +531,14 @@ class TTSOutputWorker(QtCore.QThread):
         try:
             # Thread-safe: put message in queue.
             asyncio.run_coroutine_threadsafe(
-                self.message_queue.put(text),
+                self.message_queue.put(self._make_queue_item(text, priority)),
                 loop,
             )
         except RuntimeError as e:
             # Can happen during shutdown races; do not crash caller thread.
             logger.warning("[TTS] Failed to queue message during shutdown: %s", e)
 
-    def speak_sentence(self, sentence: str) -> bool:
+    def speak_sentence(self, sentence: str, priority: int = 2) -> bool:
         """
         Queue a pre-split sentence for immediate synthesis+playback.
 
@@ -528,6 +547,7 @@ class TTSOutputWorker(QtCore.QThread):
 
         Args:
             sentence: A single sentence to speak
+            priority: Message priority (0=critical, 3=low)
 
         Returns:
             True if the sentence was successfully queued, False otherwise.
@@ -545,7 +565,7 @@ class TTSOutputWorker(QtCore.QThread):
         logger.info("[TTS] Queueing streaming sentence: %s", sentence[:50])
         try:
             asyncio.run_coroutine_threadsafe(
-                self.message_queue.put(("sentence", sentence)),
+                self.message_queue.put(self._make_queue_item(("sentence", sentence), priority)),
                 loop,
             )
             return True
@@ -553,7 +573,7 @@ class TTSOutputWorker(QtCore.QThread):
             logger.warning("[TTS] Failed to queue streaming sentence: %s", e)
             return False
 
-    def signal_stream_end(self) -> bool:
+    def signal_stream_end(self, priority: int = 2) -> bool:
         """
         Signal that no more streaming sentences are coming.
 
@@ -574,7 +594,7 @@ class TTSOutputWorker(QtCore.QThread):
         logger.info("[TTS] Signalling end of stream")
         try:
             asyncio.run_coroutine_threadsafe(
-                self.message_queue.put(("end_of_stream", None)),
+                self.message_queue.put(self._make_queue_item(("end_of_stream", None), priority)),
                 loop,
             )
             return True
