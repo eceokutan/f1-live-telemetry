@@ -234,6 +234,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 border: 1px solid {BORDER_COLOR};
                 border-bottom: 2px solid {BORDER_COLOR};
                 padding: 10px 22px;
+                min-width: 140px;
                 margin-right: 4px;
                 font-size: 8pt;
                 font-weight: 600;
