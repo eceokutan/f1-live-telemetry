@@ -719,7 +719,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         Mark responses as estimates when they contain numeric claims that are
         not present in the current query/context snapshot.
         """
-        if not response or not self.context or self._is_estimate_labeled(response):
+        if not response or not self.context:
             return response
 
         response_nums = self._extract_numeric_values(response)
@@ -728,17 +728,27 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
         source_text = f"{query}\n{self.context.to_prompt_context(query=query)}"
         source_nums = self._extract_numeric_values(source_text)
-        if not source_nums:
-            return f"Estimate based on current data: {response}"
 
-        tolerance = 0.6  # allow small rounding differences
-        for val in response_nums:
-            if min(abs(val - src) for src in source_nums) > tolerance:
+        ungrounded = False
+        if not source_nums:
+            ungrounded = True
+        else:
+            tolerance = 0.6  # allow small rounding differences
+            for val in response_nums:
+                if min(abs(val - src) for src in source_nums) > tolerance:
+                    logger.warning(
+                        "Out-of-context numeric claim in response (%.3f); labeling as estimate",
+                        val,
+                    )
+                    ungrounded = True
+                    break
+
+        if ungrounded:
+            if self._is_estimate_labeled(response):
                 logger.warning(
-                    "Out-of-context numeric claim in response (%.3f); labeling as estimate",
-                    val,
+                    "Response has hedge words but contains fabricated numbers; labeling anyway",
                 )
-                return f"Estimate based on current data: {response}"
+            return f"Estimate based on current data: {response}"
 
         return response
 
