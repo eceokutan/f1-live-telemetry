@@ -14,7 +14,7 @@ class TimeSeriesCanvas(FigureCanvas):
     data on the Y-axis (speed, RPM, gear, brake, etc.).
     """
 
-    def __init__(self, title: str, parent=None, width=4, height=1.5, dpi=100):
+    def __init__(self, title: str, parent=None, width=4, height=1.5, dpi=100, window_seconds: float = 30.0):
         """
         Initialize time series canvas.
 
@@ -24,7 +24,9 @@ class TimeSeriesCanvas(FigureCanvas):
             width: Figure width in inches
             height: Figure height in inches
             dpi: Dots per inch resolution
+            window_seconds: Sliding window duration in seconds (0 = show all)
         """
+        self.window_seconds = window_seconds
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
@@ -77,10 +79,16 @@ class TimeSeriesCanvas(FigureCanvas):
             return
 
         try:
+            if self.window_seconds > 0 and t[-1] > self.window_seconds:
+                t_min = t[-1] - self.window_seconds
+                mask = t >= t_min
+                t = t[mask]
+                y = y[mask]
+
             self.line.set_data(t, y)
             self.ax.relim()
             self.ax.autoscale_view()
-            self.draw_idle()  # Use draw_idle for better performance
+            self.draw_idle()
         except Exception:
             # Matplotlib can throw errors during rendering in multithreaded environments
             # Just skip this update and wait for the next one

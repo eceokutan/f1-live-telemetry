@@ -13,7 +13,7 @@ class MultiLineCanvas(FigureCanvas):
     Displays multiple colored lines on the same plot (e.g., FL, FR, RL, RR tires).
     """
 
-    def __init__(self, title: str, labels: list, parent=None, width=4, height=1.5, dpi=100):
+    def __init__(self, title: str, labels: list, parent=None, width=4, height=1.5, dpi=100, window_seconds: float = 30.0):
         """
         Initialize multi-line canvas.
 
@@ -24,7 +24,9 @@ class MultiLineCanvas(FigureCanvas):
             width: Figure width in inches
             height: Figure height in inches
             dpi: Dots per inch resolution
+            window_seconds: Sliding window duration in seconds (0 = show all)
         """
+        self.window_seconds = window_seconds
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
@@ -77,9 +79,14 @@ class MultiLineCanvas(FigureCanvas):
             return
 
         try:
+            if self.window_seconds > 0 and t[-1] > self.window_seconds:
+                t_min = t[-1] - self.window_seconds
+                mask = t >= t_min
+                t = t[mask]
+                y_data = [y[mask] if y.size == mask.size else y for y in y_data]
+
             for line, y in zip(self.lines, y_data):
                 if y.size > 0:
-                    # Ensure array sizes match
                     if t.size != y.size:
                         print(f"⚠️  Warning: Array size mismatch in {self.title}: t={t.size}, y={y.size}")
                         continue
@@ -87,7 +94,7 @@ class MultiLineCanvas(FigureCanvas):
 
             self.ax.relim()
             self.ax.autoscale_view()
-            self.draw_idle()  # Use draw_idle for better performance
+            self.draw_idle()
         except Exception:
             # Matplotlib can throw errors during rendering in multithreaded environments
             # Just skip this update and wait for the next one
