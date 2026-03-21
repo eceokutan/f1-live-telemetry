@@ -59,46 +59,35 @@ VERBOSITY_INSTRUCTIONS = {
 
 PROACTIVE_PROMPT_MINIMAL = PromptTemplate(
     input_variables=["event_type", "event_data", "session_context", "conversation_history"],
-    template="""F1 engineer radio. Alert driver about {event_type}. Data: {event_data}. Under 10 words.
+    template="""Alert: {event_type}. Data: {event_data}
 
 Alert:"""
 )
 
 PROACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["event_type", "event_data", "session_context", "conversation_history"],
-    template="""F1 race engineer on radio. Alert the driver in one short sentence.
-
-Event: {event_type}
+    template="""Event: {event_type}
 Details: {event_data}
 
 Data:
 {session_context}
-
-Example alerts: "Fuel getting low, box in 3 laps." / "Front left tire is overheating, ease off." / "Good lap, two tenths faster."
 
 Alert:"""
 )
 
 PROACTIVE_PROMPT_VERBOSE = PromptTemplate(
     input_variables=["event_type", "event_data", "session_context", "conversation_history"],
-    template="""You are an experienced F1 race engineer speaking to your driver during a race.
-An important event has been detected.
-
-Event Type: {event_type}
+    template="""Event Type: {event_type}
 Event Details: {event_data}
 
-Current Session Context:
+Session Data:
 {session_context}
 
 Recent conversation:
 {conversation_history}
 
-Provide a detailed radio message explaining:
-1. What happened
-2. The implications
-3. Recommended action
-Keep it under 4 sentences for clarity during racing.
-Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-commentary."""
+Reply in under 4 sentences.
+Alert:"""
 )
 
 
@@ -108,52 +97,34 @@ Reply ONLY as the engineer speaking to the driver. No notes, asterisks, or meta-
 
 REACTIVE_PROMPT_MINIMAL = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""F1 engineer radio. Driver asks: "{query}".
-Use only the provided data. Do not invent exact numbers.
-If key data is missing, give a brief estimate and say it is an estimate.
-Data: {session_context}. Under 10 words.
+    template="""Driver asks: "{query}"
+Data: {session_context}
 
 Answer:"""
 )
 
 REACTIVE_PROMPT_MODERATE = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""F1 race engineer on radio. Answer the driver's question in one short sentence using the data below.
-Ground every claim in the provided data.
-Do not invent exact values (laps, fuel, gaps, positions, temperatures, wear).
-If key data is missing, give your best estimate and explicitly label it as an estimate.
-
-Question: "{query}"
+    template="""Question: "{query}"
 
 Data:
 {session_context}
-
-Example answers: "Tires at 75 degrees, looking good." / "Fuel for 8 more laps." / "No damage, car is clean."
 
 Answer:"""
 )
 
 REACTIVE_PROMPT_VERBOSE = PromptTemplate(
     input_variables=["query", "session_context", "conversation_history"],
-    template="""You are an experienced F1 race engineer responding to your driver's question during a race.
+    template="""Driver's Question: "{query}"
 
-Driver's Question: "{query}"
-
-Current Session Context:
+Session Data:
 {session_context}
 
 Recent conversation:
 {conversation_history}
 
-Provide a comprehensive response that:
-1. Directly answers the question
-2. Includes relevant supporting data
-3. Offers any strategic insights if applicable
-4. Uses only provided data; if something is missing, state an estimate clearly
-Keep it under 4 sentences for clarity during racing.
-Reply ONLY as the engineer speaking directly to the driver.
-Do NOT include notes, asterisks, or meta-commentary.
-Do NOT fabricate exact numeric facts."""
+Reply in under 4 sentences.
+Answer:"""
 )
 
 

@@ -53,6 +53,7 @@ list_audio_devices.py
 
 # PyInstaller build output
 dist/
+dist/*
 build/
 
 # Installers

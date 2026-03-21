@@ -30,7 +30,7 @@ class TimelineController(QtCore.QObject):
         self._timer = QtCore.QTimer(self)
         self._timer.setTimerType(QtCore.Qt.PreciseTimer)
         self._timer.timeout.connect(self._on_timer_tick)
-        self._timer_interval = 16  # ~60 FPS
+        self._timer_interval = 33  # ~30 FPS
         self._elapsed_timer = QtCore.QElapsedTimer()
         self._last_tick_ms: int = 0
 

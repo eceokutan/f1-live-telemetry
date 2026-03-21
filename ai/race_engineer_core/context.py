@@ -6,7 +6,7 @@ LiveSessionContext maintains all state during an active racing session:
 - Resource state (fuel, tires)
 - Race position (position, gaps)
 - Telemetry buffer (rolling 60s window)
-- Conversation history (last 3 exchanges)
+- Conversation history (last exchange)
 - Active alerts
 """
 
@@ -21,6 +21,40 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from ai.race_engineer_core.telemetry import OpponentSnapshot, TelemetryData
+
+# Keyword groups for query-aware context pruning.
+# Each group maps a set of query keywords to the context line labels it unlocks.
+# Lines whose label is in the "core" group are always included.
+_CONTEXT_GROUPS = {
+    "core": {
+        "keywords": set(),  # always included
+        "labels": {"track", "lap_position", "speed_gear_rpm"},
+    },
+    "inputs": {
+        "keywords": {"throttle", "brake", "pedal", "g-force", "steering", "braking", "accelerat"},
+        "labels": {"throttle_brake", "g_forces"},
+    },
+    "gaps": {
+        "keywords": {"gap", "ahead", "behind", "opponent", "defend", "attack", "overtake", "pass", "close", "catch"},
+        "labels": {"gap_ahead_behind", "nearby_opponents"},
+    },
+    "fuel": {
+        "keywords": {"fuel", "pit", "box", "stop", "refuel", "range", "stint"},
+        "labels": {"fuel"},
+    },
+    "tires": {
+        "keywords": {"tire", "tyre", "temp", "temperature", "pressure", "wear", "grip", "deg", "degradation"},
+        "labels": {"tire_temps", "tire_pressures", "tire_wear"},
+    },
+    "damage": {
+        "keywords": {"damage", "crash", "contact", "hit", "broken", "wing"},
+        "labels": {"car_damage"},
+    },
+    "laptimes": {
+        "keywords": {"lap", "time", "pace", "fast", "slow", "delta", "best", "sector", "improve"},
+        "labels": {"best_last_lap"},
+    },
+}
 
 
 @dataclass
@@ -106,9 +140,9 @@ class LiveSessionContext:
         default_factory=lambda: deque(maxlen=600)
     )
 
-    # Conversation history (last 3 exchanges)
+    # Conversation history (last exchange)
     conversation_history: Deque[Dict[str, Any]] = field(
-        default_factory=lambda: deque(maxlen=3)
+        default_factory=lambda: deque(maxlen=1)
     )
 
     # Active alerts
@@ -344,54 +378,79 @@ class LiveSessionContext:
         """
         return _utcnow() - self.started_at
 
-    def to_prompt_context(self) -> str:
+    def to_prompt_context(self, query: Optional[str] = None) -> str:
         """
         Format context for LLM prompt injection.
+
+        Args:
+            query: Optional driver query. When provided, only context lines
+                   relevant to the query keywords are included (plus core
+                   lines that are always present). When *None*, all lines
+                   are returned (backwards-compatible).
 
         Returns:
             Formatted string containing current session state
             suitable for including in LLM prompts.
         """
-        # Format fuel laps
+        # Determine which labels to include
+        active_labels: set = set(_CONTEXT_GROUPS["core"]["labels"])
+
+        if query is None:
+            # No query → return full context (backwards compatible)
+            for group in _CONTEXT_GROUPS.values():
+                active_labels |= group["labels"]
+        elif query is not None:
+            query_lower = query.lower()
+            matched_any = False
+            for group_name, group in _CONTEXT_GROUPS.items():
+                if group_name == "core":
+                    continue
+                for kw in group["keywords"]:
+                    if kw in query_lower:
+                        active_labels |= group["labels"]
+                        matched_any = True
+                        break
+            if not matched_any:
+                # No keyword match → include everything (safe fallback)
+                for group in _CONTEXT_GROUPS.values():
+                    active_labels |= group["labels"]
+
+        # Pre-format values used by multiple lines
         fuel_laps = self.get_fuel_laps_remaining()
         fuel_laps_str = f"{fuel_laps:.1f}" if fuel_laps != float('inf') else "N/A"
-
-        # Format gaps
         gap_ahead_str = f"{self.gap_ahead:.2f}s" if self.gap_ahead is not None else "N/A"
         gap_behind_str = f"{self.gap_behind:.2f}s" if self.gap_behind is not None else "N/A"
         nearby_str = self._format_nearby_opponents()
-
-        # Format lap times
         best_lap_str = self._format_lap_time(self.best_lap) if self.best_lap else "N/A"
         last_lap_str = self._format_lap_time(self.last_lap) if self.last_lap else "N/A"
-
-        # Format car damage
         total_damage = sum(self.car_damage.values())
         if total_damage > 0:
             damage_parts = [f"{zone}: {val:.0f}%" for zone, val in self.car_damage.items() if val > 0]
             damage_str = ", ".join(damage_parts)
         else:
             damage_str = "No damage"
-
-        # Format tire wear
         wear_str = f"FL:{self.tire_wear['fl']:.0f}% FR:{self.tire_wear['fr']:.0f}% RL:{self.tire_wear['rl']:.0f}% RR:{self.tire_wear['rr']:.0f}%"
-
-        # Format tire pressure
         pressure_str = f"FL:{self.tire_pressures['fl']:.1f}psi FR:{self.tire_pressures['fr']:.1f}psi RL:{self.tire_pressures['rl']:.1f}psi RR:{self.tire_pressures['rr']:.1f}psi"
 
-        return f"""Track: {self.track_name}
-Lap: {self.current_lap} | Position: P{self.position}
-Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}
-Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%}
-G-Forces: Lat {self.g_force_lat:.2f}g | Lon {self.g_force_lon:.2f}g
-Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}
-Nearby Opponents: {nearby_str}
-Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)
-Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C
-Tire Pressures: {pressure_str}
-Tire Wear: {wear_str}
-Car Damage: {damage_str}
-Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"""
+        # Build context lines conditionally
+        all_lines = [
+            ("track", f"Track: {self.track_name}"),
+            ("lap_position", f"Lap: {self.current_lap} | Position: P{self.position}"),
+            ("speed_gear_rpm", f"Speed: {self.speed_kmh:.0f} km/h | Gear: {self.gear} | RPM: {self.rpm}"),
+            ("throttle_brake", f"Throttle: {self.throttle:.0%} | Brake: {self.brake:.0%}"),
+            ("g_forces", f"G-Forces: Lat {self.g_force_lat:.2f}g | Lon {self.g_force_lon:.2f}g"),
+            ("gap_ahead_behind", f"Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}"),
+            ("nearby_opponents", f"Nearby Opponents: {nearby_str}"),
+            ("fuel", f"Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)"),
+            ("tire_temps", f"Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C"),
+            ("tire_pressures", f"Tire Pressures: {pressure_str}"),
+            ("tire_wear", f"Tire Wear: {wear_str}"),
+            ("car_damage", f"Car Damage: {damage_str}"),
+            ("best_last_lap", f"Best Lap: {best_lap_str} | Last Lap: {last_lap_str}"),
+        ]
+
+        lines = [text for label, text in all_lines if label in active_labels]
+        return "\n".join(lines)
 
     def _format_nearby_opponents(self) -> str:
         """Format up to three opponents nearest in race position."""

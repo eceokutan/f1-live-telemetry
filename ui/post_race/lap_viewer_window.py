@@ -53,6 +53,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     analyst_chunk = QtCore.pyqtSignal(int, str)  # (request_id, text)
     coach_finished = QtCore.pyqtSignal(int, str, str)  # (request_id, coach_text, error)
     coach_chunk = QtCore.pyqtSignal(int, str)   # (request_id, text)
+    POSTRACE_RENDER_HZ = 20.0
 
     def __init__(self):
         super().__init__()
@@ -60,6 +61,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         # Data
         self.session: Optional[Session] = None
         self.current_lap: Optional[Lap] = None
+        self._render_telemetry_df = None
         self._elapsed_times: Optional[np.ndarray] = None
         self._telemetry_columns: dict[str, Optional[np.ndarray]] = {}
         self._last_sample_index: int = -1
@@ -604,7 +606,8 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self._scrub_timer.stop()
         self._pending_scrub_time = None
         self._last_sample_index = -1
-        telemetry_df = self.current_lap.telemetry
+        telemetry_df = self._downsample_telemetry_for_render(self.current_lap.telemetry)
+        self._render_telemetry_df = telemetry_df
         self._elapsed_times = (
             telemetry_df["elapsed_time"].to_numpy(copy=False)
             if "elapsed_time" in telemetry_df.columns
@@ -630,6 +633,39 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.analysis_context_label.setText(self._get_analysis_session_name())
 
         self.status_bar.showMessage(f"Loaded Lap {lap_number}")
+
+    def _downsample_telemetry_for_render(self, telemetry_df):
+        """Downsample lap telemetry for post-race rendering only (keeps recording fidelity unchanged)."""
+        if telemetry_df is None or telemetry_df.empty:
+            return telemetry_df
+        if "elapsed_time" not in telemetry_df.columns:
+            return telemetry_df
+        if self.POSTRACE_RENDER_HZ <= 0:
+            return telemetry_df
+
+        times = telemetry_df["elapsed_time"].to_numpy(copy=False)
+        if times.size <= 2:
+            return telemetry_df
+
+        sample_period = 1.0 / self.POSTRACE_RENDER_HZ
+        if sample_period <= 0:
+            return telemetry_df
+
+        # Keep first sample per 20 Hz time bucket and always include the final sample.
+        bucket_ids = np.floor(times / sample_period).astype(np.int64)
+        keep_mask = np.empty(times.size, dtype=bool)
+        keep_mask[0] = True
+        keep_mask[1:] = bucket_ids[1:] != bucket_ids[:-1]
+        keep_indices = np.flatnonzero(keep_mask)
+
+        last_idx = times.size - 1
+        if keep_indices.size == 0 or int(keep_indices[-1]) != last_idx:
+            keep_indices = np.append(keep_indices, last_idx)
+
+        if keep_indices.size >= times.size:
+            return telemetry_df
+
+        return telemetry_df.iloc[keep_indices].reset_index(drop=True)
 
     def _sync_lap_list_selection(self, lap_number: int) -> None:
         """Keep lap list highlight aligned with the currently loaded lap."""
@@ -934,7 +970,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         from ui.styles import ACCENT_GREEN, ACCENT_RED, ACCENT_CYAN, ACCENT_YELLOW
 
-        df = self.current_lap.telemetry
+        df = self._render_telemetry_df
+        if df is None:
+            df = self.current_lap.telemetry
         times = df['elapsed_time'].values
 
         self._clear_layout(self.graph_layout_left)
@@ -944,8 +982,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         # Track map (always shown)
         self.track_map = TrackMapCanvas(width=3, height=3)
-        x, z = self.current_lap.get_racing_line()
-        speeds = self.current_lap.get_speed_trace()
+        x = df["pos_x"].to_numpy(copy=False) if "pos_x" in df.columns else np.array([])
+        z = df["pos_z"].to_numpy(copy=False) if "pos_z" in df.columns else np.array([])
+        speeds = df["speed"].to_numpy(copy=False) if "speed" in df.columns else np.array([])
         self.track_map.load_lap(x, z, speeds)
         self.track_map_container.addWidget(self.track_map)
 
