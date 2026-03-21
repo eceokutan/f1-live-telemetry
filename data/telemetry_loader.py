@@ -1,6 +1,8 @@
 """
 CSV telemetry loader - loads exported CSV files into Session/Lap objects.
 """
+import json
+from datetime import datetime
 import pandas as pd
 from pathlib import Path
 from typing import List
@@ -18,6 +20,7 @@ class TelemetryLoader:
     - session_X_telemetry.csv - High-frequency telemetry samples
     - session_X_laps.csv - Lap summary statistics
     - session_X_ai_commentary.csv (optional) - AI comments
+    - session_X_metadata.json (optional) - Session metadata from SQLite export
     """
 
     @staticmethod
@@ -46,6 +49,7 @@ class TelemetryLoader:
         telemetry_path = directory / f"{base_name}_telemetry.csv"
         laps_path = directory / f"{base_name}_laps.csv"
         ai_path = directory / f"{base_name}_ai_commentary.csv"
+        metadata_path = directory / f"{base_name}_metadata.json"
 
         if not telemetry_path.exists():
             raise FileNotFoundError(f"Telemetry file not found: {telemetry_path}")
@@ -65,7 +69,8 @@ class TelemetryLoader:
         metadata = TelemetryLoader._extract_metadata(
             telemetry_df,
             base_name,
-            len(laps_list)
+            len(laps_list),
+            metadata_path,
         )
 
         ai_commentary = []
@@ -126,7 +131,8 @@ class TelemetryLoader:
     def _extract_metadata(
         telemetry_df: pd.DataFrame,
         base_name: str,
-        total_laps: int
+        total_laps: int,
+        metadata_path: Path,
     ) -> SessionMetadata:
         """Extract session metadata from telemetry DataFrame."""
         session_id = 0
@@ -136,16 +142,40 @@ class TelemetryLoader:
             except (IndexError, ValueError):
                 pass
 
+        metadata_payload = {}
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    metadata_payload = json.load(f) or {}
+            except Exception:
+                metadata_payload = {}
+
+        start_time = None
+        start_raw = metadata_payload.get("start_time")
+        if isinstance(start_raw, (int, float)):
+            try:
+                start_time = datetime.fromtimestamp(start_raw)
+            except (OSError, OverflowError, ValueError):
+                start_time = None
+
+        end_time = None
+        end_raw = metadata_payload.get("end_time")
+        if isinstance(end_raw, (int, float)):
+            try:
+                end_time = datetime.fromtimestamp(end_raw)
+            except (OSError, OverflowError, ValueError):
+                end_time = None
+
         return SessionMetadata(
-            session_id=session_id,
-            game="unknown",
-            track_name="Unknown Track",
-            car_model="Unknown Car",
-            player_name="Unknown Player",
-            start_time=None,
-            end_time=None,
-            total_laps=total_laps,
-            ai_enabled=False
+            session_id=int(metadata_payload.get("session_id", session_id) or session_id),
+            game=str(metadata_payload.get("game") or "unknown"),
+            track_name=str(metadata_payload.get("track_name") or "Unknown Track"),
+            car_model=str(metadata_payload.get("car_model") or "Unknown Car"),
+            player_name=str(metadata_payload.get("player_name") or "Unknown Player"),
+            start_time=start_time,
+            end_time=end_time,
+            total_laps=int(metadata_payload.get("total_laps", total_laps) or total_laps),
+            ai_enabled=bool(metadata_payload.get("ai_enabled", False)),
         )
 
     @staticmethod

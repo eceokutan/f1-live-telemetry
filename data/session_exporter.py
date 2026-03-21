@@ -150,8 +150,17 @@ class SessionExporter:
 
         # Verify session exists
         cursor = db.cursor()
-        cursor.execute("SELECT session_id FROM sessions WHERE session_id = ?", (session_id,))
-        if not cursor.fetchone():
+        cursor.execute(
+            """
+            SELECT session_id, game, track_name, car_model, player_name,
+                   start_time, end_time, total_laps, ai_enabled
+            FROM sessions
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        )
+        session_row = cursor.fetchone()
+        if not session_row:
             db.close()
             raise ValueError(f"Session {session_id} not found in database")
 
@@ -163,10 +172,29 @@ class SessionExporter:
 
         # Export AI commentary (if exists)
         self._export_ai_commentary(db, session_id, output_path)
+        self._export_metadata(session_row, output_path)
 
         db.close()
         logger.info("Session %d exported to %s", session_id, output_path)
         return str(output_path)
+
+    def _export_metadata(self, session_row: sqlite3.Row, output_path: Path) -> None:
+        """Export session metadata to JSON sidecar used by TelemetryLoader."""
+        session_id = int(session_row["session_id"])
+        metadata_file = output_path / f"session_{session_id}_metadata.json"
+        payload = {
+            "session_id": session_id,
+            "game": session_row["game"] or "unknown",
+            "track_name": session_row["track_name"] or "Unknown Track",
+            "car_model": session_row["car_model"] or "Unknown Car",
+            "player_name": session_row["player_name"] or "Unknown Player",
+            "start_time": session_row["start_time"],
+            "end_time": session_row["end_time"],
+            "total_laps": int(session_row["total_laps"] or 0),
+            "ai_enabled": bool(session_row["ai_enabled"]),
+        }
+        with open(metadata_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
 
     def _export_telemetry(self, db: sqlite3.Connection, session_id: int, output_path: Path) -> None:
         """Export telemetry samples to CSV."""
