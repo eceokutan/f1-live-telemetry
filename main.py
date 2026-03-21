@@ -240,11 +240,14 @@ def run_jarvis_live(settings: dict) -> bool:
                     logger.warning("TTS worker stopped")
                     if voice_thread:
                         voice_thread.resume()
+                    window.set_mic_input_disabled(False)
 
                 worker.finished.connect(_on_tts_worker_finished)
                 if voice_thread:
                     worker.playback_started.connect(voice_thread.pause)
                     worker.playback_finished.connect(voice_thread.resume)
+                    worker.playback_started.connect(lambda: window.set_mic_input_disabled(True))
+                    worker.playback_finished.connect(lambda: window.set_mic_input_disabled(False))
 
                 return worker
 

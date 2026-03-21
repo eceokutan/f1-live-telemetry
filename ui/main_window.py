@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         self._best_time_ms = 0        # best lap time in ms
         self._last_completed_laps = 0 # last seen completedLaps value
         self._lap_counter_initialized = False
+        self._mic_disabled_by_tts = False
 
         # Best lap reference for delta calculation
         self._best_lap_samples = None  # list of sample dicts from best lap
@@ -889,12 +890,25 @@ class MainWindow(QMainWindow):
         Args:
             is_speaking: True if driver is speaking, False if silent
         """
+        if self._mic_disabled_by_tts:
+            return
+
         if is_speaking:
             self.mic_status_label.setText("🎤 Mic: Speaking...")
             self.mic_status_label.setStyleSheet("color: #FF6B6B;")  # Red when speaking
         else:
             self.mic_status_label.setText("🎤 Mic: Ready")
             self.mic_status_label.setStyleSheet("color: #888888;")  # Gray when idle
+
+    def set_mic_input_disabled(self, disabled: bool):
+        """Set microphone UI state when input is temporarily disabled."""
+        self._mic_disabled_by_tts = bool(disabled)
+        if self._mic_disabled_by_tts:
+            self.mic_status_label.setText("🎤 Mic: Disabled (TTS playback)")
+            self.mic_status_label.setStyleSheet("color: #FFD166;")
+        else:
+            self.mic_status_label.setText("🎤 Mic: Ready")
+            self.mic_status_label.setStyleSheet("color: #888888;")
 
     def handle_ai_status_update(self, status: str):
         """

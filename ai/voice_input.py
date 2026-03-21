@@ -431,6 +431,11 @@ class VoiceInputWorker(QtCore.QThread):
         """
         if not self._paused:
             self._paused = True
+            if self.ptt_mode:
+                # Force explicit re-press after TTS so an old held PTT state
+                # cannot restart recording automatically on resume.
+                with self._ptt_lock:
+                    self._ptt_recording = False
             logger.debug("Voice input paused (TTS playing)")
 
     def resume(self):
