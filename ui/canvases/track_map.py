@@ -50,13 +50,19 @@ class TrackMapCanvas(FigureCanvas):
         # Configure plot
         self.ax.set_aspect("equal", adjustable="box")
         self.ax.set_title("Location Map", fontsize=10)
-        self.ax.set_xlabel("X [m]", fontsize=8)
-        self.ax.set_ylabel("Z [m]", fontsize=8)
+        self.ax.set_xlabel("")
+        self.ax.set_ylabel("")
+        self.ax.set_xticklabels([])
+        self.ax.set_yticklabels([])
         self.ax.grid(True, color="#333333", alpha=0.6)
 
         self.line_collection = None
         self.colorbar = None
         self._car_marker = None
+
+        # Reference bounds from a completed lap (locks axis limits)
+        self._ref_xlim = None
+        self._ref_ylim = None
 
         self.fig.tight_layout(pad=1.0)
 
@@ -82,8 +88,10 @@ class TrackMapCanvas(FigureCanvas):
                 self.ax.clear()
                 self.ax.set_aspect("equal", adjustable="box")
                 self.ax.set_title("Location Map", fontsize=10)
-                self.ax.set_xlabel("X [m]", fontsize=8)
-                self.ax.set_ylabel("Z [m]", fontsize=8)
+                self.ax.set_xlabel("")
+                self.ax.set_ylabel("")
+                self.ax.set_xticklabels([])
+                self.ax.set_yticklabels([])
                 self.ax.grid(True, color="#333333", alpha=0.6)
                 self._initialized = True
 
@@ -110,9 +118,13 @@ class TrackMapCanvas(FigureCanvas):
             self.line_collection = lc
             self.ax.add_collection(lc)
 
-            # Set axis limits with padding
-            self.ax.set_xlim(xs.min() - 10, xs.max() + 10)
-            self.ax.set_ylim(zs.min() - 10, zs.max() + 10)
+            # Set axis limits: use reference bounds if available, else dynamic
+            if self._ref_xlim is not None:
+                self.ax.set_xlim(self._ref_xlim)
+                self.ax.set_ylim(self._ref_ylim)
+            else:
+                self.ax.set_xlim(xs.min() - 10, xs.max() + 10)
+                self.ax.set_ylim(zs.min() - 10, zs.max() + 10)
 
             # Update car position marker at the latest point
             if self._car_marker is not None:
@@ -146,3 +158,14 @@ class TrackMapCanvas(FigureCanvas):
         except Exception as e:
             # Silently fail to avoid crashing the UI
             pass
+
+    def set_reference_bounds(self, xs: np.ndarray, zs: np.ndarray):
+        """
+        Lock axis limits from a complete lap's coordinates.
+
+        Once set, plot_track() will use these fixed limits instead of
+        recalculating from current data, preventing the map from resizing.
+        """
+        padding = 20
+        self._ref_xlim = (xs.min() - padding, xs.max() + padding)
+        self._ref_ylim = (zs.min() - padding, zs.max() + padding)

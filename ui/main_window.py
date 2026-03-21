@@ -556,6 +556,10 @@ class MainWindow(QMainWindow):
             # Save previous lap samples before clearing (needed for best-lap reference)
             if self.current_lap_samples:
                 self._previous_lap_samples = list(self.current_lap_samples)
+                # Lock track map bounds from the completed lap
+                ref_xs = np.array([s["x"] for s in self.current_lap_samples], dtype=float)
+                ref_zs = -np.array([s["z"] for s in self.current_lap_samples], dtype=float)
+                self.track_canvas.set_reference_bounds(ref_xs, ref_zs)
             self.current_lap_samples = []
             self.current_lap_id = lap_id
             # Reset track map initialization flag so it redraws properly
@@ -594,7 +598,7 @@ class MainWindow(QMainWindow):
         try:
             # Extract arrays from samples
             xs = np.array([s["x"] for s in self.current_lap_samples], dtype=float)
-            zs = np.array([s["z"] for s in self.current_lap_samples], dtype=float)
+            zs = -np.array([s["z"] for s in self.current_lap_samples], dtype=float)
             speeds = np.array([s["speed"] for s in self.current_lap_samples], dtype=float)
             times = np.array([s["t"] for s in self.current_lap_samples], dtype=float)
 
