@@ -746,26 +746,34 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         sb = text_edit.verticalScrollBar()
         return sb.value() >= sb.maximum() - 4
 
+    @staticmethod
+    def _append_chunk(text_edit: QtWidgets.QTextEdit, text: str) -> None:
+        """Append text to a QTextEdit, auto-scrolling only if already at the bottom."""
+        sb = text_edit.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 4
+        # Save scroll position before modifying content
+        scroll_pos = sb.value()
+        # Insert at the end without moving the visible cursor
+        cursor = text_edit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.insertText(text)
+        if at_bottom:
+            sb.setValue(sb.maximum())
+        else:
+            sb.setValue(scroll_pos)
+
     def _on_analyst_chunk(self, request_id: int, text: str) -> None:
         if request_id != self._analyst_request_id:
             return
         if self.analyst_output:
-            at_bottom = self._is_scrolled_to_bottom(self.analyst_output)
-            self.analyst_output.moveCursor(QtGui.QTextCursor.End)
-            self.analyst_output.insertPlainText(text)
-            if at_bottom:
-                self.analyst_output.ensureCursorVisible()
+            self._append_chunk(self.analyst_output, text)
 
     def _on_coach_chunk(self, request_id: int, text: str) -> None:
         if request_id != self._analysis_request_id:
             return
         self._current_stream_text.append(text)
         if self.coach_output:
-            at_bottom = self._is_scrolled_to_bottom(self.coach_output)
-            self.coach_output.moveCursor(QtGui.QTextCursor.End)
-            self.coach_output.insertPlainText(text)
-            if at_bottom:
-                self.coach_output.ensureCursorVisible()
+            self._append_chunk(self.coach_output, text)
 
     def _on_analyst_finished(self, request_id: int, analyst_text: str, source: str) -> None:
         if request_id != self._analyst_request_id:
