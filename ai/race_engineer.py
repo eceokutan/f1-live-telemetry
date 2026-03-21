@@ -11,6 +11,7 @@ import asyncio
 import logging
 import math
 import re
+import time
 from typing import Optional, Dict, Any
 from PyQt5 import QtCore
 
@@ -87,6 +88,9 @@ class AIRaceEngineerWorker(QtCore.QThread):
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._on_track = False  # True only when AC status is LIVE (2)
         self._ready = False
+        # Prevent repeated spam of identical CRITICAL events while still allowing
+        # different critical event types to bypass the generic cooldown.
+        self._last_critical_event_sent: Dict[str, float] = {}
 
         # Queues (initialized in run() after event loop is created)
         self.telemetry_queue: Optional[asyncio.Queue] = None
@@ -521,6 +525,17 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             # CRITICAL alerts must not be blocked by generic anti-spam cooldown.
             is_critical = event.priority == Priority.CRITICAL
+            now_monotonic = time.monotonic()
+            if is_critical:
+                last_sent = self._last_critical_event_sent.get(event.type, 0.0)
+                if (now_monotonic - last_sent) < min_interval:
+                    logger.debug(
+                        "Suppressing repeated CRITICAL event %s (cooldown %.1fs)",
+                        event.type,
+                        min_interval,
+                    )
+                    return
+
             if not is_critical and not self.context.can_send_proactive(min_interval):
                 logger.debug("Skipping proactive message for %s - too soon", event.type)
                 return
@@ -537,6 +552,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
             self.context.mark_proactive_sent()
             self.context.add_exchange(f"[Event: {event.type}]", response)
+            if is_critical:
+                self._last_critical_event_sent[event.type] = now_monotonic
 
             self.ai_commentary.emit(response, event.type, event.priority.value)
             logger.info("Rule-based commentary for %s: %s...", event.type, response[:80])
