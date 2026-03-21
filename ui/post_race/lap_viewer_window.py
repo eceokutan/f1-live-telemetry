@@ -1092,6 +1092,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             canvases.append(canvas)
             self._active_canvases.append(canvas)
 
+        # Apply current zoom setting to newly created canvases
+        zoom_map = {"15s": 15.0, "30s": 30.0, "45s": 45.0, "60s": 60.0, "Full Lap": None}
+        window = zoom_map.get(self.zoom_combo.currentText())
+        for canvas in self._active_canvases:
+            canvas.window_duration = window
+
         # Split canvases evenly between left and right columns
         mid = (len(canvases) + 1) // 2
         for canvas in canvases[:mid]:
