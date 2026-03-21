@@ -357,6 +357,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         info_label.setStyleSheet(f"font-family: '{FONT_HEADING}'; font-size: 16px; padding: 4px;")
         layout.addWidget(info_label)
 
+        self.selected_lap_label = QtWidgets.QLabel("Viewing: Lap --")
+        self.selected_lap_label.setStyleSheet(
+            f"font-family: '{FONT_HEADING}'; font-size: 14px; padding: 2px 8px; color: {ACCENT_PRIMARY};"
+        )
+        layout.addWidget(self.selected_lap_label)
+
         self.time_label = QtWidgets.QLabel("Time: 0.00s")
         self.time_label.setStyleSheet("font-size: 14pt; padding: 2px 8px;")
         layout.addWidget(self.time_label)
@@ -568,6 +574,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self.status_bar.showMessage(f"Loaded session: {self.session.metadata.track_name}")
 
             self.lap_list.clear()
+            self.selected_lap_label.setText("Viewing: Lap --")
             for lap in self.session.laps:
                 item = QtWidgets.QListWidgetItem(f"Lap {lap.lap_number} - {lap.lap_time:.3f}s")
                 item.setData(QtCore.Qt.UserRole, lap.lap_number)
@@ -590,6 +597,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.current_lap = self.session.get_lap(lap_number)
         if not self.current_lap:
             return
+
+        self._sync_lap_list_selection(lap_number)
+        self.selected_lap_label.setText(f"Viewing: Lap {lap_number}")
 
         self._scrub_timer.stop()
         self._pending_scrub_time = None
@@ -622,6 +632,14 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             )
 
         self.status_bar.showMessage(f"Loaded Lap {lap_number}")
+
+    def _sync_lap_list_selection(self, lap_number: int) -> None:
+        """Keep lap list highlight aligned with the currently loaded lap."""
+        for i in range(self.lap_list.count()):
+            item = self.lap_list.item(i)
+            if item and item.data(QtCore.Qt.UserRole) == lap_number:
+                self.lap_list.setCurrentItem(item)
+                return
 
     def _start_session_analyst(self) -> None:
         """Kick off session-level analyst in background as soon as session loads."""
