@@ -21,6 +21,7 @@ from ai.race_engineer_core import (
     LLMClient,
     LiveSessionContext,
     OpponentSnapshot,
+    Priority,
     RaceEngineerAgent,
     RideHeight,
     SuspensionTravel,
