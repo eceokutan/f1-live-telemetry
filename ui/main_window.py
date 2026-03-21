@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
         track_group = QGroupBox("Location Map")
         track_layout = QVBoxLayout()
         track_group.setLayout(track_layout)
-        self.track_canvas = TrackMapCanvas(self, width=5, height=4, dpi=100)
+        self.track_canvas = TrackMapCanvas(self, width=5, height=5, dpi=100)
         track_layout.addWidget(self.track_canvas)
 
         # Lap times table
@@ -255,11 +255,8 @@ class MainWindow(QMainWindow):
         self.lap_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
         self.lap_table.setColumnWidth(0, 100)
 
-        self.lap_table.setMaximumHeight(150)
+        self.lap_table.setMaximumHeight(110)
         lap_layout.addWidget(self.lap_table)
-
-        left_col.addWidget(track_group)
-        left_col.addWidget(lap_group)
 
         # Delta to best lap graph
         delta_group = QGroupBox("Delta to Best Lap")
@@ -267,7 +264,10 @@ class MainWindow(QMainWindow):
         delta_group.setLayout(delta_layout)
         self.delta_canvas = DeltaCanvas(self, width=4, height=1.5, dpi=100)
         delta_layout.addWidget(self.delta_canvas)
-        left_col.addWidget(delta_group)
+
+        left_col.addWidget(track_group, stretch=3)
+        left_col.addWidget(delta_group, stretch=1)
+        left_col.addWidget(lap_group, stretch=0)
 
         return left_col
 
