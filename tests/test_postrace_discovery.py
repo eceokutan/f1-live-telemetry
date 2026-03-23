@@ -5,8 +5,12 @@ Tests for deterministic/safe Jarvis Post discovery behavior.
 from pathlib import Path
 import sys
 
+import pytest
+
 import analysis.ai_pipeline_bridge as bridge_module
 from analysis.ai_pipeline_bridge import AIPipelineBridge
+
+pytestmark = [pytest.mark.component, pytest.mark.regression]
 
 
 def _new_bridge() -> AIPipelineBridge:

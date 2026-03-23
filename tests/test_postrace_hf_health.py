@@ -8,6 +8,8 @@ import httpx
 import jarvis_post.llm.client as hf_module
 from jarvis_post.llm.client import HFClient, LLMError
 
+pytestmark = [pytest.mark.component, pytest.mark.regression]
+
 
 class _FakeResponse:
     def __init__(self, status_code: int, payload: dict | None = None):

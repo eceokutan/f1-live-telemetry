@@ -1,7 +1,12 @@
+import pytest
 from types import SimpleNamespace
+
+pytest.importorskip("PyQt5")
 
 from ai.race_engineer import AIRaceEngineerWorker
 from ai.race_engineer_core import LiveSessionContext, ThresholdsConfig
+
+pytestmark = [pytest.mark.component, pytest.mark.regression]
 
 
 def _build_worker_for_tests() -> AIRaceEngineerWorker:

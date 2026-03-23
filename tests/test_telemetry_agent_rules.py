@@ -1,7 +1,11 @@
+import pytest
+
 from ai.race_engineer_core.config import ThresholdsConfig
 from ai.race_engineer_core.context import LiveSessionContext
 from ai.race_engineer_core.telemetry import OpponentSnapshot, TelemetryData, TireTemps
 from ai.race_engineer_core.telemetry_agent import TelemetryAgent
+
+pytestmark = [pytest.mark.component, pytest.mark.regression]
 
 
 def _make_telemetry(**overrides) -> TelemetryData:

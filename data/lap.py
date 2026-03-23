@@ -69,7 +69,7 @@ class Lap:
             avg_speed=float(df['speed'].mean()) if 'speed' in df.columns else 0.0,
             max_speed=float(df['speed'].max()) if 'speed' in df.columns else 0.0,
             min_speed=float(df['speed'].min()) if 'speed' in df.columns else 0.0,
-            valid=self.lap_time > 0.0
+            valid=bool(self.lap_time > 0.0)
         )
 
     def get_speed_trace(self) -> np.ndarray:

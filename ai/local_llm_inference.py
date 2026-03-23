@@ -50,29 +50,40 @@ class LocalLLMInference:
         Raises:
             FileNotFoundError: If GGUF model file does not exist.
         """
+        # Env var overrides
+        env_model_path = os.getenv("LOCAL_LLM_MODEL_PATH", "").strip()
+        if env_model_path:
+            model_path = env_model_path
+
         # Resolve model path relative to project root
         self.model_path = Path(model_path)
         if not self.model_path.is_absolute():
             self.model_path = Path(__file__).parent.parent / self.model_path
 
+        auto_download_enabled = (
+            os.getenv("LOCAL_LLM_AUTO_DOWNLOAD", "1").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
         if not self.model_path.exists():
-            # Try auto-downloading from Hugging Face Hub
-            try:
-                from ai.model_downloader import ensure_model
-                logger.info("Model not found locally, attempting auto-download...")
-                downloaded = ensure_model(model_path)
-                self.model_path = downloaded
-            except Exception as dl_err:
+            if auto_download_enabled:
+                # Try auto-downloading from Hugging Face Hub
+                try:
+                    from ai.model_downloader import ensure_model
+                    logger.info("Model not found locally, attempting auto-download...")
+                    downloaded = ensure_model(str(self.model_path))
+                    self.model_path = downloaded
+                except Exception as dl_err:
+                    raise FileNotFoundError(
+                        f"GGUF model not found at {self.model_path} and auto-download failed: {dl_err}. "
+                        "Run 'python scripts/convert_to_gguf.py' to generate it from the QLoRA adapter, "
+                        "or place the model file manually."
+                    ) from dl_err
+            else:
                 raise FileNotFoundError(
-                    f"GGUF model not found at {self.model_path} and auto-download failed: {dl_err}. "
-                    "Run 'python scripts/convert_to_gguf.py' to generate it from the QLoRA adapter, "
+                    f"GGUF model not found at {self.model_path}. "
+                    "Set LOCAL_LLM_AUTO_DOWNLOAD=1 to allow automatic download, "
                     "or place the model file manually."
-                ) from dl_err
-
-        # Env var overrides
-        env_model_path = os.getenv("LOCAL_LLM_MODEL_PATH", "").strip()
-        if env_model_path:
-            self.model_path = Path(env_model_path)
+                )
 
         env_n_gpu_layers = os.getenv("LOCAL_LLM_N_GPU_LAYERS", "").strip()
         if env_n_gpu_layers:

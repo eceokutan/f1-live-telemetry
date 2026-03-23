@@ -60,6 +60,15 @@ python main.py          # Launch Jarvis (launcher opens first)
 python main.py --ai     # Launch with AI race engineer enabled
 ```
 
+### Run automated tests
+```bash
+pip install -r requirements-test.txt
+pytest
+```
+
+Default `pytest` runs unit/component/integration suites and excludes manual/system/slow tests.
+See `tests/TESTING_STRATEGY.md` for marker usage, test levels, and assessment evidence guidance.
+
 ### Environment variables (for AI features)
 
 Copy `.env.example` to `.env` and fill in:
