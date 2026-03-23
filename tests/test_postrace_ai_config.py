@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from analysis.ai_pipeline_bridge import AIPipelineBridge
+
+pytestmark = [pytest.mark.component, pytest.mark.regression]
 
 
 def _bridge_for_config_tests() -> AIPipelineBridge:
@@ -43,6 +47,7 @@ def test_has_postrace_local_model_false_when_missing(monkeypatch, tmp_path):
 
 def test_has_postrace_local_model_false_default_path_missing(monkeypatch):
     monkeypatch.delenv("POSTRACE_GGUF_MODEL_PATH", raising=False)
+    monkeypatch.setenv("POSTRACE_GGUF_AUTO_DOWNLOAD", "0")
 
     bridge = _bridge_for_config_tests()
     # Patch the default path resolution to point to a non-existent location

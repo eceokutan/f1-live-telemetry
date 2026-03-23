@@ -1,77 +1,39 @@
-#!/usr/bin/env python3
 """
-Quick environment test script
-Run this to verify your Python setup is working
+Manual environment/system checks.
+
+These are intentionally opt-in and excluded from the default pytest run.
+Run with:
+    RUN_ENVIRONMENT_CHECKS=1 pytest -m "system and manual" tests/test_environment.py
 """
 
-print("="*60)
-print("🧪 TESTING PYTHON ENVIRONMENT")
-print("="*60)
+from __future__ import annotations
 
-# Test 1: Python version
-print("\n1️⃣ Testing Python version...")
-import sys
-print(f"   ✅ Python {sys.version}")
-print(f"   ✅ Executable: {sys.executable}")
-
-# Test 2: PyQt5
-print("\n2️⃣ Testing PyQt5...")
-try:
-    from PyQt5 import QtWidgets, QtCore
-    print("   ✅ PyQt5 imported successfully")
-    print(f"   ✅ Qt version: {QtCore.QT_VERSION_STR}")
-except ImportError as e:
-    print(f"   ❌ ERROR: {e}")
-    print("   Run: pip install PyQt5")
-    sys.exit(1)
-
-# Test 3: Matplotlib
-print("\n3️⃣ Testing Matplotlib...")
-try:
-    import matplotlib
-    print("   ✅ Matplotlib imported successfully")
-    print(f"   ✅ Version: {matplotlib.__version__}")
-except ImportError as e:
-    print(f"   ❌ ERROR: {e}")
-    print("   Run: pip install matplotlib")
-    sys.exit(1)
-
-# Test 4: NumPy
-print("\n4️⃣ Testing NumPy...")
-try:
-    import numpy
-    print("   ✅ NumPy imported successfully")
-    print(f"   ✅ Version: {numpy.__version__}")
-except ImportError as e:
-    print(f"   ❌ ERROR: {e}")
-    print("   Run: pip install numpy")
-    sys.exit(1)
-
-# Test 5: Platform check
-print("\n5️⃣ Testing Platform...")
+import importlib
+import os
 import platform
-os_type = platform.system()
-print(f"   ℹ️  OS: {os_type}")
-if os_type != "Windows":
-    print("   ⚠️  WARNING: AC shared memory only works on Windows!")
-    print("   ⚠️  You won't be able to connect to Assetto Corsa on Mac/Linux")
-else:
-    print("   ✅ Windows detected - shared memory will work!")
+import sys
 
-# Test 6: Simple Qt Application
-print("\n6️⃣ Testing Qt Application...")
-try:
-    app = QtWidgets.QApplication(sys.argv)
-    print("   ✅ Qt Application created successfully")
-    print("   ✅ (Not showing window, just testing)")
-except Exception as e:
-    print(f"   ❌ ERROR: {e}")
-    sys.exit(1)
+import pytest
 
-# Final result
-print("\n" + "="*60)
-print("✅ ALL TESTS PASSED!")
-print("="*60)
-print("\nYour environment is ready. You can now run:")
-print("   python main.py")
-print("\n")
+pytestmark = [pytest.mark.system, pytest.mark.manual]
+
+if os.getenv("RUN_ENVIRONMENT_CHECKS", "0") != "1":
+    pytest.skip(
+        "Environment checks are manual/opt-in. Set RUN_ENVIRONMENT_CHECKS=1 to run.",
+        allow_module_level=True,
+    )
+
+
+def test_python_version_supported():
+    assert sys.version_info >= (3, 10)
+
+
+def test_core_dependencies_import():
+    required = ["PyQt5", "matplotlib", "numpy", "pydantic", "httpx"]
+    for module in required:
+        assert importlib.import_module(module) is not None
+
+
+def test_platform_is_supported_for_live_ac_integration():
+    # Assetto Corsa shared memory integration is Windows-only.
+    assert platform.system() == "Windows"

@@ -508,6 +508,13 @@ class AIPipelineBridge:
         if default_path.exists():
             return True
 
+        auto_download_enabled = (
+            os.getenv("POSTRACE_GGUF_AUTO_DOWNLOAD", "1").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
+        if not auto_download_enabled:
+            return False
+
         # Try auto-downloading
         try:
             from ai.model_downloader import ensure_postrace_model

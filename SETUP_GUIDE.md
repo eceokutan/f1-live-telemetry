@@ -56,7 +56,7 @@ Open a terminal (Command Prompt or PowerShell) and run:
 
 ```bash
 cd /path/to/f1_telemetry_app
-python integrated_telemetry.py
+python main.py
 ```
 
 ## Step 4: Verify Connection

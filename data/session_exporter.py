@@ -342,22 +342,7 @@ class SessionExporter:
         cursor = db.cursor()
 
         # Ensure tables exist (in case DB is fresh)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                start_time REAL NOT NULL,
-                end_time REAL,
-                game TEXT NOT NULL,
-                track_name TEXT,
-                car_model TEXT,
-                player_name TEXT,
-                total_laps INTEGER DEFAULT 0,
-                best_lap_time REAL,
-                total_distance REAL DEFAULT 0.0,
-                ai_enabled INTEGER DEFAULT 0,
-                notes TEXT
-            )
-        """)
+        self._ensure_import_tables(cursor)
 
         # Insert session
         now = _time.time()
@@ -417,6 +402,106 @@ class SessionExporter:
         db.close()
         logger.info("Imported session from %s as session_id=%d", input_file, session_id)
         return session_id
+
+    def _ensure_import_tables(self, cursor: sqlite3.Cursor) -> None:
+        """Create all tables required by import_session_bundle()."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start_time REAL NOT NULL,
+                end_time REAL,
+                game TEXT NOT NULL,
+                track_name TEXT,
+                car_model TEXT,
+                player_name TEXT,
+                total_laps INTEGER DEFAULT 0,
+                best_lap_time REAL,
+                total_distance REAL DEFAULT 0.0,
+                ai_enabled INTEGER DEFAULT 0,
+                notes TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS laps (
+                lap_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                lap_number INTEGER NOT NULL,
+                lap_time REAL,
+                sector1_time REAL,
+                sector2_time REAL,
+                sector3_time REAL,
+                valid INTEGER DEFAULT 1,
+                fuel_start REAL,
+                fuel_end REAL,
+                avg_speed REAL,
+                max_speed REAL,
+                min_speed REAL,
+                timestamp REAL NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS telemetry (
+                telemetry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                lap_number INTEGER NOT NULL,
+                elapsed_time REAL NOT NULL,
+                pos_x REAL NOT NULL,
+                pos_z REAL NOT NULL,
+                speed REAL NOT NULL,
+                gear INTEGER,
+                rpm INTEGER,
+                throttle REAL,
+                brake REAL,
+                fuel REAL,
+                steer_angle REAL,
+                g_force_lat REAL,
+                g_force_lon REAL,
+                tyre_pressure_fl REAL,
+                tyre_pressure_fr REAL,
+                tyre_pressure_rl REAL,
+                tyre_pressure_rr REAL,
+                tyre_temp_fl REAL,
+                tyre_temp_fr REAL,
+                tyre_temp_rl REAL,
+                tyre_temp_rr REAL,
+                tyre_wear_fl REAL,
+                tyre_wear_fr REAL,
+                tyre_wear_rl REAL,
+                tyre_wear_rr REAL,
+                wheel_slip_fl REAL,
+                wheel_slip_fr REAL,
+                wheel_slip_rl REAL,
+                wheel_slip_rr REAL,
+                suspension_fl REAL,
+                suspension_fr REAL,
+                suspension_rl REAL,
+                suspension_rr REAL,
+                ride_height_front REAL,
+                ride_height_rear REAL,
+                car_damage_front REAL,
+                car_damage_rear REAL,
+                car_damage_left REAL,
+                car_damage_right REAL,
+                car_damage_centre REAL,
+                is_in_pit INTEGER,
+                pit_limiter INTEGER,
+                timestamp REAL NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ai_commentary (
+                commentary_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                timestamp REAL NOT NULL,
+                message TEXT NOT NULL,
+                trigger TEXT,
+                priority TEXT,
+                lap_number INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        """)
 
     def _export_ai_commentary(self, db: sqlite3.Connection, session_id: int, output_path: Path) -> None:
         """Export AI commentary to CSV (if any exists)."""

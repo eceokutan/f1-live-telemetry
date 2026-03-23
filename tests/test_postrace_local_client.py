@@ -9,6 +9,8 @@ import pytest
 
 from jarvis_post.llm.local_client import LocalGGUFClient
 
+pytestmark = [pytest.mark.component, pytest.mark.regression]
+
 
 @pytest.fixture
 def mock_llama():
