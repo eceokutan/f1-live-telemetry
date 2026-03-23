@@ -99,6 +99,43 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
         logger.info("AIRaceEngineerWorker initialized")
 
+    def update_session_info(self, info: dict):
+        """
+        Update session info from telemetry backend.
+
+        Called when session_info_update signal fires. Seeds fuel consumption
+        estimate from datasheet if no real telemetry data is available yet.
+
+        Args:
+            info: Dict with keys 'track', 'car_model', 'max_fuel', etc.
+        """
+        track = info.get("track", "Unknown Track")
+        car_model = info.get("car_model", "")
+
+        # Update track name
+        self.track_name = track
+        if self.context:
+            self.context.track_name = track
+
+        # Look up fuel data from datasheet
+        try:
+            from ai.fuel_lookup import lookup_fuel_consumption
+            fuel_data = lookup_fuel_consumption(car_model, track)
+
+            # Seed fuel consumption estimate only if no real telemetry data yet
+            if self.context and self.context.fuel_consumption_per_lap <= 0:
+                self.context.fuel_consumption_per_lap = fuel_data["fuel_per_lap"]
+                logger.info(
+                    "Seeded fuel estimate from datasheet: %.2f L/lap (%s @ %s)",
+                    fuel_data["fuel_per_lap"],
+                    fuel_data["matched_car"],
+                    fuel_data["matched_track"],
+                )
+        except Exception as e:
+            logger.warning("Failed to look up fuel data: %s", e)
+
+        logger.info("Session info updated: track=%s, car=%s", track, car_model)
+
     def run(self):
         """Main thread execution loop."""
         self._running = True
@@ -343,17 +380,14 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
                 response = self._clean_llm_response(response)
 
-                # Guardrail: label numeric claims not grounded in current context.
-                response = self._label_estimate_if_ungrounded_numbers(response, query)
-
-                # Guardrail: if the model gave a weak/generic pit answer, provide
-                # deterministic pit guidance from current thresholds/context.
-                if self._should_force_pit_fallback(query, response):
+                # Guardrail chain: only one fires (first match wins).
+                if self._has_ungrounded_numbers(response, query):
+                    logger.warning("Response contains ungrounded numbers; using fallback")
+                    response = self._build_reactive_fallback_response(query)
+                elif self._should_force_pit_fallback(query, response):
                     logger.warning("Replacing low-confidence pit response with deterministic fallback")
                     response = self._build_pit_query_fallback_response()
-
-                # Guardrail: replace obviously broken outputs such as "0".
-                if self._is_low_quality_response(response):
+                elif self._is_low_quality_response(response):
                     logger.warning("Low-quality reactive response detected; using deterministic fallback")
                     response = self._build_reactive_fallback_response(query)
 
@@ -727,63 +761,37 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 continue
         return values
 
-    @staticmethod
-    def _is_estimate_labeled(text: str) -> bool:
-        """Return True when the response already signals uncertainty."""
-        if not text:
-            return False
-
-        lowered = text.lower()
-        markers = (
-            "estimate",
-            "estimated",
-            "roughly",
-            "about",
-            "around",
-            "approximately",
-            "likely",
-            "probably",
-            "maybe",
-        )
-        return any(marker in lowered for marker in markers)
-
-    def _label_estimate_if_ungrounded_numbers(self, response: str, query: str) -> str:
+    def _has_ungrounded_numbers(self, response: str, query: str) -> bool:
         """
-        Mark responses as estimates when they contain numeric claims that are
-        not present in the current query/context snapshot.
+        Check if response contains numeric claims not grounded in the
+        current query/context snapshot.
+
+        Returns True if the response has fabricated numbers that should
+        trigger a deterministic fallback.
         """
         if not response or not self.context:
-            return response
+            return False
 
         response_nums = self._extract_numeric_values(response)
         if not response_nums:
-            return response
+            return False
 
         source_text = f"{query}\n{self.context.to_prompt_context(query=query, grounding_only=True)}"
         source_nums = self._extract_numeric_values(source_text)
 
-        ungrounded = False
         if not source_nums:
-            ungrounded = True
-        else:
-            tolerance = 0.6  # allow small rounding differences
-            for val in response_nums:
-                if min(abs(val - src) for src in source_nums) > tolerance:
-                    logger.warning(
-                        "Out-of-context numeric claim in response (%.3f); labeling as estimate",
-                        val,
-                    )
-                    ungrounded = True
-                    break
+            return True
 
-        if ungrounded:
-            if self._is_estimate_labeled(response):
+        tolerance = 0.6  # allow small rounding differences
+        for val in response_nums:
+            if min(abs(val - src) for src in source_nums) > tolerance:
                 logger.warning(
-                    "Response has hedge words but contains fabricated numbers; labeling anyway",
+                    "Ungrounded numeric claim in response (%.3f); triggering fallback",
+                    val,
                 )
-            return f"Estimate based on current data: {response}"
+                return True
 
-        return response
+        return False
 
     def _build_reactive_prompt(self, query: str) -> str:
         """
@@ -810,7 +818,11 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if not query:
             return False
         query_lower = query.lower()
-        return any(token in query_lower for token in ("pit", "pet", "box", "stop", "stint", "refuel"))
+        return any(token in query_lower for token in (
+            "pit", "pits", "pitting",
+            "pet", "pay", "bet", "bit",  # common STT misrecognitions of "pit"
+            "box", "stop", "stint", "refuel",
+        ))
 
     @staticmethod
     def _signals_insufficient_data(response: str) -> bool:
@@ -891,10 +903,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
             return "Need one clean lap to calibrate fuel burn before I can call pit timing. Tires and damage look good, push on."
 
         if fuel_laps <= thresholds.fuel_critical_laps:
-            return f"Fuel critical, box this lap. About {fuel_laps:.1f} laps remaining."
+            return f"Fuel critical, box this lap. About {int(fuel_laps)} laps remaining."
 
         if fuel_laps <= thresholds.fuel_warning_laps:
-            return f"Pit window open now. Fuel projects {fuel_laps:.1f} laps."
+            return f"Pit window open now. Fuel projects about {int(fuel_laps)} laps."
 
         if has_wear_data and max_wear >= thresholds.tire_wear_critical:
             return f"Tire wear is critical at {max_wear:.0f} percent. Box this lap."
@@ -908,7 +920,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if max_temp >= thresholds.tire_temp_warning:
             return f"Tire temperatures are high at {max_temp:.0f} C. Manage pace and plan a stop."
 
-        return f"No stop needed yet. Fuel projects about {fuel_laps:.1f} laps remaining."
+        return f"No stop needed yet. Fuel projects about {int(fuel_laps)} laps remaining."
 
     def _build_event_fallback_response(self, event: Event) -> str:
         """

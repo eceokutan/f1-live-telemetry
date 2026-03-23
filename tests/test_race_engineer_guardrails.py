@@ -72,7 +72,7 @@ def test_pit_fallback_uses_fuel_projection_when_available():
     worker.context.fuel_remaining = 6.0
     msg = worker._build_pit_query_fallback_response()
     assert "pit window open" in msg.lower()
-    assert "3.0 laps" in msg.lower()
+    assert "3 laps" in msg.lower()
 
 
 def test_general_fallback_safe_when_agent_missing():
@@ -137,3 +137,83 @@ def test_should_force_pit_fallback_false_for_non_pit_query():
         "how are my tires?",
         "Insufficient data.",
     )
+
+
+# --- _has_ungrounded_numbers tests ---
+
+def test_has_ungrounded_numbers_detects_fabricated():
+    worker = _build_worker_for_tests()
+    # Context has speed ~0, rpm 0, gear 0, etc.  "3894" is nowhere in context.
+    assert worker._has_ungrounded_numbers("Your lap time is 3894 seconds.", "how am I doing?")
+
+
+def test_has_ungrounded_numbers_passes_grounded():
+    worker = _build_worker_for_tests()
+    worker.context.speed_kmh = 250.0
+    worker.context.rpm = 8500
+    # Response only references numbers present in context
+    assert not worker._has_ungrounded_numbers("Speed is 250 km/h.", "how fast am I?")
+
+
+def test_has_ungrounded_numbers_false_when_no_numbers():
+    worker = _build_worker_for_tests()
+    assert not worker._has_ungrounded_numbers("Tires look fine, push on.", "how are my tires?")
+
+
+# --- _is_pit_query STT broadening tests ---
+
+def test_is_pit_query_catches_stt_misrecognitions():
+    assert AIRaceEngineerWorker._is_pit_query("when should I pay?")
+    assert AIRaceEngineerWorker._is_pit_query("when should I bet?")
+    assert AIRaceEngineerWorker._is_pit_query("when should I bit?")
+    assert AIRaceEngineerWorker._is_pit_query("when should I pet?")
+    assert AIRaceEngineerWorker._is_pit_query("when should I pit?")
+    assert AIRaceEngineerWorker._is_pit_query("should I box now?")
+
+
+def test_is_pit_query_rejects_unrelated():
+    assert not AIRaceEngineerWorker._is_pit_query("how are my tires?")
+    assert not AIRaceEngineerWorker._is_pit_query("what is my gap?")
+
+
+# --- Pit context pruning with STT keywords ---
+
+def test_stt_pit_query_gets_pit_context():
+    """Garbled pit queries should still get fuel/pit context lines."""
+    ctx = LiveSessionContext(
+        session_id="test-session",
+        source="assetto_corsa",
+        track_name="Monza",
+    )
+    ctx.fuel_remaining = 10.0
+    ctx.fuel_consumption_per_lap = 2.5
+    prompt_ctx = ctx.to_prompt_context(query="when should I pay?")
+    assert "Fuel:" in prompt_ctx
+    assert "Pit Summary:" in prompt_ctx
+
+
+# --- Fuel lookup tests ---
+
+def test_fuel_lookup_known_car_and_track():
+    from ai.fuel_lookup import lookup_fuel_consumption
+    result = lookup_fuel_consumption("ks_ferrari_458", "monza")
+    assert not result["is_default"]
+    assert "Ferrari" in result["matched_car"]
+    assert "Monza" in result["matched_track"]
+    # Ferrari 458: base=3.50, Monza: sf=1.20, km=5.79
+    expected = 3.50 * 1.20 * (5.79 / 5.0)
+    assert abs(result["fuel_per_lap"] - expected) < 0.01
+
+
+def test_fuel_lookup_unknown_falls_back_to_default():
+    from ai.fuel_lookup import lookup_fuel_consumption
+    result = lookup_fuel_consumption("totally_unknown_car", "nonexistent_track")
+    assert result["is_default"]
+    assert "Lotus" in result["matched_car"]
+    assert "Monza" in result["matched_track"]
+
+
+def test_fuel_lookup_track_with_ks_prefix():
+    from ai.fuel_lookup import lookup_fuel_consumption
+    result = lookup_fuel_consumption("ks_lotus_exos_125", "ks_nurburgring")
+    assert "Nurburgring" in result["matched_track"] or "Nürburgring" in result["matched_track"]

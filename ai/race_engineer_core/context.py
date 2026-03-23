@@ -51,7 +51,7 @@ _CONTEXT_GROUPS = {
         "labels": {"car_damage"},
     },
     "pit": {
-        "keywords": {"pit", "pitting", "box", "stop", "stint", "refuel"},
+        "keywords": {"pit", "pits", "pitting", "pet", "pay", "bet", "bit", "box", "stop", "stint", "refuel"},
         "labels": {"pit_summary", "fuel"},
     },
     "laptimes": {

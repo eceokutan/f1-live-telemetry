@@ -168,6 +168,11 @@ def run_jarvis_live(settings: dict) -> bool:
 
             telemetry_thread.live_data_update.connect(on_live_data_for_ai)
 
+        # Wire session info to AI thread so it gets real track/car names
+        # and can seed fuel consumption estimate from datasheet
+        if hasattr(telemetry_thread, 'session_info_update'):
+            telemetry_thread.session_info_update.connect(ai_thread.update_session_info)
+
         ai_thread.start()
         logger.info("AI Race Engineer started")
 
