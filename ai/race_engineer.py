@@ -334,23 +334,22 @@ class AIRaceEngineerWorker(QtCore.QThread):
                     logger.debug(f"LLM response received: {response[:100]}...")
                 except asyncio.TimeoutError:
                     logger.error("LLM response timed out after %.1f seconds", query_timeout_seconds)
-                    # Build the same prompt that would have been sent to the LLM
-                    # so the rule-based fallback can keyword-match on full context.
-                    prompt = self._build_reactive_prompt(query)
-                    fallback = self.race_engineer_agent.llm_client._generate_fallback_response(prompt)
-                    self.ai_commentary.emit(fallback, "driver_query_timeout", 1)
-                    self.status_update.emit("AI Race Engineer ready")
-                    return
+                    if self._is_pit_query(query):
+                        response = self._build_pit_query_fallback_response()
+                    else:
+                        prompt = self._build_reactive_prompt(query)
+                        response = self.race_engineer_agent.llm_client._generate_fallback_response(prompt)
+                    trigger = "driver_query_timeout"
 
                 response = self._clean_llm_response(response)
 
                 # Guardrail: label numeric claims not grounded in current context.
                 response = self._label_estimate_if_ungrounded_numbers(response, query)
 
-                # Guardrail: if the model says it lacks data for pit timing, provide
+                # Guardrail: if the model gave a weak/generic pit answer, provide
                 # deterministic pit guidance from current thresholds/context.
-                if self._is_pit_query(query) and self._signals_insufficient_data(response):
-                    logger.warning("LLM returned low-confidence pit answer; using pit fallback")
+                if self._should_force_pit_fallback(query, response):
+                    logger.warning("Replacing low-confidence pit response with deterministic fallback")
                     response = self._build_pit_query_fallback_response()
 
                 # Guardrail: replace obviously broken outputs such as "0".
@@ -811,7 +810,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if not query:
             return False
         query_lower = query.lower()
-        return any(token in query_lower for token in ("pit", "box", "stop", "stint", "refuel"))
+        return any(token in query_lower for token in ("pit", "pet", "box", "stop", "stint", "refuel"))
 
     @staticmethod
     def _signals_insufficient_data(response: str) -> bool:
@@ -831,6 +830,13 @@ class AIRaceEngineerWorker(QtCore.QThread):
             "do not have enough",
         )
         return any(marker in lowered for marker in markers)
+
+    def _should_force_pit_fallback(self, query: str, response: str) -> bool:
+        """Return True when a pit query got an insufficient-data response
+        that the context-aware deterministic fallback can answer better."""
+        if not self._is_pit_query(query):
+            return False
+        return self._signals_insufficient_data(response)
 
     @staticmethod
     def _is_low_quality_response(response: str) -> bool:
@@ -882,7 +888,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 return f"Tire wear is high at {max_wear:.0f} percent. Pit window is open."
             if max_temp >= thresholds.tire_temp_warning:
                 return f"Tire temperatures are high at {max_temp:.0f} C. Pit soon if they do not recover."
-            return "Need one clean lap to calibrate fuel burn before I can call pit timing. Ask again next lap."
+            return "Need one clean lap to calibrate fuel burn before I can call pit timing. Tires and damage look good, push on."
 
         if fuel_laps <= thresholds.fuel_critical_laps:
             return f"Fuel critical, box this lap. About {fuel_laps:.1f} laps remaining."

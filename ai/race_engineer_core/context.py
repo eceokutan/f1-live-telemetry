@@ -39,16 +39,20 @@ _CONTEXT_GROUPS = {
         "labels": {"gap_ahead_behind", "nearby_opponents"},
     },
     "fuel": {
-        "keywords": {"fuel", "pit", "box", "stop", "refuel", "range", "stint"},
+        "keywords": {"fuel", "range"},
         "labels": {"fuel"},
     },
     "tires": {
-        "keywords": {"tire", "tyre", "temp", "temperature", "pressure", "wear", "grip", "deg", "degradation", "pit", "pitting", "box", "stop"},
+        "keywords": {"tire", "tyre", "temp", "temperature", "pressure", "wear", "grip", "deg", "degradation"},
         "labels": {"tire_temps", "tire_pressures", "tire_wear"},
     },
     "damage": {
-        "keywords": {"damage", "crash", "contact", "hit", "broken", "wing", "pit", "pitting", "box", "stop"},
+        "keywords": {"damage", "crash", "contact", "hit", "broken", "wing"},
         "labels": {"car_damage"},
+    },
+    "pit": {
+        "keywords": {"pit", "pitting", "box", "stop", "stint", "refuel"},
+        "labels": {"pit_summary", "fuel"},
     },
     "laptimes": {
         "keywords": {"lap", "time", "pace", "fast", "slow", "delta", "best", "sector", "improve"},
@@ -431,6 +435,18 @@ class LiveSessionContext:
         wear_str = f"FL:{self.tire_wear['fl']:.0f}% FR:{self.tire_wear['fr']:.0f}% RL:{self.tire_wear['rl']:.0f}% RR:{self.tire_wear['rr']:.0f}%"
         pressure_str = f"FL:{self.tire_pressures['fl']:.1f}psi FR:{self.tire_pressures['fr']:.1f}psi RL:{self.tire_pressures['rl']:.1f}psi RR:{self.tire_pressures['rr']:.1f}psi"
 
+        # Pit summary: condensed single-line overview for pit-strategy queries
+        max_tire_temp = max(self.tire_temps.values()) if self.tire_temps else 0.0
+        max_temp_corner = max(self.tire_temps, key=self.tire_temps.get) if self.tire_temps else "N/A"
+        max_tire_wear_val = max(self.tire_wear.values()) if self.tire_wear else 0.0
+        max_wear_corner = max(self.tire_wear, key=self.tire_wear.get) if self.tire_wear else "N/A"
+        pit_summary_str = (
+            f"Fuel {fuel_laps_str} laps"
+            f" | Max Tire Temp: {max_tire_temp:.0f}C ({max_temp_corner.upper()})"
+            f" | Max Tire Wear: {max_tire_wear_val:.0f}% ({max_wear_corner.upper()})"
+            f" | Damage: {total_damage:.0f}% total"
+        )
+
         # Build context lines conditionally
         all_lines = [
             ("track", f"Track: {self.track_name}"),
@@ -441,6 +457,7 @@ class LiveSessionContext:
             ("gap_ahead_behind", f"Gap Ahead: {gap_ahead_str} | Gap Behind: {gap_behind_str}"),
             ("nearby_opponents", f"Nearby Opponents: {nearby_str}"),
             ("fuel", f"Fuel: {self.fuel_remaining:.1f}L ({fuel_laps_str} laps)"),
+            ("pit_summary", f"Pit Summary: {pit_summary_str}"),
             ("tire_temps", f"Tire Temps: FL:{self.tire_temps['fl']:.0f}°C FR:{self.tire_temps['fr']:.0f}°C RL:{self.tire_temps['rl']:.0f}°C RR:{self.tire_temps['rr']:.0f}°C"),
             ("tire_pressures", f"Tire Pressures: {pressure_str}"),
             ("tire_wear", f"Tire Wear: {wear_str}"),
