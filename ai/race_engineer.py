@@ -845,7 +845,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             return True
 
         cleaned = response.strip().lower()
-        if cleaned in {"0", "0.", "n/a", "na", "none", "null", "unknown", "idk", "..."}:
+        if cleaned in {"0", "0.", "n/a", "na", "none", "null", "unknown", "idk", "...", "insufficient data.", "insufficient data"}:
             return True
 
         if re.fullmatch(r"[0-9\W]+", cleaned):

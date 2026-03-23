@@ -177,8 +177,7 @@ class LocalLLMInference:
             "You are an expert F1 race engineer communicating with your "
             "driver over team radio. Use ONLY numbers from the provided data. "
             "Do NOT derive, calculate, or invent new values (percentages, rates, totals). "
-            "If key data is missing, reply EXACTLY: \"Insufficient data.\" "
-            "Reply in one short sentence."
+            "If key data is missing, say so. Reply in one short sentence."
         )
         return (
             f"<|start_of_role|>system<|end_of_role|>{system_msg}<|end_of_text|>"
