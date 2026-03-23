@@ -183,11 +183,9 @@ class LLMClient:
 
         if "fuel" in prompt_lower and "critical" in prompt_lower:
             return "Box box box! Fuel critical, pit this lap."
-        elif "fuel" in prompt_lower:
-            return "Fuel looking tight. Consider your pit window."
         elif "tire" in prompt_lower and "critical" in prompt_lower:
             return "Tires are gone! Box immediately."
-        elif "tire" in prompt_lower:
+        elif "tire" in prompt_lower and ("warning" in prompt_lower or "high" in prompt_lower):
             return "Tires are showing wear. Monitor carefully."
         elif "gap" in prompt_lower:
             return "Gap has changed. Adjust your pace accordingly."
