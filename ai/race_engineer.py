@@ -908,8 +908,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
         if any(kw in query_lower for kw in ("gap", "ahead", "behind", "position", "opponent")):
             has_gap_data = self.context.gap_ahead is not None or self.context.gap_behind is not None
             if has_gap_data:
-                gap_ahead_str = f"{self.context.gap_ahead:.1f}s" if self.context.gap_ahead is not None else "unavailable"
-                gap_behind_str = f"{self.context.gap_behind:.1f}s" if self.context.gap_behind is not None else "unavailable"
+                gap_ahead_str = f"{self.context.gap_ahead:.1f}s" if self.context.gap_ahead is not None else "no car"
+                gap_behind_str = f"{self.context.gap_behind:.1f}s" if self.context.gap_behind is not None else "no car"
                 return f"P{self.context.position}. Gap ahead {gap_ahead_str}, behind {gap_behind_str}."
             return f"You're P{self.context.position}. Gap and opponent data not available from this sim."
 

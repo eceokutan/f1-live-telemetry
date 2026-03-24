@@ -78,8 +78,17 @@ class RaceAnalysisAgent(BaseAgent):
         # --- lap_summary ---
         fastest_time = min(valid_times) if valid_times else 0
         slowest_time = max(valid_times) if valid_times else 0
-        fastest_lap = lap_times.index(fastest_time) + 1 if fastest_time else 1
-        slowest_lap = lap_times.index(slowest_time) + 1 if slowest_time else 1
+        fastest_lap = 1
+        slowest_lap = 1
+        if valid_times:
+            for i, (lap, t, v) in enumerate(zip(laps, lap_times, valid_flags)):
+                if t > 0 and v and t == fastest_time:
+                    fastest_lap = lap.get("lap_number", i + 1)
+                    break
+            for i, (lap, t, v) in enumerate(zip(laps, lap_times, valid_flags)):
+                if t > 0 and v and t == slowest_time:
+                    slowest_lap = lap.get("lap_number", i + 1)
+                    break
         avg_time = round(sum(valid_times) / len(valid_times), 3) if valid_times else 0
 
         lap_summary = {
