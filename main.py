@@ -577,6 +577,7 @@ if __name__ == "__main__":
 
     loader_thread = StartupLoaderThread()
     loader_thread.stage_update.connect(loading_screen.set_stage_status)
+    loader_thread.download_progress.connect(loading_screen.set_stage_progress)
     loader_thread.fatal_error.connect(loading_screen.show_fatal_error)
 
     startup_results = [None]
