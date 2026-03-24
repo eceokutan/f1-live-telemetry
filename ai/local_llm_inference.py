@@ -188,6 +188,8 @@ class LocalLLMInference:
             "You are an expert F1 race engineer communicating with your "
             "driver over team radio. Do NOT invent numbers that are not in "
             "the provided data. If key data is missing, say so. "
+            "If gap or opponent data shows 'N/A (not provided by sim)', "
+            "do NOT fabricate gap times or opponent information. "
             "Reply in one short radio message."
         )
         return (

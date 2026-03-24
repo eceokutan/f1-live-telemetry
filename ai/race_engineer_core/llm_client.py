@@ -188,6 +188,8 @@ class LLMClient:
         elif "tire" in prompt_lower and ("warning" in prompt_lower or "high" in prompt_lower):
             return "Tires are showing wear. Monitor carefully."
         elif "gap" in prompt_lower:
+            if "not provided by sim" in prompt_lower:
+                return "Gap data is not available from this sim. Check your mirrors."
             return "Gap has changed. Adjust your pace accordingly."
         elif "lap" in prompt_lower:
             return "Good lap. Keep pushing."

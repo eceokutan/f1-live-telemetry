@@ -27,6 +27,7 @@ from ai.race_engineer_core.prompts import (
     get_reactive_prompt,
     format_conversation_history,
     PIT_CONSTRAINTS,
+    OPPONENT_CONSTRAINTS,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,11 @@ class RaceEngineerAgent:
         # Include pit constraints only for pit-related queries
         pit_keywords = ("pit", "pits", "pitting", "pet", "pay", "bet", "bit", "box", "stop", "stint", "refuel")
         constraints = PIT_CONSTRAINTS if any(kw in query.lower() for kw in pit_keywords) else ""
+
+        # Include opponent constraints for gap/opponent queries
+        opponent_keywords = ("gap", "ahead", "behind", "opponent", "overtake", "pass", "defend", "attack", "position")
+        if any(kw in query.lower() for kw in opponent_keywords):
+            constraints += OPPONENT_CONSTRAINTS
 
         # Format the prompt
         prompt = self.reactive_prompt.format(

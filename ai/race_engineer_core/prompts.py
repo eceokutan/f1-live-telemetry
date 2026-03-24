@@ -103,6 +103,13 @@ PITTING RULES:
 - Only recommend pitting for fuel if fuel laps remaining is less than 4. If 4 or more, tell the driver they have enough fuel and do NOT suggest pitting.
 - Base your pit recommendation ONLY on the numbers in the session data. Do not invent or assume problems not shown in the data."""
 
+OPPONENT_CONSTRAINTS = """
+OPPONENT/GAP DATA RULES:
+- Gap and opponent data is ONLY available from certain sims (e.g. ACC). The current sim may NOT provide it.
+- If Gap Ahead and Gap Behind both show "N/A (not provided by sim)", do NOT invent gap times, opponent names, or lap differences.
+- Only report position (P-number) if it is a real number in the session data.
+- If the driver asks about gaps or opponents and the data shows N/A, tell them this data is not available from the current game and report their position only."""
+
 
 # =============================================================================
 # REACTIVE PROMPTS (Query-Driven)

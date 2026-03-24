@@ -817,6 +817,7 @@ class AIRaceEngineerWorker(QtCore.QThread):
             query=query,
             session_context=session_context_str,
             conversation_history=conversation_str,
+            constraints="",
         )
 
     @staticmethod
@@ -905,9 +906,12 @@ class AIRaceEngineerWorker(QtCore.QThread):
 
         # Gap / position queries
         if any(kw in query_lower for kw in ("gap", "ahead", "behind", "position", "opponent")):
-            gap_ahead_str = f"{self.context.gap_ahead:.1f}s" if self.context.gap_ahead is not None else "no car"
-            gap_behind_str = f"{self.context.gap_behind:.1f}s" if self.context.gap_behind is not None else "no car"
-            return f"P{self.context.position}. Gap ahead {gap_ahead_str}, behind {gap_behind_str}."
+            has_gap_data = self.context.gap_ahead is not None or self.context.gap_behind is not None
+            if has_gap_data:
+                gap_ahead_str = f"{self.context.gap_ahead:.1f}s" if self.context.gap_ahead is not None else "unavailable"
+                gap_behind_str = f"{self.context.gap_behind:.1f}s" if self.context.gap_behind is not None else "unavailable"
+                return f"P{self.context.position}. Gap ahead {gap_ahead_str}, behind {gap_behind_str}."
+            return f"You're P{self.context.position}. Gap and opponent data not available from this sim."
 
         # Fuel queries
         if any(kw in query_lower for kw in ("fuel", "range")):
@@ -1091,6 +1095,18 @@ class AIRaceEngineerWorker(QtCore.QThread):
             if lap is not None and lap_time is not None:
                 return f"Lap {lap} complete, {lap_time:.3f} seconds. Keep building."
             return "Lap complete. Keep building."
+
+        if event_type == "position_change":
+            old_pos = data.get("old_position")
+            new_pos = data.get("new_position")
+            gained = data.get("gained", 0)
+            if new_pos is not None:
+                if gained > 0:
+                    return f"Position gained! Now P{new_pos}. Keep the pressure on."
+                elif gained < 0:
+                    return f"Lost position, now P{new_pos}. Stay focused, fight back."
+                return f"Position P{new_pos}."
+            return "Position change. Stay focused."
 
         return "Copy that. Monitoring."
 

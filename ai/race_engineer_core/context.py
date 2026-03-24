@@ -421,8 +421,8 @@ class LiveSessionContext:
             fuel_laps_str = "unknown (no completed lap yet)"
         else:
             fuel_laps_str = f"{fuel_laps:.1f}"
-        gap_ahead_str = f"{self.gap_ahead:.2f}s" if self.gap_ahead is not None else "N/A"
-        gap_behind_str = f"{self.gap_behind:.2f}s" if self.gap_behind is not None else "N/A"
+        gap_ahead_str = f"{self.gap_ahead:.2f}s" if self.gap_ahead is not None else "N/A (not provided by sim)"
+        gap_behind_str = f"{self.gap_behind:.2f}s" if self.gap_behind is not None else "N/A (not provided by sim)"
         nearby_str = self._format_nearby_opponents()
         best_lap_str = self._format_lap_time(self.best_lap) if self.best_lap else "N/A"
         last_lap_str = self._format_lap_time(self.last_lap) if self.last_lap else "N/A"
@@ -471,7 +471,7 @@ class LiveSessionContext:
     def _format_nearby_opponents(self) -> str:
         """Format up to three opponents nearest in race position."""
         if not self.opponents:
-            return "N/A"
+            return "N/A (not provided by sim)"
 
         sorted_cars = sorted(
             self.opponents,
