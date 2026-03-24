@@ -164,6 +164,21 @@ class LoadingScreen(QtWidgets.QWidget):
 
         main_layout.addWidget(self._error_panel)
 
+        # Always-visible quit button
+        quit_always_btn = QtWidgets.QPushButton("Quit")
+        quit_always_btn.setFixedWidth(100)
+        quit_always_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        quit_always_btn.setStyleSheet(
+            "background-color: #444444; color: #CCCCCC; "
+            "font-size: 10pt; padding: 5px 12px; border-radius: 4px;"
+        )
+        quit_always_btn.clicked.connect(lambda: sys.exit(0))
+        quit_btn_layout = QtWidgets.QHBoxLayout()
+        quit_btn_layout.addStretch()
+        quit_btn_layout.addWidget(quit_always_btn)
+        quit_btn_layout.addStretch()
+        main_layout.addLayout(quit_btn_layout)
+
         # Center on screen
         self._center_on_screen()
 
@@ -313,24 +328,48 @@ class StartupLoaderThread(QtCore.QThread):
                 self.stage_update.emit(5, STATUS_RUNNING, "Downloading post-race model...")
             ensure_postrace_model()
 
-            # Prewarm LLM into memory
-            self.stage_update.emit(5, STATUS_RUNNING, "Loading LLM into memory...")
+            # Prewarm LLM into memory (with progress updates so UI doesn't look frozen)
             try:
                 from ai.model_prewarm import (
                     is_local_llm_model_available,
                     needs_local_llm_prewarm,
                     prewarm_local_llm,
                 )
+                import threading as _th
+                import time as _time
 
                 local_model_path = DEFAULT_LOCAL_PATH
                 if is_local_llm_model_available(local_model_path) and needs_local_llm_prewarm():
-                    prewarm_local_llm(model_path=local_model_path)
+                    self.stage_update.emit(5, STATUS_RUNNING, "Loading LLM into memory...")
+                    prewarm_error = [None]
+                    prewarm_done = _th.Event()
+
+                    def _do_prewarm():
+                        try:
+                            prewarm_local_llm(model_path=local_model_path)
+                        except Exception as e:
+                            prewarm_error[0] = e
+                        finally:
+                            prewarm_done.set()
+
+                    _th.Thread(target=_do_prewarm, daemon=True).start()
+                    t0 = _time.time()
+                    while not prewarm_done.is_set():
+                        elapsed = int(_time.time() - t0)
+                        self.stage_update.emit(
+                            5, STATUS_RUNNING,
+                            f"Loading LLM into memory... ({elapsed}s)"
+                        )
+                        prewarm_done.wait(timeout=1.0)
+
+                    if prewarm_error[0]:
+                        raise prewarm_error[0]
                     self.stage_update.emit(5, STATUS_DONE, "Models downloaded, LLM loaded")
                 else:
                     self.stage_update.emit(5, STATUS_DONE, "Models ready")
             except Exception as e:
                 logger.warning("LLM prewarm failed (non-fatal): %s", e)
-                self.stage_update.emit(5, STATUS_DONE, "Models downloaded, LLM prewarm skipped")
+                self.stage_update.emit(5, STATUS_DONE, "Models ready, LLM loads on first use")
 
         except Exception as e:
             logger.warning("Model download/prewarm failed: %s", e)

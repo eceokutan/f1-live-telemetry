@@ -38,9 +38,13 @@ a = Analysis(
         'PyQt5.QtWidgets',
         'PyQt5.QtCore',
         'PyQt5.QtGui',
-        # Matplotlib backends
+        'PyQt5.QtSvg',
+        # Matplotlib
         'matplotlib.backends.backend_qt5agg',
-        # AI modules (optional - app works without them)
+        'matplotlib.collections',
+        'matplotlib.colors',
+        'matplotlib.cm',
+        # AI modules
         'ai.race_engineer',
         'ai.race_engineer_core',
         'ai.voice_input',
@@ -49,21 +53,47 @@ a = Analysis(
         'ai.local_llm_inference',
         'ai.model_downloader',
         'ai.model_prewarm',
+        'ai.fuel_lookup',
         # Post-race analysis
         'analysis.ai_pipeline_bridge',
         'jarvis_post.llm.local_client',
         'jarvis_post.llm.client',
-        # Data recording
+        # Data (lazy imports in __init__.py)
         'data.session_recorder',
         'data.session_exporter',
+        'data.telemetry_loader',
+        'data.lap',
+        'data.session',
+        'data.models',
         # Telemetry backends
         'telemetry.backends.ac_backend',
         'telemetry.lap_buffer',
-        # Dependencies that PyInstaller may miss
+        # LLM and model inference
+        'llama_cpp',
+        'huggingface_hub',
+        # Voice and TTS
+        'faster_whisper',
+        'pykokoro',
+        'pykokoro.onnx_backend',
+        'pykokoro.ssmd_parser',
+        'pykokoro.stages.doc_parsers.ssmd',
+        'pykokoro.stages.protocols',
+        'pykokoro.tokenizer',
+        'pykokoro.utils',
+        # Input control
+        'pynput',
+        'pygame',
+        # Native runtimes (pre-loaded before PyQt5)
+        'onnxruntime',
+        'ctranslate2',
+        # HTTP
+        'httpx',
+        # Standard deps PyInstaller may miss
         'pydantic',
         'pydantic.deprecated.decorator',
         'dotenv',
         'numpy',
+        'pandas',
         'ctypes',
         'sqlite3',
     ],
@@ -83,10 +113,8 @@ a = Analysis(
         'langgraph',
         'ibm_watsonx_ai',
         'ibm_botocore',
-        'pandas',
         # Exclude test frameworks
         'pytest',
-        'unittest',
         '_pytest',
     ],
     noarchive=False,
