@@ -75,10 +75,51 @@ def test_pit_fallback_uses_fuel_projection_when_available():
     assert "3 laps" in msg.lower()
 
 
-def test_general_fallback_safe_when_agent_missing():
+def test_general_fallback_default_for_unknown_query():
     worker = _build_worker_for_tests()
-    msg = worker._build_reactive_fallback_response("How are my gaps?")
+    msg = worker._build_reactive_fallback_response("Tell me a joke")
     assert msg == "Copy that. Monitoring the situation."
+
+
+def test_reactive_fallback_damage_no_damage():
+    worker = _build_worker_for_tests()
+    msg = worker._build_reactive_fallback_response("How's my damage?")
+    assert "no damage" in msg.lower()
+
+
+def test_reactive_fallback_damage_with_damage():
+    worker = _build_worker_for_tests()
+    worker.context.car_damage = {"front": 15.0, "rear": 0.0, "left": 0.0, "right": 0.0, "centre": 0.0}
+    msg = worker._build_reactive_fallback_response("How's my damage?")
+    assert "front 15%" in msg.lower()
+
+
+def test_reactive_fallback_tire_query():
+    worker = _build_worker_for_tests()
+    worker.context.tire_temps = {"fl": 85.0, "fr": 102.0, "rl": 88.0, "rr": 90.0}
+    msg = worker._build_reactive_fallback_response("How are my tires?")
+    assert "fr" in msg.lower()
+    assert "102" in msg
+
+
+def test_reactive_fallback_gap_query():
+    worker = _build_worker_for_tests()
+    worker.context.position = 3
+    worker.context.gap_ahead = 1.5
+    worker.context.gap_behind = None
+    msg = worker._build_reactive_fallback_response("What's my gap?")
+    assert "p3" in msg.lower()
+    assert "1.5s" in msg
+    assert "no car" in msg.lower()
+
+
+def test_reactive_fallback_fuel_query():
+    worker = _build_worker_for_tests()
+    worker.context.fuel_remaining = 45.0
+    worker.context.fuel_consumption_per_lap = 3.0
+    msg = worker._build_reactive_fallback_response("How's my fuel?")
+    assert "45.0" in msg
+    assert "15 laps" in msg
 
 
 def test_pit_query_gets_condensed_pit_summary():

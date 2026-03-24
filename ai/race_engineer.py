@@ -868,15 +868,59 @@ class AIRaceEngineerWorker(QtCore.QThread):
         return len(tokens) == 1 and len(cleaned) <= 3
 
     def _build_reactive_fallback_response(self, query: str) -> str:
-        """Deterministic fallback for failed/low-quality reactive responses."""
+        """Context-aware deterministic fallback for failed/low-quality reactive responses."""
         if self._is_pit_query(query):
             return self._build_pit_query_fallback_response()
 
-        if not self.race_engineer_agent:
+        if not self.context:
             return "Copy that. Monitoring the situation."
 
-        prompt = self._build_reactive_prompt(query)
-        return self.race_engineer_agent.llm_client._generate_fallback_response(prompt)
+        query_lower = query.lower()
+
+        # Damage queries
+        if any(kw in query_lower for kw in ("damage", "crash", "contact", "hit", "broken", "wing")):
+            total_damage = sum(self.context.car_damage.values())
+            if total_damage > 0:
+                parts = [f"{zone} {val:.0f}%" for zone, val in self.context.car_damage.items() if val > 0]
+                return f"Car damage: {', '.join(parts)}. Monitor handling."
+            return "No damage reported. Car is clean."
+
+        # Tire queries
+        if any(kw in query_lower for kw in ("tire", "tyre", "temp", "temperature", "pressure", "wear", "grip")):
+            max_temp = max(self.context.tire_temps.values())
+            max_corner = max(self.context.tire_temps, key=self.context.tire_temps.get).upper()
+            wear_values = list(self.context.tire_wear.values())
+            has_wear = any(w > 0 for w in wear_values)
+            if has_wear:
+                max_wear = max(wear_values)
+                return f"Hottest tire is {max_corner} at {max_temp:.0f} C. Max wear {max_wear:.0f} percent."
+            return f"Hottest tire is {max_corner} at {max_temp:.0f} C. No wear data available."
+
+        # Gap / position queries
+        if any(kw in query_lower for kw in ("gap", "ahead", "behind", "position", "opponent")):
+            gap_ahead_str = f"{self.context.gap_ahead:.1f}s" if self.context.gap_ahead is not None else "no car"
+            gap_behind_str = f"{self.context.gap_behind:.1f}s" if self.context.gap_behind is not None else "no car"
+            return f"P{self.context.position}. Gap ahead {gap_ahead_str}, behind {gap_behind_str}."
+
+        # Fuel queries
+        if any(kw in query_lower for kw in ("fuel", "range")):
+            fuel_laps = self.context.get_fuel_laps_remaining()
+            if math.isfinite(fuel_laps):
+                return f"Fuel at {self.context.fuel_remaining:.1f} litres, about {int(fuel_laps)} laps remaining."
+            return f"Fuel at {self.context.fuel_remaining:.1f} litres. Need a completed lap to estimate range."
+
+        # Lap time queries
+        if any(kw in query_lower for kw in ("lap", "time", "pace", "fast", "best")):
+            if self.context.last_lap:
+                best_str = f" Best is {self.context._format_lap_time(self.context.best_lap)}." if self.context.best_lap else ""
+                return f"Last lap {self.context._format_lap_time(self.context.last_lap)}.{best_str}"
+            return "No lap time recorded yet. Complete a lap first."
+
+        # Speed queries
+        if any(kw in query_lower for kw in ("speed", "rpm")):
+            return f"Currently {self.context.speed_kmh:.0f} km/h in gear {self.context.gear} at {self.context.rpm} RPM."
+
+        return "Copy that. Monitoring the situation."
 
     def _build_pit_query_fallback_response(self) -> str:
         """Deterministic pit guidance from live context and thresholds."""
