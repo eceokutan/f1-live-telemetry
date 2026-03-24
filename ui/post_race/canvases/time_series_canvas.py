@@ -167,6 +167,34 @@ class TimeSeriesCanvas(FigureCanvas):
         self._apply_uniform_layout()
         self.draw_idle()
 
+    def plot_xy_multi(self, x_arrays, y_arrays, labels, colors, xlabel, ylabel, title=""):
+        """Plot multiple XY scatter lines (e.g., camber vs suspension travel)."""
+        self.times = None  # not time-based
+        self.lap_duration = 0.0
+
+        self.ax.clear()
+        self.ax.set_facecolor(BG_COLOR_LIGHT)
+        for spine in self.ax.spines.values():
+            spine.set_color(TEXT_COLOR_DIM)
+        self.ax.tick_params(colors=TEXT_COLOR_DIM, labelsize=8)
+        self.ax.xaxis.label.set_color(TEXT_COLOR_DIM)
+        self.ax.yaxis.label.set_color(TEXT_COLOR_DIM)
+        self.ax.title.set_color("#FFFFFF")
+
+        self.timeline_marker = None
+        for x_vals, y_vals, label, color in zip(x_arrays, y_arrays, labels, colors):
+            self.ax.plot(x_vals, y_vals, color=color, linewidth=1.5, label=label, alpha=0.7)
+
+        self.ax.set_xlabel(xlabel, fontsize=9)
+        self.ax.set_ylabel(ylabel, fontsize=9)
+        if title:
+            self.ax.set_title(title, fontsize=10, fontweight="bold")
+        self.ax.legend(loc='upper right', fontsize=8, framealpha=0.8)
+        self.ax.grid(True, color=GRID_COLOR, alpha=0.6)
+
+        self._apply_uniform_layout()
+        self.draw_idle()
+
     def update_sliding_window(self, current_time: float):
         """Update x-axis limits to show a window centered on current_time."""
         if self.times is None or self.lap_duration <= 0:

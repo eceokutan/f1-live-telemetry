@@ -130,6 +130,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         ("tyre_wear", "Tire Wear", "multi_tyre", {"prefix": "tyre_wear", "ylabel": "Wear [%]"}),
         ("wheel_slip", "Wheel Slip", "multi_tyre", {"prefix": "wheel_slip", "ylabel": "Slip"}),
         ("suspension", "Suspension Travel", "multi_tyre", {"prefix": "suspension", "ylabel": "Travel [m]"}),
+        ("camber_gain", "Camber Gain", "camber_gain", {}),
         ("ride_height", "Ride Height", "multi_rh", {}),
         ("car_damage", "Car Damage", "multi_damage", {}),
         ("delta_best", "Delta to Best Lap", "delta_best", {}),
@@ -1106,6 +1107,25 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                     [df[c].values if c in df.columns else times * 0 for c in dmg_cols],
                     labels=dmg_labels, colors=dmg_colors,
                     ylabel="Damage", title=title
+                )
+
+            elif gtype == "camber_gain":
+                camber_cols = ["camber_fl", "camber_fr", "camber_rl", "camber_rr"]
+                susp_cols = ["suspension_fl", "suspension_fr", "suspension_rl", "suspension_rr"]
+                if not (any(self._col_exists(df, c) for c in camber_cols)
+                        and any(self._col_exists(df, c) for c in susp_cols)):
+                    continue
+                x_arrays, y_arrays = [], []
+                for sc, cc in zip(susp_cols, camber_cols):
+                    susp = df[sc].values * 1000 if sc in df.columns else np.zeros(len(df))
+                    cam = np.degrees(df[cc].values) if cc in df.columns else np.zeros(len(df))
+                    x_arrays.append(susp)
+                    y_arrays.append(cam)
+                canvas.plot_xy_multi(
+                    x_arrays, y_arrays,
+                    labels=TIRE_LABELS, colors=TIRE_COLORS,
+                    xlabel="Suspension Travel [mm]", ylabel="Camber [\u00b0]",
+                    title=title,
                 )
 
             elif gtype == "delta_best":
