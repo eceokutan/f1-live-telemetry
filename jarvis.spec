@@ -32,6 +32,10 @@ a = Analysis(
         (os.path.join(ROOT, 'ui', 'img'), 'ui/img'),
         # Config example (user can copy to config.json)
         (os.path.join(ROOT, 'config.example.json'), '.'),
+        # SSL certificates for HTTPS downloads (huggingface_hub)
+        (os.path.join(
+            ROOT, 'venv', 'lib', 'site-packages', 'certifi', 'cacert.pem'
+        ), 'certifi'),
     ],
     hiddenimports=[
         # PyQt5
@@ -86,8 +90,12 @@ a = Analysis(
         # Native runtimes (pre-loaded before PyQt5)
         'onnxruntime',
         'ctranslate2',
-        # HTTP
+        # HTTP / networking
         'httpx',
+        'requests',
+        'urllib3',
+        'certifi',
+        'charset_normalizer',
         # Standard deps PyInstaller may miss
         'pydantic',
         'pydantic.deprecated.decorator',
@@ -132,7 +140,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # No console window
+    console=True,  # Console visible for debugging
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

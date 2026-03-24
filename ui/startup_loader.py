@@ -306,6 +306,53 @@ class StartupLoaderThread(QtCore.QThread):
             logger.warning("AI Race Engineer not available: %s", e)
             self.stage_update.emit(4, STATUS_FAILED, str(e)[:60])
 
+    def _download_model_with_progress(self, stage_idx, label, ensure_fn, dest_path=None):
+        """Download a model in a thread while showing real download progress."""
+        import threading as _th
+        import time as _time
+        from pathlib import Path
+
+        error = [None]
+        done = _th.Event()
+
+        def _do_download():
+            try:
+                ensure_fn()
+            except Exception as e:
+                error[0] = e
+            finally:
+                done.set()
+
+        _th.Thread(target=_do_download, daemon=True).start()
+        t0 = _time.time()
+        while not done.is_set():
+            elapsed = int(_time.time() - t0)
+            # Try to show actual file size progress
+            progress_str = ""
+            if dest_path:
+                try:
+                    p = Path(dest_path)
+                    # Check for partial download files too (.incomplete, no extension)
+                    candidates = [p] + list(p.parent.glob(f"{p.name}.*")) + list(p.parent.glob("*.incomplete"))
+                    for f in candidates:
+                        if f.exists() and f.stat().st_size > 0:
+                            size_mb = f.stat().st_size / (1024 * 1024)
+                            if size_mb > 1:
+                                progress_str = f" ({size_mb:.0f} MB)"
+                                break
+                except Exception:
+                    pass
+            if not progress_str:
+                progress_str = f" ({elapsed}s)"
+            self.stage_update.emit(
+                stage_idx, STATUS_RUNNING,
+                f"{label}...{progress_str}"
+            )
+            done.wait(timeout=1.0)
+
+        if error[0]:
+            raise error[0]
+
     def _run_stage_6(self, results: dict):
         """Local models — check/download GGUF models, prewarm LLM."""
         self.stage_update.emit(5, STATUS_RUNNING, "Checking local models...")
@@ -318,52 +365,40 @@ class StartupLoaderThread(QtCore.QThread):
                 POSTRACE_LOCAL_PATH,
             )
 
+            from ai.model_downloader import get_model_path
+
             # Download live model if missing
             if not is_model_available(DEFAULT_LOCAL_PATH):
-                self.stage_update.emit(5, STATUS_RUNNING, "Downloading live model...")
-            ensure_model()
+                self._download_model_with_progress(
+                    5, "Downloading AI Race Engineer model (~2GB)", ensure_model,
+                    dest_path=str(get_model_path(DEFAULT_LOCAL_PATH))
+                )
+            else:
+                ensure_model()
 
             # Download post-race model if missing
             if not is_model_available(POSTRACE_LOCAL_PATH):
-                self.stage_update.emit(5, STATUS_RUNNING, "Downloading post-race model...")
-            ensure_postrace_model()
+                self._download_model_with_progress(
+                    5, "Downloading Post-Race Analyst model (~2GB)", ensure_postrace_model,
+                    dest_path=str(get_model_path(POSTRACE_LOCAL_PATH))
+                )
+            else:
+                ensure_postrace_model()
 
-            # Prewarm LLM into memory (with progress updates so UI doesn't look frozen)
+            # Prewarm LLM into memory
             try:
                 from ai.model_prewarm import (
                     is_local_llm_model_available,
                     needs_local_llm_prewarm,
                     prewarm_local_llm,
                 )
-                import threading as _th
-                import time as _time
 
                 local_model_path = DEFAULT_LOCAL_PATH
                 if is_local_llm_model_available(local_model_path) and needs_local_llm_prewarm():
-                    self.stage_update.emit(5, STATUS_RUNNING, "Loading LLM into memory...")
-                    prewarm_error = [None]
-                    prewarm_done = _th.Event()
-
-                    def _do_prewarm():
-                        try:
-                            prewarm_local_llm(model_path=local_model_path)
-                        except Exception as e:
-                            prewarm_error[0] = e
-                        finally:
-                            prewarm_done.set()
-
-                    _th.Thread(target=_do_prewarm, daemon=True).start()
-                    t0 = _time.time()
-                    while not prewarm_done.is_set():
-                        elapsed = int(_time.time() - t0)
-                        self.stage_update.emit(
-                            5, STATUS_RUNNING,
-                            f"Loading LLM into memory... ({elapsed}s)"
-                        )
-                        prewarm_done.wait(timeout=1.0)
-
-                    if prewarm_error[0]:
-                        raise prewarm_error[0]
+                    self._download_model_with_progress(
+                        5, "Loading LLM into memory",
+                        lambda: prewarm_local_llm(model_path=local_model_path)
+                    )
                     self.stage_update.emit(5, STATUS_DONE, "Models downloaded, LLM loaded")
                 else:
                     self.stage_update.emit(5, STATUS_DONE, "Models ready")
@@ -372,8 +407,8 @@ class StartupLoaderThread(QtCore.QThread):
                 self.stage_update.emit(5, STATUS_DONE, "Models ready, LLM loads on first use")
 
         except Exception as e:
-            logger.warning("Model download/prewarm failed: %s", e)
-            self.stage_update.emit(5, STATUS_FAILED, f"Will use rule-based fallback")
+            logger.error("Model download failed: %s", e, exc_info=True)
+            self.stage_update.emit(5, STATUS_FAILED, f"Download failed: {str(e)[:80]}")
 
     def _run_stage_7(self, results: dict):
         """Voice stack — import VoiceInputWorker, prewarm faster-whisper."""

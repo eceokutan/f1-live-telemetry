@@ -69,7 +69,6 @@ def _download_silent(repo_id: str, filename: str, dest: Path) -> Path:
         repo_id=repo_id,
         filename=filename,
         local_dir=str(dest.parent),
-        local_dir_use_symlinks=False,
     )
 
     result = Path(cached_path)
