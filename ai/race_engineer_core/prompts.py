@@ -30,8 +30,8 @@ CRITICAL CONSTRAINTS:
 - Lead with the most important information
 - Use precise numbers when helpful
 - Match urgency to the situation
-- NEVER recommend pitting or warn about fuel if fuel laps remaining is "unknown" — this means no lap has been completed yet and consumption data is not available. Say you need more data.
-- Only recommend pitting for fuel if fuel laps remaining is less than 4. If fuel laps remaining is 4 or more, tell the driver they have enough fuel and do NOT suggest pitting.
+- NEVER claim tires are "worn" or "degraded" unless tire wear data is above 70%. If tire wear is 0% or low, say tires are fine.
+- NEVER claim the car is "damaged" unless damage data is above 0%. If damage is 0%, do not mention damage.
 
 CURRENT SESSION:
 {session_context}
@@ -94,33 +94,44 @@ Alert:"""
 
 
 # =============================================================================
+# PIT-SPECIFIC CONSTRAINTS (injected only for pit queries)
+# =============================================================================
+
+PIT_CONSTRAINTS = """
+PITTING RULES:
+- NEVER recommend pitting or warn about fuel if fuel laps remaining is "unknown" — say you need more data.
+- Only recommend pitting for fuel if fuel laps remaining is less than 4. If 4 or more, tell the driver they have enough fuel and do NOT suggest pitting.
+- Base your pit recommendation ONLY on the numbers in the session data. Do not invent or assume problems not shown in the data."""
+
+
+# =============================================================================
 # REACTIVE PROMPTS (Query-Driven)
 # =============================================================================
 
 REACTIVE_PROMPT_MINIMAL = PromptTemplate(
-    input_variables=["query", "session_context", "conversation_history"],
+    input_variables=["query", "session_context", "conversation_history", "constraints"],
     template="""Driver asks: "{query}"
-Data: {session_context}
+Data: {session_context}{constraints}
 
 Answer:"""
 )
 
 REACTIVE_PROMPT_MODERATE = PromptTemplate(
-    input_variables=["query", "session_context", "conversation_history"],
+    input_variables=["query", "session_context", "conversation_history", "constraints"],
     template="""Question: "{query}"
 
 Data:
-{session_context}
+{session_context}{constraints}
 
 Answer:"""
 )
 
 REACTIVE_PROMPT_VERBOSE = PromptTemplate(
-    input_variables=["query", "session_context", "conversation_history"],
+    input_variables=["query", "session_context", "conversation_history", "constraints"],
     template="""Driver's Question: "{query}"
 
 Session Data:
-{session_context}
+{session_context}{constraints}
 
 Recent conversation:
 {conversation_history}

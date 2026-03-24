@@ -941,29 +941,46 @@ class AIRaceEngineerWorker(QtCore.QThread):
         has_wear_data = any(wear > 0 for wear in wear_values)
         max_wear = max(wear_values) if wear_values else 0.0
         max_temp = max(self.context.tire_temps.values()) if self.context.tire_temps else 0.0
+        total_damage = sum(self.context.car_damage.values()) if self.context.car_damage else 0.0
 
         if not math.isfinite(fuel_laps) or self.context.fuel_consumption_per_lap <= 0:
+            if total_damage >= thresholds.car_damage_critical_total:
+                parts = [f"{zone} {val:.0f}%" for zone, val in self.context.car_damage.items() if val > 0]
+                return f"Heavy damage: {', '.join(parts)}. Box this lap for repairs."
             if has_wear_data and max_wear >= thresholds.tire_wear_critical:
                 return f"Tire wear is critical at {max_wear:.0f} percent. Box this lap."
             if max_temp >= thresholds.tire_temp_critical:
                 return f"Tire temperatures are critical at {max_temp:.0f} C. Box this lap."
+            if total_damage >= thresholds.car_damage_warning_total:
+                parts = [f"{zone} {val:.0f}%" for zone, val in self.context.car_damage.items() if val > 0]
+                return f"Car damage: {', '.join(parts)}. Consider pitting for repairs."
             if has_wear_data and max_wear >= thresholds.tire_wear_warning:
                 return f"Tire wear is high at {max_wear:.0f} percent. Pit window is open."
             if max_temp >= thresholds.tire_temp_warning:
                 return f"Tire temperatures are high at {max_temp:.0f} C. Pit soon if they do not recover."
             return "Need one clean lap to calibrate fuel burn before I can call pit timing. Tires and damage look good, push on."
 
+        # Critical checks first (box this lap)
         if fuel_laps <= thresholds.fuel_critical_laps:
             return f"Fuel critical, box this lap. About {int(fuel_laps)} laps remaining."
 
-        if fuel_laps <= thresholds.fuel_warning_laps:
-            return f"Pit window open now. Fuel projects about {int(fuel_laps)} laps."
+        if total_damage >= thresholds.car_damage_critical_total:
+            parts = [f"{zone} {val:.0f}%" for zone, val in self.context.car_damage.items() if val > 0]
+            return f"Heavy damage: {', '.join(parts)}. Box this lap for repairs."
 
         if has_wear_data and max_wear >= thresholds.tire_wear_critical:
             return f"Tire wear is critical at {max_wear:.0f} percent. Box this lap."
 
         if max_temp >= thresholds.tire_temp_critical:
             return f"Tire temperatures are critical at {max_temp:.0f} C. Box this lap."
+
+        # Warning checks (pit soon)
+        if fuel_laps <= thresholds.fuel_warning_laps:
+            return f"Pit window open now. Fuel projects about {int(fuel_laps)} laps."
+
+        if total_damage >= thresholds.car_damage_warning_total:
+            parts = [f"{zone} {val:.0f}%" for zone, val in self.context.car_damage.items() if val > 0]
+            return f"Car damage: {', '.join(parts)}. Consider pitting for repairs."
 
         if has_wear_data and max_wear >= thresholds.tire_wear_warning:
             return f"Pit window open on tires, max wear {max_wear:.0f} percent."
