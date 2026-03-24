@@ -564,6 +564,7 @@ class AcTelemetryWorker(QtCore.QThread):
                         "pit_limiter": phys.pitLimiterOn,
                         "lap_valid": lap_valid,
                         "last_time_ms": gfx.lastTimeMs,
+                        "position": gfx.position,
                     }
 
                     lap_buffer.add_sample(
