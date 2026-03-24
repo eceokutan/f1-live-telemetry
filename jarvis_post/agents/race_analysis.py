@@ -55,12 +55,25 @@ class RaceAnalysisAgent(BaseAgent):
         telemetry = session_data.get("telemetry", [])
         metadata = session_data.get("session_metadata", {})
 
-        # --- lap times list ---
+        # --- per-lap data (times + fuel) ---
         lap_times = [round(lap.get("lap_time", 0), 3) for lap in laps]
         valid_flags = [lap.get("valid", True) for lap in laps]
         incomplete_laps = [i + 1 for i, v in enumerate(valid_flags) if not v]
         # Exclude incomplete laps from summary statistics
         valid_times = [t for t, v in zip(lap_times, valid_flags) if t > 0 and v]
+
+        # Build enriched per-lap list with fuel data
+        laps_with_fuel = []
+        for lap in laps:
+            lap_entry = {
+                "lap_time": round(lap.get("lap_time", 0), 3),
+                "fuel_start": round(lap.get("fuel_start", 0) or 0, 2),
+                "fuel_end": round(lap.get("fuel_end", 0) or 0, 2),
+            }
+            fuel_used = lap_entry["fuel_start"] - lap_entry["fuel_end"]
+            if fuel_used > 0:
+                lap_entry["fuel_used"] = round(fuel_used, 2)
+            laps_with_fuel.append(lap_entry)
 
         # --- lap_summary ---
         fastest_time = min(valid_times) if valid_times else 0
@@ -146,6 +159,8 @@ class RaceAnalysisAgent(BaseAgent):
             "avg_steer_angle",
             "avg_tyre_temp_c",
             "avg_tyre_pressure_psi",
+            "fuel_start",
+            "fuel_end",
             "max_damage_sum",
         ]
         car_data = self._build_lap_aggregate_rows(telemetry, max_rows=60)
@@ -163,7 +178,7 @@ class RaceAnalysisAgent(BaseAgent):
             "session": session_context,
             "result": result,
             "lap_summary": lap_summary,
-            "laps": lap_times,
+            "laps": laps_with_fuel,
             "incomplete_laps": incomplete_laps,
             "stints": stints,
             "pit_stops": pit_stops,
@@ -245,6 +260,11 @@ class RaceAnalysisAgent(BaseAgent):
                 if val is not None:
                     tyre_pressure_vals.append(float(val))
 
+        # Fuel: first and last sample values for this lap
+        fuel_vals = [float(s.get("fuel", 0) or 0) for s in samples]
+        fuel_start = round(fuel_vals[0], 2) if fuel_vals else 0.0
+        fuel_end = round(fuel_vals[-1], 2) if fuel_vals else 0.0
+
         damage_sums = []
         for s in samples:
             damage_total = 0.0
@@ -270,6 +290,8 @@ class RaceAnalysisAgent(BaseAgent):
             round(self._avg(steer), 3),
             round(self._avg(tyre_temp_vals), 1),
             round(self._avg(tyre_pressure_vals), 2),
+            fuel_start,
+            fuel_end,
             round(max(damage_sums), 1) if damage_sums else 0.0,
         ]
 
