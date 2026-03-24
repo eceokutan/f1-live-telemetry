@@ -298,9 +298,7 @@ class MainWindow(QMainWindow):
         self.rpm_canvas = TimeSeriesCanvas("RPM", self)
         self.brake_canvas = TimeSeriesCanvas("Brake [%]", self)
 
-        self.tyre_pressure_canvas = MultiLineCanvas(
-            "Tyre Pressure [PSI]", ["FL", "FR", "RL", "RR"], self
-        )
+        self.throttle_canvas = TimeSeriesCanvas("Throttle [%]", self)
         self.tyre_temp_canvas = MultiLineCanvas(
             "Tyre Temperature [°C]", ["FL", "FR", "RL", "RR"], self
         )
@@ -310,7 +308,7 @@ class MainWindow(QMainWindow):
             self.gear_canvas,
             self.rpm_canvas,
             self.brake_canvas,
-            self.tyre_pressure_canvas,
+            self.throttle_canvas,
             self.tyre_temp_canvas,
         ]
         for canvas in self._live_graphs:
@@ -321,7 +319,7 @@ class MainWindow(QMainWindow):
         mid_col.addWidget(self.gear_canvas, 1)
         mid_col.addWidget(self.rpm_canvas, 1)
         mid_col.addWidget(self.brake_canvas, 1)
-        mid_col.addWidget(self.tyre_pressure_canvas, 1)
+        mid_col.addWidget(self.throttle_canvas, 1)
         mid_col.addWidget(self.tyre_temp_canvas, 1)
 
         return mid_col
@@ -678,11 +676,7 @@ class MainWindow(QMainWindow):
             rpms = np.array([s.get("rpms", 0) for s in self.current_lap_samples], dtype=float)
             brakes = np.array([s.get("brake", 0) for s in self.current_lap_samples], dtype=float)
 
-            # Tire data arrays
-            tyre_pressure_fl = np.array([s.get("tyre_pressure_fl", 0) for s in self.current_lap_samples], dtype=float)
-            tyre_pressure_fr = np.array([s.get("tyre_pressure_fr", 0) for s in self.current_lap_samples], dtype=float)
-            tyre_pressure_rl = np.array([s.get("tyre_pressure_rl", 0) for s in self.current_lap_samples], dtype=float)
-            tyre_pressure_rr = np.array([s.get("tyre_pressure_rr", 0) for s in self.current_lap_samples], dtype=float)
+            throttles = np.array([s.get("throttle", 0) for s in self.current_lap_samples], dtype=float)
 
             tyre_temp_fl = np.array([s.get("tyre_temp_fl", 0) for s in self.current_lap_samples], dtype=float)
             tyre_temp_fr = np.array([s.get("tyre_temp_fr", 0) for s in self.current_lap_samples], dtype=float)
@@ -704,9 +698,7 @@ class MainWindow(QMainWindow):
             self.rpm_canvas.update_data(times, rpms)
             self.brake_canvas.update_data(times, brakes * 100)  # Scale to percentage
 
-            self.tyre_pressure_canvas.update_data(times, [
-                tyre_pressure_fl, tyre_pressure_fr, tyre_pressure_rl, tyre_pressure_rr
-            ])
+            self.throttle_canvas.update_data(times, throttles * 100)
             self.tyre_temp_canvas.update_data(times, [
                 tyre_temp_fl, tyre_temp_fr, tyre_temp_rl, tyre_temp_rr
             ])
