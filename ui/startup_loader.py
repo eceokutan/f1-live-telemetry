@@ -381,9 +381,16 @@ class StartupLoaderThread(QtCore.QThread):
             if dest_path:
                 try:
                     p = Path(dest_path)
-                    candidates = [p] + list(p.parent.glob(f"{p.name}.*")) + list(p.parent.glob("*.incomplete"))
+                    # Check final file, parent dir globs, AND the HF local_dir
+                    # cache where partial downloads live during hf_hub_download
+                    hf_cache_dir = p.parent / ".cache" / "huggingface" / "download"
+                    candidates = [p]
+                    candidates += list(p.parent.glob(f"{p.name}.*"))
+                    candidates += list(p.parent.glob("*.incomplete"))
+                    if hf_cache_dir.exists():
+                        candidates += list(hf_cache_dir.glob("*.incomplete"))
                     for f in candidates:
-                        if f.exists() and f.stat().st_size > 0:
+                        if f.is_file() and f.stat().st_size > 0:
                             size_mb = f.stat().st_size / (1024 * 1024)
                             if size_mb > 1:
                                 break
