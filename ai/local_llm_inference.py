@@ -238,7 +238,7 @@ class LocalLLMInference:
                 temperature=self.temperature,
                 top_k=50,
                 top_p=0.95,
-                stop=["<|end_of_text|>", "<|start_of_role|>"],
+                stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
             )
 
             elapsed = time.monotonic() - start_time
@@ -269,7 +269,7 @@ class LocalLLMInference:
                 warmup_prompt,
                 max_tokens=min(16, self.max_tokens),
                 temperature=0.0,
-                stop=["<|end_of_text|>", "<|start_of_role|>"],
+                stop=["<|end_of_text|>", "\n\n", "<|start_of_role|>"],
             )
             logger.info("Local LLM generation warmup complete")
         except Exception as e:

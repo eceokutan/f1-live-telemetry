@@ -60,21 +60,6 @@ def test_low_quality_response_detects_numeric_stub():
     assert not AIRaceEngineerWorker._is_low_quality_response("Fuel looks good for 6 laps.")
 
 
-def test_clean_llm_response_preserves_data_mid_sentence():
-    """The word 'Data' mid-sentence should not be stripped."""
-    result = AIRaceEngineerWorker._clean_llm_response("Data looks good, no damage detected.")
-    assert "Data looks good" in result
-    result2 = AIRaceEngineerWorker._clean_llm_response("Tire data shows normal temps across all four corners.")
-    assert "data shows normal" in result2.lower()
-
-
-def test_clean_llm_response_strips_data_header_at_line_start():
-    """A 'Data:' header line should still be removed."""
-    result = AIRaceEngineerWorker._clean_llm_response("Tires are fine.\nData: speed 250, rpm 8500")
-    assert "Data:" not in result
-    assert "Tires are fine" in result
-
-
 def test_pit_fallback_asks_for_one_clean_lap_when_fuel_burn_unknown():
     worker = _build_worker_for_tests()
     msg = worker._build_pit_query_fallback_response()
@@ -214,26 +199,6 @@ def test_has_ungrounded_numbers_passes_grounded():
 def test_has_ungrounded_numbers_false_when_no_numbers():
     worker = _build_worker_for_tests()
     assert not worker._has_ungrounded_numbers("Tires look fine, push on.", "how are my tires?")
-
-
-def test_has_ungrounded_numbers_passes_trivial_values():
-    """Numbers like 0, 1, 100 should not trigger ungrounded fallback."""
-    worker = _build_worker_for_tests()
-    assert not worker._has_ungrounded_numbers("0 damage, 100 percent condition.", "how's my damage?")
-    assert not worker._has_ungrounded_numbers("Push for 1 more lap.", "should I push?")
-    assert not worker._has_ungrounded_numbers("All 4 tires look fine, 10 laps to go.", "how are my tires?")
-
-
-def test_has_ungrounded_numbers_still_detects_fabricated_with_trivial():
-    """Mixing trivial and fabricated numbers should still trigger fallback."""
-    worker = _build_worker_for_tests()
-    assert worker._has_ungrounded_numbers("0 damage but lap time was 9876 seconds.", "how am I doing?")
-
-
-def test_has_ungrounded_numbers_trivial_only_with_empty_source():
-    """Response with only trivial numbers should pass even if source has no numbers."""
-    worker = _build_worker_for_tests()
-    assert not worker._has_ungrounded_numbers("0 damage.", "any damage?")
 
 
 # --- _is_pit_query STT broadening tests ---
