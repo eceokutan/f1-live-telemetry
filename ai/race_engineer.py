@@ -669,6 +669,13 @@ class AIRaceEngineerWorker(QtCore.QThread):
             )
             return
 
+        # Filter out empty/noise transcriptions (e.g. accidental PTT press)
+        # Show in transcript but don't invoke the LLM pipeline
+        if not query.strip().strip(".…,!? "):
+            logger.info(f"Ignoring noise transcription: {query}")
+            self.driver_query_received.emit(query)
+            return
+
         if self._event_loop and self._running and self.query_queue is not None:
             # Thread-safe: put query in queue
             asyncio.run_coroutine_threadsafe(
