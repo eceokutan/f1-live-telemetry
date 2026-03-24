@@ -476,7 +476,12 @@ class MainWindow(QMainWindow):
 
         track_name = f"{track} ({track_config})" if track_config else track
 
-        self.driver_name_label.setText(f"Driver: {player_name} {player_surname} ({player_nick})")
+        full_name = f"{player_name} {player_surname}".strip()
+        if player_nick and player_nick != full_name and player_nick != player_name:
+            driver_display = f"{full_name} ({player_nick})" if full_name else player_nick
+        else:
+            driver_display = full_name or player_nick or "Unknown"
+        self.driver_name_label.setText(f"Driver: {driver_display}")
         self.car_label.setText(f"Car: {car}")
         self.track_label.setText(f"Track: {track_name}")
 
