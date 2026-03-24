@@ -718,8 +718,8 @@ class AIRaceEngineerWorker(QtCore.QThread):
         # Remove "Radio Message:" / "Engineer:" / "Alert:" prefix
         response = re.sub(r"^(Radio\s*Message|Engineer|Response|Alert|Answer)\s*:\s*", "", response, flags=re.IGNORECASE)
 
-        # Remove "References:", "Sources:", etc. sections and everything after
-        response = re.sub(r"\n?\s*(References|Sources|Notes?|Context|Data|Observations?)\s*:.*", "", response, flags=re.IGNORECASE | re.DOTALL)
+        # Remove "References:", "Sources:", etc. section-header lines
+        response = re.sub(r"^\s*(References|Sources|Notes?|Context|Data|Observations?)\s*:.*$", "", response, flags=re.IGNORECASE | re.MULTILINE)
 
         # Remove numbered data lists like "1. Tire Wear Data: 100%"
         response = re.sub(r"\n\s*\d+\.\s+\w[\w\s]*?:\s*[\d.]+[%°CLs]*\s*", "", response)
@@ -746,6 +746,11 @@ class AIRaceEngineerWorker(QtCore.QThread):
                 response = first_sentence[0]
 
         return response
+
+    # Small common numbers that appear naturally in race radio
+    # ("0 damage", "100 percent", "1 more lap") and should not
+    # trigger the ungrounded-numbers guardrail.
+    _TRIVIAL_NUMBERS = frozenset({0, 1, 2, 3, 4, 5, 10, 100})
 
     @staticmethod
     def _extract_numeric_values(text: str) -> list[float]:
@@ -780,10 +785,13 @@ class AIRaceEngineerWorker(QtCore.QThread):
         source_nums = self._extract_numeric_values(source_text)
 
         if not source_nums:
-            return True
+            non_trivial = [v for v in response_nums if v not in self._TRIVIAL_NUMBERS]
+            return len(non_trivial) > 0
 
         tolerance = 0.6  # allow small rounding differences
         for val in response_nums:
+            if val in self._TRIVIAL_NUMBERS:
+                continue
             if min(abs(val - src) for src in source_nums) > tolerance:
                 logger.warning(
                     "Ungrounded numeric claim in response (%.3f); triggering fallback",
