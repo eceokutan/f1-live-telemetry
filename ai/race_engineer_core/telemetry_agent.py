@@ -21,6 +21,7 @@ Event Types:
 - opponent_close_behind: Car behind is within close gap threshold (HIGH)
 - car_damage_alert: Car damage crossed warning/critical threshold (MEDIUM/HIGH)
 - lap_complete: Lap number increased (MEDIUM)
+- position_change: Race position gained or lost (HIGH)
 - pit_window_open: Fuel or tire wear at warning levels (HIGH)
 """
 
@@ -42,6 +43,7 @@ from ai.race_engineer_core.events import (
     create_wheel_slip_critical_event,
     create_opponent_close_behind_event,
     create_car_damage_event,
+    create_position_change_event,
 )
 from ai.race_engineer_core.telemetry import TelemetryData
 from ai.race_engineer_core.config import ThresholdsConfig
@@ -63,6 +65,7 @@ class TelemetryAgent:
     FUEL_WARNING_COOLDOWN = 60.0
     OPPONENT_CLOSE_COOLDOWN = 15.0
     CAR_DAMAGE_COOLDOWN = 20.0
+    POSITION_CHANGE_COOLDOWN = 5.0
 
     def __init__(self, thresholds: Optional[ThresholdsConfig] = None):
         """
@@ -77,6 +80,7 @@ class TelemetryAgent:
         self._last_opponent_close_time: float = 0.0
         self._opponent_close_active: bool = False
         self._last_car_damage_time: float = 0.0
+        self._last_position_change_time: float = 0.0
 
     def detect_events(
         self,
@@ -125,6 +129,10 @@ class TelemetryAgent:
         # Check car damage alerts
         damage_events = self._check_car_damage_events(telemetry, context)
         events.extend(damage_events)
+
+        # Check position changes (overtakes / being overtaken)
+        position_events = self._check_position_change(telemetry, context)
+        events.extend(position_events)
 
         # Check lap completion
         lap_events = self._check_lap_completion(telemetry, context)
@@ -441,6 +449,42 @@ class TelemetryAgent:
             )
         )
         self._last_car_damage_time = now
+
+        return events
+
+    def _check_position_change(
+        self,
+        telemetry: TelemetryData,
+        context: LiveSessionContext
+    ) -> List[Event]:
+        """
+        Check for race position changes (overtakes or being overtaken).
+
+        Compares current position from telemetry against the last known
+        position stored in context. Fires once per change with a short
+        cooldown to avoid duplicate alerts from noisy data.
+
+        Returns:
+            List containing position_change event if position changed
+        """
+        events = []
+
+        if telemetry.position is None:
+            return events
+
+        old_pos = context.position
+        new_pos = telemetry.position
+
+        # Skip if position hasn't changed or is uninitialized
+        if new_pos == old_pos or old_pos is None or new_pos < 1:
+            return events
+
+        now = time.time()
+        if now - self._last_position_change_time < self.POSITION_CHANGE_COOLDOWN:
+            return events
+
+        events.append(create_position_change_event(old_pos, new_pos))
+        self._last_position_change_time = now
 
         return events
 

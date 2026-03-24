@@ -316,6 +316,33 @@ def create_pit_window_event(
     )
 
 
+def create_position_change_event(
+    old_position: int,
+    new_position: int,
+) -> Event:
+    """
+    Create a position change event.
+
+    Args:
+        old_position: Previous race position
+        new_position: New race position
+
+    Returns:
+        Event with HIGH priority
+    """
+    gained = old_position - new_position  # positive = gained positions
+    return Event(
+        type="position_change",
+        priority=Priority.HIGH,
+        data={
+            "old_position": old_position,
+            "new_position": new_position,
+            "gained": gained,
+        },
+        timestamp=time.time(),
+    )
+
+
 def create_car_damage_event(
     total_damage: float,
     zones: Dict[str, float],
