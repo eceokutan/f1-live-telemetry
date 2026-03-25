@@ -374,7 +374,8 @@ class SessionExporter:
         # Insert telemetry
         telem = bundle.get("telemetry", {})
         if telem:
-            col_names = list(telem.keys())
+            table_columns = self._get_table_columns(cursor, "telemetry")
+            col_names = [name for name in telem.keys() if name in table_columns]
             num_rows = len(telem[col_names[0]]) if col_names else 0
             for i in range(num_rows):
                 row_vals = {col: telem[col][i] for col in col_names}
@@ -477,6 +478,10 @@ class SessionExporter:
                 suspension_fr REAL,
                 suspension_rl REAL,
                 suspension_rr REAL,
+                camber_fl REAL,
+                camber_fr REAL,
+                camber_rl REAL,
+                camber_rr REAL,
                 ride_height_front REAL,
                 ride_height_rear REAL,
                 car_damage_front REAL,
@@ -502,6 +507,51 @@ class SessionExporter:
                 FOREIGN KEY (session_id) REFERENCES sessions(session_id)
             )
         """)
+
+        # Ensure newer telemetry columns exist in older target databases.
+        required_telemetry_cols = [
+            ("steer_angle", "REAL"),
+            ("g_force_lat", "REAL"),
+            ("g_force_lon", "REAL"),
+            ("tyre_wear_fl", "REAL"),
+            ("tyre_wear_fr", "REAL"),
+            ("tyre_wear_rl", "REAL"),
+            ("tyre_wear_rr", "REAL"),
+            ("wheel_slip_fl", "REAL"),
+            ("wheel_slip_fr", "REAL"),
+            ("wheel_slip_rl", "REAL"),
+            ("wheel_slip_rr", "REAL"),
+            ("suspension_fl", "REAL"),
+            ("suspension_fr", "REAL"),
+            ("suspension_rl", "REAL"),
+            ("suspension_rr", "REAL"),
+            ("camber_fl", "REAL"),
+            ("camber_fr", "REAL"),
+            ("camber_rl", "REAL"),
+            ("camber_rr", "REAL"),
+            ("ride_height_front", "REAL"),
+            ("ride_height_rear", "REAL"),
+            ("car_damage_front", "REAL"),
+            ("car_damage_rear", "REAL"),
+            ("car_damage_left", "REAL"),
+            ("car_damage_right", "REAL"),
+            ("car_damage_centre", "REAL"),
+            ("is_in_pit", "INTEGER"),
+            ("pit_limiter", "INTEGER"),
+        ]
+        existing = self._get_table_columns(cursor, "telemetry")
+        for col_name, col_type in required_telemetry_cols:
+            if col_name in existing:
+                continue
+            cursor.execute(f"ALTER TABLE telemetry ADD COLUMN {col_name} {col_type}")
+            existing.add(col_name)
+
+    @staticmethod
+    def _get_table_columns(cursor: sqlite3.Cursor, table_name: str) -> set[str]:
+        """Return column names for an existing SQLite table."""
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        rows = cursor.fetchall()
+        return {row[1] for row in rows}
 
     def _export_ai_commentary(self, db: sqlite3.Connection, session_id: int, output_path: Path) -> None:
         """Export AI commentary to CSV (if any exists)."""
