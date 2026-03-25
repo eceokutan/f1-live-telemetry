@@ -218,7 +218,7 @@ class StartupLoaderThread(QtCore.QThread):
     """Background thread that runs stages 2-9 sequentially."""
 
     stage_update = QtCore.pyqtSignal(int, str, str)  # index, status, detail
-all_done = QtCore.pyqtSignal(dict)
+    all_done = QtCore.pyqtSignal(dict)
     fatal_error = QtCore.pyqtSignal(int, str)
 
     def run(self):
