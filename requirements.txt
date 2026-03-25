@@ -29,6 +29,14 @@ llama-cpp-python>=0.2.50  # GGUF model inference (replaces transformers+peft at 
 tenacity>=8.2.0
 
 # =============================================================================
+# Data & Networking
+# =============================================================================
+pandas>=1.5.0
+httpx>=0.25.0
+requests>=2.28.0
+certifi>=2023.0.0
+
+# =============================================================================
 # Voice Input/Output (webrtcvad + faster-whisper + Kokoro TTS)
 # =============================================================================
 pyaudio>=0.2.13
@@ -41,13 +49,3 @@ pykokoro>=0.6.5
 # =============================================================================
 pynput>=1.7.6           # Global keyboard hooks (works when game has focus)
 pygame>=2.5.0           # Wheel/joystick PTT button detection
-
-# =============================================================================
-# Optional: LiveKit (Future - not currently used)
-# =============================================================================
-# fastapi>=0.104.0
-# uvicorn[standard]>=0.24.0
-# livekit>=0.9.0
-# livekit-api>=0.4.0
-# httpx>=0.25.0
-# pyyaml>=6.0.0
