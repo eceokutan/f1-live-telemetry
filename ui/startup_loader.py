@@ -36,6 +36,18 @@ STAGE_NAMES = [
 ]
 
 
+class _ElidingLabel(QtWidgets.QLabel):
+    """QLabel that elides text with '...' when it doesn't fit."""
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        metrics = QtGui.QFontMetrics(self.font())
+        elided = metrics.elidedText(self.text(), QtCore.Qt.ElideRight, self.width())
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.setFont(self.font())
+        painter.drawText(self.rect(), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, elided)
+
+
 class StageRow(QtWidgets.QWidget):
     """Single row showing status icon + stage name + detail text."""
 
@@ -59,7 +71,7 @@ class StageRow(QtWidgets.QWidget):
         self.name_label.setStyleSheet(f"color: {TEXT_COLOR}; font-size: 11pt;")
         top_row.addWidget(self.name_label)
 
-        self.detail_label = QtWidgets.QLabel("")
+        self.detail_label = _ElidingLabel("")
         self.detail_label.setStyleSheet("color: #888888; font-size: 10pt;")
         top_row.addWidget(self.detail_label, 1)
 
@@ -92,7 +104,8 @@ class LoadingScreen(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         load_fonts()
-        self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
+        self._drag_pos = None  # for mouse-drag movement
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
         self.setFixedSize(620, 620)
         self.setStyleSheet(f"background-color: {BG_COLOR};")
@@ -204,6 +217,20 @@ class LoadingScreen(QtWidgets.QWidget):
         if 0 <= index < len(self._stage_rows):
             self._stage_rows[index].set_status(status, detail)
 
+
+    # --- Frameless window drag support ---
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None and event.buttons() & QtCore.Qt.LeftButton:
+            self.move(event.globalPos() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
 
     def show_fatal_error(self, index: int, message: str):
         """Show error panel with Quit button for hard failures."""
@@ -387,7 +414,7 @@ class StartupLoaderThread(QtCore.QThread):
                         eta_str = f"~{eta_sec}s left"
                 else:
                     eta_str = "estimating..."
-                progress_str = f"{int(size_mb)}MB / {expected_size_mb}MB ({pct}%) — {eta_str}"
+                progress_str = f"{pct}% — {int(size_mb)}/{expected_size_mb}MB — {eta_str}"
             else:
                 progress_str = f"starting download... ({int(elapsed)}s)"
 
