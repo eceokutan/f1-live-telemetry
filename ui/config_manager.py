@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS = {
-    "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
+    "voice_mode": "push_to_talk",   # "disabled", "push_to_talk", "continuous"
     "ptt_key": "v",                 # Key name for push-to-talk (legacy, slot 1 keyboard fallback)
     "ptt_slot_1_type": "keyboard",  # "keyboard" or "joystick"
     "ptt_slot_1_value": "v",        # key name (str) or button index (str of int)

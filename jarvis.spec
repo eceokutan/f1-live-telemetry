@@ -112,7 +112,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(ROOT, 'scripts', 'pyi_rth_dll_fix.py')],
     excludes=[
         # Exclude heavy packages not needed at runtime
         'torch',
