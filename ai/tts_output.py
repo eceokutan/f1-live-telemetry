@@ -11,6 +11,7 @@ Synthesizes the full AI response, then plays it through the default audio output
 import asyncio
 import io
 import logging
+import re
 import time
 import wave
 import platform
@@ -356,6 +357,7 @@ class TTSOutputWorker(QtCore.QThread):
         """
         try:
             self.status_update.emit("Synthesizing speech...")
+            text = re.sub(r'(\d)\.(\d)', r'\1 point \2', text)
             audio_bytes = await self.tts_client.synthesize(text)
 
             logger.info(f"Synthesized {len(audio_bytes)} bytes of audio")
