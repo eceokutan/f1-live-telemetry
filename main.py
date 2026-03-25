@@ -21,6 +21,21 @@ if getattr(sys, "frozen", False):
 
 # Pre-load native DLLs BEFORE PyQt5 to avoid DLL conflicts on Windows.
 # PyQt5 changes the DLL search path, which breaks onnxruntime/ctranslate2 if loaded after.
+if getattr(sys, "frozen", False) and hasattr(os, "add_dll_directory"):
+    # In PyInstaller bundles, explicitly register DLL directories so native
+    # extensions (onnxruntime, ctranslate2, llama_cpp) can find their libs.
+    _meipass = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    for _dll_subdir in (
+        os.path.join(_meipass, "onnxruntime", "capi"),
+        os.path.join(_meipass, "ctranslate2"),
+        os.path.join(_meipass, "llama_cpp", "lib"),
+        _meipass,
+    ):
+        if os.path.isdir(_dll_subdir):
+            try:
+                os.add_dll_directory(_dll_subdir)
+            except OSError:
+                pass
 for _mod in ("onnxruntime", "ctranslate2"):
     try:
         __import__(_mod)
