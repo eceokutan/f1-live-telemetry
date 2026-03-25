@@ -366,7 +366,7 @@ class StartupLoaderThread(QtCore.QThread):
                 except Exception:
                     pass
 
-            progress_str = f" {elapsed}s)"
+            progress_str = f" ({elapsed}s)"
 
             self.stage_update.emit(
                 stage_idx, STATUS_RUNNING,
@@ -394,7 +394,7 @@ class StartupLoaderThread(QtCore.QThread):
             # Download live model if missing
             if not is_model_available(DEFAULT_LOCAL_PATH):
                 self._download_model_with_progress(
-                    5, "Downloading AI Race Engineer model (~2GB", ensure_model,
+                    5, "Downloading AI Race Engineer model ~2GB", ensure_model,
                     dest_path=str(get_model_path(DEFAULT_LOCAL_PATH))
                 )
             else:
@@ -403,7 +403,7 @@ class StartupLoaderThread(QtCore.QThread):
             # Download post-race model if missing
             if not is_model_available(POSTRACE_LOCAL_PATH):
                 self._download_model_with_progress(
-                    5, "Downloading Post-Race Analyst model (~2GB", ensure_postrace_model,
+                    5, "Downloading Post-Race Analyst model ~2GB", ensure_postrace_model,
                     dest_path=str(get_model_path(POSTRACE_LOCAL_PATH))
                 )
             else:
