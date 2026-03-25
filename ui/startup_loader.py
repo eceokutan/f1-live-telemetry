@@ -94,12 +94,12 @@ class LoadingScreen(QtWidgets.QWidget):
         load_fonts()
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
-        self.setFixedSize(500, 620)
+        self.setFixedSize(620, 620)
         self.setStyleSheet(f"background-color: {BG_COLOR};")
 
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 12, 40, 30)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(40, 0, 40, 30)
+        main_layout.setSpacing(4)
 
         # SVG logo
         svg_path = os.path.join(os.path.dirname(__file__), "img", "f1_jarvis_topdown_massive_tyres.svg")
@@ -366,11 +366,7 @@ class StartupLoaderThread(QtCore.QThread):
                 except Exception:
                     pass
 
-            if size_mb > 1:
-                percent = min(int((size_mb / expected_size_mb) * 100), 99)
-                progress_str = f" {percent}%"
-            else:
-                progress_str = f" ({elapsed}s)"
+            progress_str = f" {elapsed}s)"
 
             self.stage_update.emit(
                 stage_idx, STATUS_RUNNING,
@@ -398,7 +394,7 @@ class StartupLoaderThread(QtCore.QThread):
             # Download live model if missing
             if not is_model_available(DEFAULT_LOCAL_PATH):
                 self._download_model_with_progress(
-                    5, "Downloading AI Race Engineer model (~2GB)", ensure_model,
+                    5, "Downloading AI Race Engineer model (~2GB", ensure_model,
                     dest_path=str(get_model_path(DEFAULT_LOCAL_PATH))
                 )
             else:
@@ -407,7 +403,7 @@ class StartupLoaderThread(QtCore.QThread):
             # Download post-race model if missing
             if not is_model_available(POSTRACE_LOCAL_PATH):
                 self._download_model_with_progress(
-                    5, "Downloading Post-Race Analyst model (~2GB)", ensure_postrace_model,
+                    5, "Downloading Post-Race Analyst model (~2GB", ensure_postrace_model,
                     dest_path=str(get_model_path(POSTRACE_LOCAL_PATH))
                 )
             else:
