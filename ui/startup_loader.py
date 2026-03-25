@@ -344,8 +344,9 @@ class StartupLoaderThread(QtCore.QThread):
 
         _th.Thread(target=_do_download, daemon=True).start()
         t0 = _time.time()
+        initial_size_mb = [None]  # captured on first measurement
         while not done.is_set():
-            elapsed = int(_time.time() - t0)
+            elapsed = _time.time() - t0
             size_mb = 0.0
             if dest_path:
                 try:
@@ -366,11 +367,33 @@ class StartupLoaderThread(QtCore.QThread):
                 except Exception:
                     pass
 
-            progress_str = f" ({elapsed}s)"
+            # Capture starting size on first valid reading (handles resumed downloads)
+            if size_mb > 1 and initial_size_mb[0] is None:
+                initial_size_mb[0] = size_mb
+
+            if size_mb > 1 and expected_size_mb > 0:
+                pct = min(99, int(size_mb / expected_size_mb * 100))
+                # Speed based only on NEW bytes downloaded this session
+                new_mb = size_mb - (initial_size_mb[0] or 0)
+                speed_mbps = new_mb / max(elapsed, 1)
+                remaining_mb = expected_size_mb - size_mb
+                if speed_mbps > 0.1:
+                    eta_sec = int(remaining_mb / speed_mbps)
+                    eta_min = eta_sec // 60
+                    eta_sec_rem = eta_sec % 60
+                    if eta_min > 0:
+                        eta_str = f"~{eta_min}m {eta_sec_rem}s left"
+                    else:
+                        eta_str = f"~{eta_sec}s left"
+                else:
+                    eta_str = "estimating..."
+                progress_str = f"{int(size_mb)}MB / {expected_size_mb}MB ({pct}%) — {eta_str}"
+            else:
+                progress_str = f"starting download... ({int(elapsed)}s)"
 
             self.stage_update.emit(
                 stage_idx, STATUS_RUNNING,
-                f"{label}...{progress_str}"
+                f"{label}: {progress_str}"
             )
             done.wait(timeout=1.0)
 
