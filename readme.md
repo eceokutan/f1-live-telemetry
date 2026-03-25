@@ -60,32 +60,6 @@ python main.py          # Launch Jarvis (launcher opens first)
 python main.py --ai     # Launch with AI race engineer enabled
 ```
 
-### Run automated tests
-```bash
-pip install -r requirements-test.txt
-pytest
-```
-
-Default `pytest` runs unit/component/integration suites and excludes manual/system/slow tests.
-See `tests/TESTING_STRATEGY.md` for marker usage, test levels, and assessment evidence guidance.
-
-### Environment variables (for AI features)
-
-Copy `.env.example` to `.env` and fill in:
-
-```bash
-# Hugging Face (AI race engineer)
-HUGGINGFACE_TOKEN=hf_your_api_key_here
-HUGGINGFACE_MODEL_ID=your_model_id
-
-# Post-race AI (Hugging Face Space)
-POSTRACE_HF_API_TOKEN=your_token
-POSTRACE_HF_SPACE_URL=https://your-space.hf.space
-
-# Kokoro TTS voice (optional)
-KOKORO_VOICE=bm_lewis
-```
-
 AI features are optional — the app works without them for pure telemetry.
 
 ### Local LLM model files (GGUF)
@@ -150,12 +124,9 @@ jarvis-granite/
 ├── analysis/
 │   └── ai_pipeline_bridge.py       # Post-race AI analysis bridge
 │
-├── data/
-│   ├── session_recorder.py         # SQLite recording
-│   ├── session_exporter.py         # Export/import sessions
-│   └── session_viewer.py           # CLI session viewer
-│
-└── CLAUDE.md                       # Detailed technical docs
+└── data/
+    ├── session_recorder.py         # SQLite recording
+    └── session_exporter.py         # Export/import sessions
 ```
 
 ---

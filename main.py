@@ -38,10 +38,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger("matplotlib").setLevel(logging.ERROR)
 
-# Load environment variables from .env file
-from dotenv import load_dotenv
-load_dotenv()
-
 logger.info("Jarvis F1 Telemetry Suite starting")
 
 # Module-level placeholders — populated by the loading screen

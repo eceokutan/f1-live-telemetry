@@ -27,7 +27,6 @@ llama-cpp-python>=0.2.50  # GGUF model inference (replaces transformers+peft at 
 
 # Utilities
 tenacity>=8.2.0
-python-dotenv>=1.0.0
 
 # =============================================================================
 # Voice Input/Output (webrtcvad + faster-whisper + Kokoro TTS)

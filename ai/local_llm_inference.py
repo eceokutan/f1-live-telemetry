@@ -75,8 +75,7 @@ class LocalLLMInference:
                 except Exception as dl_err:
                     raise FileNotFoundError(
                         f"GGUF model not found at {self.model_path} and auto-download failed: {dl_err}. "
-                        "Run 'python scripts/convert_to_gguf.py' to generate it from the QLoRA adapter, "
-                        "or place the model file manually."
+                        "Place the model file manually at the expected path."
                     ) from dl_err
             else:
                 raise FileNotFoundError(
