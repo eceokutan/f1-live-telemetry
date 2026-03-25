@@ -81,6 +81,7 @@ class TelemetryAgent:
         self._opponent_close_active: bool = False
         self._last_car_damage_time: float = 0.0
         self._last_position_change_time: float = 0.0
+        self._position_initialized: bool = False
 
     def detect_events(
         self,
@@ -477,6 +478,11 @@ class TelemetryAgent:
 
         # Skip if position hasn't changed or is uninitialized
         if new_pos == old_pos or old_pos is None or new_pos < 1:
+            return events
+
+        # Suppress the first position change (race start grid shuffling)
+        if not self._position_initialized:
+            self._position_initialized = True
             return events
 
         now = time.time()
