@@ -6,6 +6,7 @@ import csv
 import json
 import sqlite3
 import logging
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
@@ -374,6 +375,7 @@ class SessionExporter:
         # Insert telemetry
         telem = bundle.get("telemetry", {})
         if telem:
+            self._ensure_bundle_telemetry_columns(cursor, telem)
             table_columns = self._get_table_columns(cursor, "telemetry")
             col_names = [name for name in telem.keys() if name in table_columns]
             num_rows = len(telem[col_names[0]]) if col_names else 0
@@ -552,6 +554,46 @@ class SessionExporter:
         cursor.execute(f"PRAGMA table_info({table_name})")
         rows = cursor.fetchall()
         return {row[1] for row in rows}
+
+    def _ensure_bundle_telemetry_columns(
+        self,
+        cursor: sqlite3.Cursor,
+        telemetry_bundle: dict,
+    ) -> None:
+        """Add bundle telemetry columns missing from target DB telemetry schema."""
+        existing = self._get_table_columns(cursor, "telemetry")
+        for column_name, values in telemetry_bundle.items():
+            if column_name in existing:
+                continue
+            if column_name in {"telemetry_id", "session_id", "timestamp"}:
+                continue
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(column_name)):
+                logger.warning("Skipping unsafe telemetry column name from bundle: %s", column_name)
+                continue
+
+            sqlite_type = self._infer_sqlite_type(values)
+            cursor.execute(f"ALTER TABLE telemetry ADD COLUMN {column_name} {sqlite_type}")
+            existing.add(column_name)
+
+    @staticmethod
+    def _infer_sqlite_type(values) -> str:
+        """Infer a safe SQLite type for dynamically imported telemetry columns."""
+        if isinstance(values, (list, tuple)):
+            candidates = values
+        else:
+            candidates = [values]
+
+        for value in candidates:
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                return "INTEGER"
+            if isinstance(value, int):
+                return "INTEGER"
+            if isinstance(value, float):
+                return "REAL"
+            return "TEXT"
+        return "REAL"
 
     def _export_ai_commentary(self, db: sqlite3.Connection, session_id: int, output_path: Path) -> None:
         """Export AI commentary to CSV (if any exists)."""

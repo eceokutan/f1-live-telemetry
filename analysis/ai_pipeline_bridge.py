@@ -754,18 +754,9 @@ class AIPipelineBridge:
         )
 
     def _summarize_fallback_series(self, series: pd.Series) -> str:
-        """Return a robust plain summary for any telemetry column."""
+        """Return a simple plain summary for any telemetry column."""
         if series.empty:
             return "no samples"
-
-        numeric = pd.to_numeric(series, errors="coerce")
-        numeric_valid = numeric.dropna()
-        if not numeric_valid.empty:
-            return (
-                f"min {self._format_fallback_value(float(numeric_valid.min()))}, "
-                f"max {self._format_fallback_value(float(numeric_valid.max()))}, "
-                f"mean {self._format_fallback_value(float(numeric_valid.mean()))}"
-            )
 
         values: list[str] = []
         for value in series:
@@ -777,11 +768,11 @@ class AIPipelineBridge:
         if not values:
             return "all values missing"
 
-        unique_values = list(dict.fromkeys(values))
-        preview = ", ".join(unique_values[:3])
-        if len(unique_values) > 3:
-            preview += ", ..."
-        return f"values {preview}"
+        first_value = values[0]
+        last_value = values[-1]
+        if first_value == last_value:
+            return f"value {first_value}"
+        return f"first {first_value}; last {last_value}"
 
     @staticmethod
     def _format_fallback_value(value: Any) -> str:
