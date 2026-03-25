@@ -30,8 +30,6 @@ a = Analysis(
         # UI assets
         (os.path.join(ROOT, 'ui', 'fonts'), 'ui/fonts'),
         (os.path.join(ROOT, 'ui', 'img'), 'ui/img'),
-        # Config example (user can copy to config.json)
-        (os.path.join(ROOT, 'config.example.json'), '.'),
         # SSL certificates for HTTPS downloads (huggingface_hub)
         (os.path.join(
             ROOT, 'venv', 'lib', 'site-packages', 'certifi', 'cacert.pem'
