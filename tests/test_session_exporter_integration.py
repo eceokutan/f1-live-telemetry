@@ -107,3 +107,62 @@ def test_bundle_export_then_import_works_with_fresh_database(tmp_path):
     sessions = target_exporter.list_sessions()
     assert len(sessions) == 1
     assert sessions[0]["track_name"] == "Spa"
+
+
+def test_bundle_import_supports_camber_columns(tmp_path):
+    source_db = tmp_path / "source_with_camber.db"
+    source_session_id = _seed_db(source_db)
+
+    source_conn = sqlite3.connect(str(source_db))
+    source_conn.row_factory = sqlite3.Row
+    source_cursor = source_conn.cursor()
+    source_cursor.execute("ALTER TABLE telemetry ADD COLUMN camber_fl REAL")
+    source_cursor.execute("ALTER TABLE telemetry ADD COLUMN camber_fr REAL")
+    source_cursor.execute("ALTER TABLE telemetry ADD COLUMN camber_rl REAL")
+    source_cursor.execute("ALTER TABLE telemetry ADD COLUMN camber_rr REAL")
+    source_cursor.execute(
+        """
+        UPDATE telemetry
+        SET camber_fl = ?, camber_fr = ?, camber_rl = ?, camber_rr = ?
+        WHERE session_id = ?
+        """,
+        (-3.1, -3.2, -2.4, -2.5, source_session_id),
+    )
+    source_conn.commit()
+    source_conn.close()
+
+    source_exporter = SessionExporter(db_path=str(source_db))
+    bundle_path = tmp_path / "session_with_camber.jsession"
+    source_exporter.export_session_bundle(source_session_id, str(bundle_path))
+
+    target_db = tmp_path / "target_with_camber.db"
+    target_exporter = SessionExporter(db_path=str(target_db))
+    imported_session_id = target_exporter.import_session_bundle(str(bundle_path))
+
+    assert imported_session_id > 0
+
+    target_conn = sqlite3.connect(str(target_db))
+    target_conn.row_factory = sqlite3.Row
+    target_cursor = target_conn.cursor()
+    target_cursor.execute("PRAGMA table_info(telemetry)")
+    telemetry_cols = {row["name"] for row in target_cursor.fetchall()}
+    assert {"camber_fl", "camber_fr", "camber_rl", "camber_rr"}.issubset(telemetry_cols)
+
+    target_cursor.execute(
+        """
+        SELECT camber_fl, camber_fr, camber_rl, camber_rr
+        FROM telemetry
+        WHERE session_id = ?
+        ORDER BY telemetry_id ASC
+        LIMIT 1
+        """,
+        (imported_session_id,),
+    )
+    row = target_cursor.fetchone()
+    target_conn.close()
+
+    assert row is not None
+    assert row["camber_fl"] == pytest.approx(-3.1)
+    assert row["camber_fr"] == pytest.approx(-3.2)
+    assert row["camber_rl"] == pytest.approx(-2.4)
+    assert row["camber_rr"] == pytest.approx(-2.5)

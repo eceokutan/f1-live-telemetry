@@ -718,119 +718,81 @@ class AIPipelineBridge:
 
     def _generate_fallback(self, session: Session, lap: Lap) -> AIAnalysisResult:
         summary = lap.summary
-        df = lap.telemetry
+        df = lap.telemetry if isinstance(lap.telemetry, pd.DataFrame) else pd.DataFrame()
+        sample_count = int(len(df.index))
+        fields = [str(column) for column in df.columns]
+        fields_text = ", ".join(fields) if fields else "none"
 
-        throttle_mean = self._mean_percentage(df, "throttle")
-        brake_mean = self._mean_percentage(df, "brake")
-        heavy_brake_samples = int((df["brake"] >= 0.80).sum()) if "brake" in df.columns else 0
-
-        avg_tire_temp = self._mean_columns(
-            df,
-            ("tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr"),
-        )
-        avg_tire_pressure = self._mean_columns(
-            df,
-            ("tyre_pressure_fl", "tyre_pressure_fr", "tyre_pressure_rl", "tyre_pressure_rr"),
-        )
-
-        # G-forces
-        avg_g_lat = self._safe_mean(df, "g_force_lat")
-        max_g_lat = self._safe_max(df, "g_force_lat")
-        avg_g_lon = self._safe_mean(df, "g_force_lon")
-        max_g_lon = self._safe_max(df, "g_force_lon")
-
-        # Wheel slip — count samples where any tire exceeds threshold
-        slip_cols = ("wheel_slip_fl", "wheel_slip_fr", "wheel_slip_rl", "wheel_slip_rr")
-        excessive_slip_samples = 0
-        max_slip = 0.0
-        for col in slip_cols:
-            if col in df.columns:
-                excessive_slip_samples += int((df[col].abs() > 5.0).sum())
-                col_max = float(df[col].abs().max())
-                if col_max > max_slip:
-                    max_slip = col_max
-
-        # Suspension travel
-        avg_susp = self._mean_columns(
-            df,
-            ("suspension_fl", "suspension_fr", "suspension_rl", "suspension_rr"),
-        )
-
-        # Ride height
-        avg_ride_front = self._safe_mean(df, "ride_height_front")
-        avg_ride_rear = self._safe_mean(df, "ride_height_rear")
-
-        # Car damage
-        damage_cols = ("car_damage_front", "car_damage_rear", "car_damage_left",
-                       "car_damage_right", "car_damage_centre")
-        max_damage = 0.0
-        damage_zones = []
-        for col in damage_cols:
-            if col in df.columns:
-                zone_max = float(df[col].max())
-                if zone_max > 0:
-                    zone_name = col.replace("car_damage_", "")
-                    damage_zones.append(f"{zone_name}: {zone_max:.0f}%")
-                if zone_max > max_damage:
-                    max_damage = zone_max
-        damage_str = ", ".join(damage_zones) if damage_zones else "No damage"
-
-        fastest_lap = session.get_fastest_lap()
-        if fastest_lap and fastest_lap.lap_number != lap.lap_number:
-            delta = lap.lap_time - fastest_lap.lap_time
-            lap_delta = f"{delta:+.3f}s vs fastest lap ({fastest_lap.lap_number})"
-        else:
-            lap_delta = "Current lap is session fastest or only valid lap."
-
-        # Build coaching lines
         coach_lines = [
-            f"Lap {lap.lap_number} coaching focus:",
-            f"- Smooth brake release into apex; heavy-brake samples: {heavy_brake_samples}.",
-            f"- Balance throttle pickup after apex; mean throttle is {throttle_mean:.1f}%.",
-            f"- Keep tire temps in working range (avg {avg_tire_temp:.1f} C).",
-            f"- Fuel used this lap: {summary.fuel_used:.2f} L.",
+            f"Fallback coach (data-only) for lap {lap.lap_number}.",
+            f"Lap time: {self._format_fallback_value(lap.lap_time)}s.",
+            f"Fuel used: {self._format_fallback_value(summary.fuel_used)}.",
+            f"Telemetry samples: {sample_count}.",
+            f"Telemetry fields ({len(fields)}): {fields_text}.",
+            "No model guidance is available in fallback mode; this output reports received telemetry only.",
         ]
-        if excessive_slip_samples > 0:
-            coach_lines.append(
-                f"- Excessive wheel slip detected in {excessive_slip_samples} samples "
-                f"(max slip: {max_slip:.1f}). Smooth inputs on throttle/brake to reduce wheelspin."
-            )
-        if max_damage > 0:
-            coach_lines.append(f"- Car damage present ({damage_str}). Drive cautiously.")
-        coach = "\n".join(coach_lines)
 
-        # Build analyst lines
         analyst_lines = [
-            f"Lap {lap.lap_number} telemetry summary:",
-            f"- Lap time: {lap.lap_time:.3f}s ({lap_delta})",
-            f"- Speed: avg {summary.avg_speed:.1f} km/h, max {summary.max_speed:.1f} km/h, min {summary.min_speed:.1f} km/h.",
-            f"- Inputs: mean throttle {throttle_mean:.1f}%, mean brake {brake_mean:.1f}%.",
-            f"- Tires: avg temperature {avg_tire_temp:.1f} C, avg pressure {avg_tire_pressure:.2f} PSI.",
+            f"Fallback analyst (data-only) for lap {lap.lap_number}.",
+            f"Lap time: {self._format_fallback_value(lap.lap_time)}s.",
+            f"Telemetry samples: {sample_count}.",
+            f"Telemetry fields ({len(fields)}): {fields_text}.",
         ]
-        if avg_g_lat is not None:
-            analyst_lines.append(
-                f"- G-Forces: lateral avg {avg_g_lat:.2f}G (max {max_g_lat:.2f}G), "
-                f"longitudinal avg {avg_g_lon:.2f}G (max {max_g_lon:.2f}G)."
-            )
-        if max_slip > 0:
-            analyst_lines.append(
-                f"- Wheel slip: max {max_slip:.1f}, excessive slip samples: {excessive_slip_samples}."
-            )
-        if avg_susp > 0:
-            analyst_lines.append(f"- Suspension travel: avg {avg_susp:.4f} m.")
-        if avg_ride_front is not None:
-            analyst_lines.append(
-                f"- Ride height: front avg {avg_ride_front:.4f} m, rear avg {avg_ride_rear:.4f} m."
-            )
-        if max_damage > 0:
-            analyst_lines.append(f"- Car damage: {damage_str}.")
-        analyst = "\n".join(analyst_lines)
+        if fields:
+            analyst_lines.append("Field summaries:")
+            for column in df.columns:
+                analyst_lines.append(
+                    f"- {column}: {self._summarize_fallback_series(df[column])}"
+                )
+        else:
+            analyst_lines.append("No telemetry fields available.")
 
         return AIAnalysisResult(
-            coach=coach,
-            analyst=analyst,
+            coach="\n".join(coach_lines),
+            analyst="\n".join(analyst_lines),
             source="built_in_fallback",
         )
+
+    def _summarize_fallback_series(self, series: pd.Series) -> str:
+        """Return a robust plain summary for any telemetry column."""
+        if series.empty:
+            return "no samples"
+
+        numeric = pd.to_numeric(series, errors="coerce")
+        numeric_valid = numeric.dropna()
+        if not numeric_valid.empty:
+            return (
+                f"min {self._format_fallback_value(float(numeric_valid.min()))}, "
+                f"max {self._format_fallback_value(float(numeric_valid.max()))}, "
+                f"mean {self._format_fallback_value(float(numeric_valid.mean()))}"
+            )
+
+        values: list[str] = []
+        for value in series:
+            if pd.isna(value):
+                continue
+            text = self._normalize_text(value)
+            if text:
+                values.append(text)
+        if not values:
+            return "all values missing"
+
+        unique_values = list(dict.fromkeys(values))
+        preview = ", ".join(unique_values[:3])
+        if len(unique_values) > 3:
+            preview += ", ..."
+        return f"values {preview}"
+
+    @staticmethod
+    def _format_fallback_value(value: Any) -> str:
+        """Format numeric fallback values consistently."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if number.is_integer():
+            return str(int(number))
+        return f"{number:.3f}".rstrip("0").rstrip(".")
 
     def _build_context(self, session: Session, lap: Lap) -> dict[str, Any]:
         summary = lap.summary
