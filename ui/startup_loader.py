@@ -107,7 +107,7 @@ class LoadingScreen(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
         self._drag_pos = None  # for mouse-drag movement
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
-        self.setFixedSize(620, 620)
+        self.setFixedSize(720, 620)
         self.setStyleSheet(f"background-color: {BG_COLOR};")
 
         main_layout = QtWidgets.QVBoxLayout(self)

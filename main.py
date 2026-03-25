@@ -45,11 +45,20 @@ for _mod in ("onnxruntime", "ctranslate2"):
 from PyQt5 import QtWidgets, QtCore
 
 # Configure logging FIRST - before any other imports
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(name)s: %(message)s',
-    stream=sys.stdout
-)
+# When running as a windowed PyInstaller app (console=False), sys.stdout is None.
+# Fall back to a log file so logging doesn't crash.
+if sys.stdout is not None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(levelname)s] %(name)s: %(message)s',
+        stream=sys.stdout
+    )
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(levelname)s] %(name)s: %(message)s',
+        filename='jarvis.log',
+    )
 logger = logging.getLogger(__name__)
 logging.getLogger("matplotlib").setLevel(logging.ERROR)
 

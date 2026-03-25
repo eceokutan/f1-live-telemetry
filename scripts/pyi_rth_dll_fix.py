@@ -31,6 +31,11 @@ if os.path.isfile(_cert_file):
     os.environ.setdefault("SSL_CERT_FILE", _cert_file)
     os.environ.setdefault("REQUESTS_CA_BUNDLE", _cert_file)
 
+# Disable hf_xet in bundled app — its native .pyd can fail in PyInstaller,
+# causing NoneType errors. huggingface_hub falls back to normal HTTP downloads.
+if getattr(sys, "frozen", False):
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 # Force-import onnxruntime before anything else can interfere
 try:
     import onnxruntime
