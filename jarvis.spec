@@ -25,11 +25,18 @@ if not os.path.exists(icon_path):
 a = Analysis(
     [os.path.join(ROOT, 'main.py')],
     pathex=[ROOT],
-    binaries=[],
+    binaries=[
+        # llama.cpp native DLLs (not auto-detected by PyInstaller)
+        (os.path.join(
+            ROOT, 'venv', 'lib', 'site-packages', 'llama_cpp', 'lib', '*.dll'
+        ), 'llama_cpp/lib'),
+    ],
     datas=[
         # UI assets
         (os.path.join(ROOT, 'ui', 'fonts'), 'ui/fonts'),
         (os.path.join(ROOT, 'ui', 'img'), 'ui/img'),
+        # AI data files
+        (os.path.join(ROOT, 'ai', 'ac_fuel_data.json'), 'ai'),
         # SSL certificates for HTTPS downloads (huggingface_hub)
         (os.path.join(
             ROOT, 'venv', 'lib', 'site-packages', 'certifi', 'cacert.pem'
