@@ -10,7 +10,7 @@ import sys
 import logging
 
 from PyQt5 import QtWidgets, QtCore, QtGui, QtSvg
-from ui.styles import BG_COLOR, TEXT_COLOR, ACCENT_PRIMARY
+from ui.styles import BG_COLOR, TEXT_COLOR, TEXT_COLOR_DIM, ACCENT_PRIMARY, FONT_HEADING, load_fonts
 
 logger = logging.getLogger(__name__)
 
@@ -65,25 +65,6 @@ class StageRow(QtWidgets.QWidget):
 
         main_layout.addLayout(top_row)
 
-        # Progress bar (hidden by default, shown during downloads)
-        self.progress_bar = QtWidgets.QProgressBar()
-        self.progress_bar.setFixedHeight(6)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setStyleSheet(
-            f"QProgressBar {{"
-            f"  background-color: #333333;"
-            f"  border: none;"
-            f"  border-radius: 3px;"
-            f"}}"
-            f"QProgressBar::chunk {{"
-            f"  background-color: {ACCENT_PRIMARY};"
-            f"  border-radius: 3px;"
-            f"}}"
-        )
-        main_layout.addWidget(self.progress_bar)
 
     def set_status(self, status: str, detail: str = ""):
         if status == STATUS_PENDING:
@@ -95,23 +76,14 @@ class StageRow(QtWidgets.QWidget):
         elif status == STATUS_DONE:
             self.icon_label.setText("\u2713")
             self.icon_label.setStyleSheet("color: #6BCB77; font-size: 11pt;")
-            self.progress_bar.setVisible(False)
         elif status == STATUS_FAILED:
             self.icon_label.setText("X")
             self.icon_label.setStyleSheet("color: #FF6B6B; font-size: 11pt;")
-            self.progress_bar.setVisible(False)
         elif status == STATUS_SKIPPED:
             self.icon_label.setText("-")
             self.icon_label.setStyleSheet("color: #888888; font-size: 11pt;")
-            self.progress_bar.setVisible(False)
 
         self.detail_label.setText(detail)
-
-    def set_progress(self, percent: int):
-        """Show and update the progress bar (0-100)."""
-        if not self.progress_bar.isVisible():
-            self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(min(max(percent, 0), 100))
 
 
 class LoadingScreen(QtWidgets.QWidget):
@@ -119,34 +91,36 @@ class LoadingScreen(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        load_fonts()
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
-        self.setFixedSize(500, 580)
+        self.setFixedSize(500, 620)
         self.setStyleSheet(f"background-color: {BG_COLOR};")
 
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 30, 40, 30)
+        main_layout.setContentsMargins(40, 12, 40, 30)
         main_layout.setSpacing(8)
 
         # SVG logo
         svg_path = os.path.join(os.path.dirname(__file__), "img", "f1_jarvis_topdown_massive_tyres.svg")
         if os.path.exists(svg_path):
             svg_widget = QtSvg.QSvgWidget(svg_path)
-            svg_widget.setFixedSize(140, 140)
+            svg_widget.setFixedSize(180, 180)
             logo_container = QtWidgets.QHBoxLayout()
             logo_container.addStretch()
             logo_container.addWidget(svg_widget)
             logo_container.addStretch()
             main_layout.addLayout(logo_container)
         else:
-            main_layout.addSpacing(140)
+            main_layout.addSpacing(180)
 
         # Title
-        title = QtWidgets.QLabel("F1 JARVIS")
+        title = QtWidgets.QLabel("F1 JARVIS GRANITE")
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setStyleSheet(
-            f"color: {TEXT_COLOR}; font-size: 28pt; font-weight: bold; "
-            f"letter-spacing: 4px; margin-top: 8px; margin-bottom: 4px;"
+            f"font-family: '{FONT_HEADING}'; "
+            f"color: {TEXT_COLOR_DIM}; font-size: 24px; "
+            f"letter-spacing: 4px;"
         )
         main_layout.addWidget(title)
 
@@ -230,10 +204,6 @@ class LoadingScreen(QtWidgets.QWidget):
         if 0 <= index < len(self._stage_rows):
             self._stage_rows[index].set_status(status, detail)
 
-    def set_stage_progress(self, index: int, percent: int):
-        """Update a stage row's progress bar."""
-        if 0 <= index < len(self._stage_rows):
-            self._stage_rows[index].set_progress(percent)
 
     def show_fatal_error(self, index: int, message: str):
         """Show error panel with Quit button for hard failures."""
@@ -248,8 +218,7 @@ class StartupLoaderThread(QtCore.QThread):
     """Background thread that runs stages 2-9 sequentially."""
 
     stage_update = QtCore.pyqtSignal(int, str, str)  # index, status, detail
-    download_progress = QtCore.pyqtSignal(int, int)  # stage_index, percent (0-100)
-    all_done = QtCore.pyqtSignal(dict)
+all_done = QtCore.pyqtSignal(dict)
     fatal_error = QtCore.pyqtSignal(int, str)
 
     def run(self):
@@ -399,20 +368,15 @@ class StartupLoaderThread(QtCore.QThread):
 
             if size_mb > 1:
                 percent = min(int((size_mb / expected_size_mb) * 100), 99)
-                progress_str = f" ({size_mb:.0f} / ~{expected_size_mb} MB)"
+                progress_str = f" {percent}%"
             else:
-                percent = 0
                 progress_str = f" ({elapsed}s)"
 
-            self.download_progress.emit(stage_idx, percent)
             self.stage_update.emit(
                 stage_idx, STATUS_RUNNING,
                 f"{label}...{progress_str}"
             )
             done.wait(timeout=1.0)
-
-        # Download complete — fill to 100%
-        self.download_progress.emit(stage_idx, 100)
 
         if error[0]:
             raise error[0]
