@@ -84,6 +84,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self._analyst_done_event = threading.Event()
         self._analyst_done_event.set()  # not blocking initially
         self._analyst_cancel_event = threading.Event()
+        self._coach_cancel_event = threading.Event()
 
         # Analysis tab widgets
         self.analysis_context_label: Optional[QtWidgets.QLabel] = None
@@ -572,8 +573,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
     def load_session_from_file(self, file_path: str) -> None:
         """Load session from CSV file."""
         try:
-            # New session always supersedes any in-flight analyst run.
+            # New session always supersedes any in-flight analyst/coach run.
             self._cancel_analyst_run()
+            self._cancel_coach_run()
             from data import TelemetryLoader
             self.session = TelemetryLoader.load_session(file_path)
             self.status_bar.showMessage(f"Loaded session: {self.session.metadata.track_name}")
@@ -588,6 +590,11 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
             # Start session-level analyst immediately in background
             self._start_session_analyst()
+
+            # Start session-level coach (waits on analyst internally)
+            if self.session.laps:
+                self.current_lap = self.session.get_lap(self.session.laps[0].lap_number)
+            self.refresh_analysis()
 
             if self.session.laps:
                 self.load_lap(self.session.laps[0].lap_number)
@@ -632,7 +639,6 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline.stop()
         self._populate_canvases()
         self._update_visualizations_at_time(0.0)
-        self.refresh_analysis()
 
         if self.analysis_context_label:
             self.analysis_context_label.setText(self._get_analysis_session_name())
@@ -710,6 +716,12 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self._analyst_cancel_event.set()
         self._analyst_running = False
         self._analyst_done_event.set()
+
+    def _cancel_coach_run(self) -> None:
+        """Cancel the current coach run and invalidate stale callbacks."""
+        self._analysis_request_id += 1
+        self._coach_cancel_event.set()
+        self._coach_streaming = False
 
     def _run_analyst_worker(
         self,
@@ -800,7 +812,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                 self.analysis_source_label.setText(f"Analyst source: {source} ({generated_at})")
 
     def refresh_analysis(self) -> None:
-        """Run coach analysis for the currently loaded lap (analyst runs on session load)."""
+        """Run coach analysis for the session (called once per session load)."""
         if not self.session or not self.current_lap:
             if self.coach_output:
                 self.coach_output.setPlainText("Load a session and select a lap to start coaching.")
@@ -811,7 +823,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         if self.analysis_context_label:
             self.analysis_context_label.setText(self._get_analysis_session_name())
 
-        # Reset conversation state for new lap
+        # Reset conversation state for new session
         self._coach_conversation = []
         self._current_stream_text = []
         self._coach_streaming = True
@@ -821,7 +833,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             self._coach_send_button.setEnabled(False)
 
         self._analysis_request_id += 1
+        self._coach_cancel_event = threading.Event()
         request_id = self._analysis_request_id
+        cancel_event = self._coach_cancel_event
         session = self.session
         lap = self.current_lap
 
@@ -830,7 +844,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         threading.Thread(
             target=self._run_coach_worker,
-            args=(request_id, session, lap),
+            args=(request_id, session, lap, cancel_event),
             daemon=True,
         ).start()
 
@@ -849,25 +863,45 @@ class LapViewerWindow(QtWidgets.QMainWindow):
 
         return f"Session {metadata.session_id}"
 
-    def _run_coach_worker(self, request_id: int, session: Session, lap: Lap) -> None:
+    def _run_coach_worker(
+        self,
+        request_id: int,
+        session: Session,
+        lap: Lap,
+        cancel_event: threading.Event,
+    ) -> None:
         # Wait for analyst to finish so it always predates the coach.
         # Both share one LLM lock; without this the coach's lighter setup
         # lets it grab the lock first.
-        self._analyst_done_event.wait()
+        # Poll so we can bail out if a new session cancels us.
+        while not self._analyst_done_event.wait(timeout=0.5):
+            if cancel_event.is_set() or request_id != self._analysis_request_id:
+                return
+        if cancel_event.is_set() or request_id != self._analysis_request_id:
+            return
         try:
             stream = self.ai_pipeline.generate_coach_stream(session, lap)
             if stream is not None:
                 for chunk in stream:
+                    if cancel_event.is_set() or request_id != self._analysis_request_id:
+                        close_fn = getattr(stream, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+                        return
                     self.coach_chunk.emit(request_id, chunk)
                 self.coach_finished.emit(request_id, "", "")
             else:
                 # Streaming unavailable — fall back to non-streaming
                 coach_text = self.ai_pipeline.generate_coach(session, lap)
+                if cancel_event.is_set() or request_id != self._analysis_request_id:
+                    return
                 if not coach_text:
                     fallback = self.ai_pipeline._generate_fallback(session, lap)
                     coach_text = fallback.coach
                 self.coach_finished.emit(request_id, coach_text or "", "")
         except Exception as exc:
+            if cancel_event.is_set() or request_id != self._analysis_request_id:
+                return
             self.coach_finished.emit(request_id, "", str(exc))
 
     def _on_coach_finished(self, request_id: int, coach_text: str, error_text: str) -> None:
@@ -968,11 +1002,18 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             stream = self.ai_pipeline.generate_coach_followup_stream(session, lap, history)
             if stream is not None:
                 for chunk in stream:
+                    if request_id != self._analysis_request_id:
+                        close_fn = getattr(stream, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+                        return
                     self.coach_chunk.emit(request_id, chunk)
                 self.coach_finished.emit(request_id, "", "")
             else:
                 self.coach_finished.emit(request_id, "", "Follow-up not available.")
         except Exception as exc:
+            if request_id != self._analysis_request_id:
+                return
             self.coach_finished.emit(request_id, "", str(exc))
 
     def _set_analysis_text(self, coach_text: str, analyst_text: str, source_text: str) -> None:
