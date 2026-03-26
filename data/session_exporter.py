@@ -339,6 +339,9 @@ class SessionExporter:
         meta = bundle["metadata"]
         import time as _time
 
+        # Ensure the database directory exists (user may import before ever recording)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+
         db = sqlite3.connect(self.db_path)
         cursor = db.cursor()
 
