@@ -1098,7 +1098,7 @@ class LapViewerWindow(QtWidgets.QMainWindow):
             elif gtype == "multi_damage":
                 dmg_cols = ["car_damage_front", "car_damage_rear", "car_damage_left",
                             "car_damage_right", "car_damage_centre"]
-                if not any(self._col_exists(df, c) for c in dmg_cols):
+                if not any(c in df.columns for c in dmg_cols):
                     continue
                 dmg_labels = ["Front", "Rear", "Left", "Right", "Centre"]
                 dmg_colors = [ACCENT_RED, ACCENT_YELLOW, ACCENT_CYAN, ACCENT_GREEN, "#FFFFFF"]
@@ -1134,6 +1134,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
                     continue
                 delta_times, delta_values = delta
                 canvas.plot_delta(delta_times, delta_values, title=title)
+                # Override lap_duration with the full lap so the sliding window
+                # covers the entire timeline, not just the masked delta range.
+                canvas.lap_duration = float(times[-1]) if len(times) > 0 else canvas.lap_duration
 
             else:
                 continue
@@ -1287,6 +1290,9 @@ class LapViewerWindow(QtWidgets.QMainWindow):
         self.timeline_widget.setVisible(is_lap_review)
         if not is_lap_review:
             self.timeline.pause()
+            # Scroll coach output to top when switching to Analysis tab
+            if self.coach_output:
+                self.coach_output.verticalScrollBar().setValue(0)
 
     def export_session(self) -> None:
         """Export the full loaded session to a .jsession file."""
