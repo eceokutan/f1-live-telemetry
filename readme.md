@@ -66,7 +66,7 @@ pip install -r requirements-test.txt
 pytest
 ```
 
-Default `pytest` runs unit/component/integration suites and excludes manual/system/slow tests.
+Default `pytest` runs unit/component/integration plus automated system/UAT suites, and excludes manual/slow tests.
 See `tests/TESTING_STRATEGY.md` for marker usage, test levels, and assessment evidence guidance.
 
 ### Environment variables (for AI features)
