@@ -36,6 +36,15 @@ if os.path.isfile(_cert_file):
 if getattr(sys, "frozen", False):
     os.environ["HF_HUB_DISABLE_XET"] = "1"
 
+    # When console=False, PyInstaller sets sys.stdout/stderr to None.
+    # Libraries like tqdm/huggingface_hub crash writing to None.
+    # Redirect to devnull so writes silently succeed.
+    import io
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
 # Force-import onnxruntime before anything else can interfere
 try:
     import onnxruntime
