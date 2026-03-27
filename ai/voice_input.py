@@ -48,11 +48,27 @@ class VoiceInputWorker(QtCore.QThread):
     FORMAT = pyaudio.paInt16  # 16-bit PCM
 
     # VAD configuration
-    VAD_AGGRESSIVENESS = 2  # webrtcvad aggressiveness (0-3, higher = more aggressive filtering)
+    DEFAULT_VAD_AGGRESSIVENESS = 5  # Continuous-mode sensitivity (1-10, higher = less sensitive)
     SPEECH_PAD_MS = 150  # Padding before/after speech (ms)
     MIN_SPEECH_DURATION_MS = 300  # Minimum speech duration to process
+    # Fallback VAD tuning curves (scaled by aggressiveness 1-10)
+    FALLBACK_VAD_START_MULT_BASE = 2.0
+    FALLBACK_VAD_START_MULT_STEP = 0.25
+    FALLBACK_VAD_CONTINUE_MULT_BASE = 1.35
+    FALLBACK_VAD_CONTINUE_MULT_STEP = 0.16
+    FALLBACK_VAD_MIN_START_RMS_BASE = 140.0
+    FALLBACK_VAD_MIN_START_RMS_STEP = 20.0
+    FALLBACK_VAD_MIN_CONTINUE_RMS_BASE = 112.0
+    FALLBACK_VAD_MIN_CONTINUE_RMS_STEP = 12.0
+    FALLBACK_VAD_NOISE_SMOOTH_BASE = 0.045
+    FALLBACK_VAD_NOISE_SMOOTH_STEP = 0.003
 
-    def __init__(self, whisper_model_size: str = "base", ptt_mode: bool = False):
+    def __init__(
+        self,
+        whisper_model_size: str = "base",
+        ptt_mode: bool = False,
+        vad_aggressiveness: int = DEFAULT_VAD_AGGRESSIVENESS,
+    ):
         """
         Initialize voice input worker.
 
@@ -61,11 +77,34 @@ class VoiceInputWorker(QtCore.QThread):
                                 Default "base" (~140MB, good speed/accuracy balance).
             ptt_mode: If True, use push-to-talk mode (skip VAD, record only when
                       start_recording() is called). If False, use VAD auto-detection.
+            vad_aggressiveness: Continuous-mode sensitivity from 1-10
+                                (higher = less sensitive).
         """
         super().__init__()
 
         self.whisper_model_size = whisper_model_size
         self.ptt_mode = ptt_mode
+        self.vad_aggressiveness = self._normalize_vad_aggressiveness(vad_aggressiveness)
+        # webrtcvad only supports aggressiveness 0-3.
+        self._webrtc_vad_aggressiveness = min(3, max(0, (self.vad_aggressiveness + 1) // 2))
+        level_offset = self.vad_aggressiveness - 1
+        self._fallback_start_mult = (
+            self.FALLBACK_VAD_START_MULT_BASE + (self.FALLBACK_VAD_START_MULT_STEP * level_offset)
+        )
+        self._fallback_continue_mult = (
+            self.FALLBACK_VAD_CONTINUE_MULT_BASE + (self.FALLBACK_VAD_CONTINUE_MULT_STEP * level_offset)
+        )
+        self._fallback_min_start_rms = (
+            self.FALLBACK_VAD_MIN_START_RMS_BASE + (self.FALLBACK_VAD_MIN_START_RMS_STEP * level_offset)
+        )
+        self._fallback_min_continue_rms = (
+            self.FALLBACK_VAD_MIN_CONTINUE_RMS_BASE + (self.FALLBACK_VAD_MIN_CONTINUE_RMS_STEP * level_offset)
+        )
+        self._fallback_noise_smooth = max(
+            0.01,
+            self.FALLBACK_VAD_NOISE_SMOOTH_BASE - (self.FALLBACK_VAD_NOISE_SMOOTH_STEP * level_offset),
+        )
+        self._fallback_start_chunks = 2 if self.vad_aggressiveness <= 3 else 3
 
         # Audio stream
         self.audio = None
@@ -73,6 +112,9 @@ class VoiceInputWorker(QtCore.QThread):
 
         # webrtcvad instance (not loaded in PTT mode)
         self.vad = None
+        self._vad_backend = "webrtcvad"
+        self._noise_floor_rms = 0.0
+        self._fallback_start_streak = 0
 
         # Whisper model
         self.whisper_model = None
@@ -90,7 +132,21 @@ class VoiceInputWorker(QtCore.QThread):
         self._ptt_lock = threading.Lock()
 
         mode_str = "PTT" if ptt_mode else "VAD"
-        logger.info(f"VoiceInputWorker initialized (whisper_model={whisper_model_size}, mode={mode_str})")
+        logger.info(
+            "VoiceInputWorker initialized (whisper_model=%s, mode=%s, vad_aggressiveness=%d)",
+            whisper_model_size,
+            mode_str,
+            self.vad_aggressiveness,
+        )
+
+    @staticmethod
+    def _normalize_vad_aggressiveness(value) -> int:
+        """Clamp external aggressiveness setting to [1, 10]."""
+        try:
+            level = int(value)
+        except Exception:
+            level = VoiceInputWorker.DEFAULT_VAD_AGGRESSIVENESS
+        return max(1, min(10, level))
 
     def run(self):
         """Main thread execution loop."""
@@ -108,7 +164,8 @@ class VoiceInputWorker(QtCore.QThread):
                 self.status_update.emit("[Voice] PTT mode ready — hold V or joystick button to talk")
                 self._run_ptt_loop()
             else:
-                self.status_update.emit("[Voice] Voice input ready (faster-whisper) - speak naturally!")
+                backend = "webrtcvad" if self._vad_backend == "webrtcvad" else "fallback VAD"
+                self.status_update.emit(f"[Voice] Voice input ready ({backend} + faster-whisper) - speak naturally!")
                 self._run_vad_loop()
 
         except Exception as e:
@@ -133,6 +190,7 @@ class VoiceInputWorker(QtCore.QThread):
                         self._speech_buffer = []
                         self._silence_chunks = 0
                         self.vad_state_changed.emit(False)
+                    self._fallback_start_streak = 0
                     continue
 
                 audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
@@ -256,18 +314,27 @@ class VoiceInputWorker(QtCore.QThread):
 
     def _initialize_vad(self):
         """Initialize webrtcvad. Only called in VAD mode (not PTT)."""
+        self.status_update.emit("Initializing voice activity detection...")
         try:
             import webrtcvad
 
-            self.status_update.emit("Initializing voice activity detection...")
-
-            self.vad = webrtcvad.Vad(self.VAD_AGGRESSIVENESS)
-
-            logger.info("webrtcvad initialized (aggressiveness=%d)", self.VAD_AGGRESSIVENESS)
+            self.vad = webrtcvad.Vad(self._webrtc_vad_aggressiveness)
+            self._vad_backend = "webrtcvad"
+            logger.info(
+                "webrtcvad initialized (setting=%d, webrtcvad=%d)",
+                self.vad_aggressiveness,
+                self._webrtc_vad_aggressiveness,
+            )
 
         except Exception as e:
-            logger.error(f"Failed to initialize webrtcvad: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to initialize VAD: {e}")
+            # Keep continuous mode available even when native webrtcvad wheels
+            # are unavailable (common on newer Python versions).
+            self.vad = None
+            self._vad_backend = "rms_fallback"
+            self._noise_floor_rms = 0.0
+            self._fallback_start_streak = 0
+            logger.warning("webrtcvad unavailable (%s); using RMS fallback VAD", e)
+            self.status_update.emit("[Voice] webrtcvad unavailable; using fallback VAD")
 
     def _initialize_whisper(self):
         """Initialize faster-whisper model for local transcription."""
@@ -358,7 +425,7 @@ class VoiceInputWorker(QtCore.QThread):
 
     def _detect_speech(self, audio_bytes: bytes) -> bool:
         """
-        Detect speech in audio chunk using webrtcvad.
+        Detect speech in audio chunk using webrtcvad or fallback VAD.
 
         Args:
             audio_bytes: Raw 16-bit PCM audio bytes (30ms frame at 16kHz)
@@ -366,11 +433,62 @@ class VoiceInputWorker(QtCore.QThread):
         Returns:
             True if speech is detected, False otherwise
         """
-        try:
-            return self.vad.is_speech(audio_bytes, self.SAMPLE_RATE)
-        except Exception as e:
-            logger.error(f"VAD error: {e}")
+        if self.vad is not None:
+            try:
+                return self.vad.is_speech(audio_bytes, self.SAMPLE_RATE)
+            except Exception as e:
+                logger.warning("webrtcvad runtime error (%s); switching to fallback VAD", e)
+                self.vad = None
+                self._vad_backend = "rms_fallback"
+                self._noise_floor_rms = 0.0
+                self._fallback_start_streak = 0
+        return self._detect_speech_fallback(audio_bytes)
+
+    def _detect_speech_fallback(self, audio_bytes: bytes) -> bool:
+        """
+        Fallback VAD based on RMS energy with adaptive noise floor.
+
+        This keeps continuous mode usable if webrtcvad cannot be imported.
+        """
+        audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+        if audio_int16.size == 0:
             return False
+
+        samples = audio_int16.astype(np.float32)
+        frame_rms = float(np.sqrt(np.mean(samples * samples)))
+        if not np.isfinite(frame_rms):
+            return False
+
+        if self._noise_floor_rms <= 0.0:
+            bootstrap_floor = self._fallback_min_start_rms / self._fallback_start_mult
+            self._noise_floor_rms = min(frame_rms, bootstrap_floor)
+
+        # Update floor mainly from non-speech-ish chunks so a loud utterance
+        # doesn't immediately raise the threshold.
+        if frame_rms < (self._noise_floor_rms * 1.6):
+            alpha = self._fallback_noise_smooth
+            self._noise_floor_rms = ((1.0 - alpha) * self._noise_floor_rms) + (alpha * frame_rms)
+
+        start_threshold = max(
+            self._fallback_min_start_rms,
+            self._noise_floor_rms * self._fallback_start_mult,
+        )
+        continue_threshold = max(
+            self._fallback_min_continue_rms,
+            self._noise_floor_rms * self._fallback_continue_mult,
+        )
+        if self._is_speaking:
+            self._fallback_start_streak = 0
+            return frame_rms >= continue_threshold
+
+        # Starting speech requires sustained energy across a few frames so
+        # keyboard taps / wheel bumps don't trigger "Listening..." immediately.
+        if frame_rms >= start_threshold:
+            self._fallback_start_streak += 1
+        else:
+            self._fallback_start_streak = 0
+
+        return self._fallback_start_streak >= self._fallback_start_chunks
 
     def _transcribe_speech(self):
         """Transcribe buffered speech using faster-whisper."""

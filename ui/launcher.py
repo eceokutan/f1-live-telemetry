@@ -316,13 +316,16 @@ class LauncherWindow(QtWidgets.QDialog):
 
         self.voice_disabled_radio = QtWidgets.QRadioButton("Disabled")
         self.voice_ptt_radio = QtWidgets.QRadioButton("Push-to-Talk")
+        self.voice_continuous_radio = QtWidgets.QRadioButton("Continuous (always listening)")
 
         self.voice_btn_group = QtWidgets.QButtonGroup(self)
         self.voice_btn_group.addButton(self.voice_disabled_radio)
         self.voice_btn_group.addButton(self.voice_ptt_radio)
+        self.voice_btn_group.addButton(self.voice_continuous_radio)
 
         voice_layout.addWidget(self.voice_disabled_radio)
         voice_layout.addWidget(self.voice_ptt_radio)
+        voice_layout.addWidget(self.voice_continuous_radio)
 
         # PTT binding slots
         self.ptt_key_widget = QtWidgets.QWidget()
@@ -338,9 +341,28 @@ class LauncherWindow(QtWidgets.QDialog):
 
         voice_layout.addWidget(self.ptt_key_widget)
 
+        # Continuous mode VAD aggressiveness
+        self.vad_aggr_widget = QtWidgets.QWidget()
+        vad_aggr_layout = QtWidgets.QHBoxLayout(self.vad_aggr_widget)
+        vad_aggr_layout.setContentsMargins(24, 6, 0, 0)
+        vad_aggr_layout.setSpacing(8)
+        self.vad_aggr_label = QtWidgets.QLabel("Aggressiveness:")
+        self.vad_aggr_label.setToolTip("Continuous mode sensitivity (1-10). Higher is less sensitive.")
+        vad_aggr_layout.addWidget(self.vad_aggr_label)
+        self.vad_aggr_spin = QtWidgets.QSpinBox()
+        self.vad_aggr_spin.setRange(1, 10)
+        self.vad_aggr_spin.setValue(5)
+        self.vad_aggr_spin.setFixedWidth(72)
+        self.vad_aggr_spin.setToolTip("Continuous mode sensitivity (1-10). Higher is less sensitive.")
+        vad_aggr_layout.addWidget(self.vad_aggr_spin)
+        vad_aggr_layout.addStretch()
+        voice_layout.addWidget(self.vad_aggr_widget)
+
         # Show/hide PTT key based on radio selection
         self.voice_ptt_radio.toggled.connect(self.ptt_key_widget.setVisible)
         self.ptt_key_widget.setVisible(False)
+        self.voice_continuous_radio.toggled.connect(self.vad_aggr_widget.setVisible)
+        self.vad_aggr_widget.setVisible(False)
 
         content_layout.addWidget(voice_group)
         content_layout.addStretch()
@@ -374,6 +396,8 @@ class LauncherWindow(QtWidgets.QDialog):
         voice = c.get("voice_mode", "disabled")
         if voice == "push_to_talk":
             self.voice_ptt_radio.setChecked(True)
+        elif voice == "continuous":
+            self.voice_continuous_radio.setChecked(True)
         else:
             self.voice_disabled_radio.setChecked(True)
 
@@ -385,10 +409,16 @@ class LauncherWindow(QtWidgets.QDialog):
             c.get("ptt_slot_2_type", "disabled"),
             c.get("ptt_slot_2_value", ""),
         )
+        try:
+            self.vad_aggr_spin.setValue(int(c.get("continuous_vad_aggressiveness", 5)))
+        except Exception:
+            self.vad_aggr_spin.setValue(5)
 
     def _save_to_config(self):
         if self.voice_ptt_radio.isChecked():
             voice_mode = "push_to_talk"
+        elif self.voice_continuous_radio.isChecked():
+            voice_mode = "continuous"
         else:
             voice_mode = "disabled"
 
@@ -397,6 +427,7 @@ class LauncherWindow(QtWidgets.QDialog):
 
         self.config.update({
             "voice_mode": voice_mode,
+            "continuous_vad_aggressiveness": int(self.vad_aggr_spin.value()),
             "ptt_slot_1_type": s1_type,
             "ptt_slot_1_value": s1_value,
             "ptt_slot_2_type": s2_type,

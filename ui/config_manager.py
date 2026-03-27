@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS = {
-    "voice_mode": "disabled",       # "disabled" or "push_to_talk"
+    "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"
+    "continuous_vad_aggressiveness": 5,  # 1-10, higher = less sensitive in continuous mode
     "ptt_key": "v",                 # Key name for push-to-talk (legacy, slot 1 keyboard fallback)
     "ptt_slot_1_type": "keyboard",  # "keyboard" or "joystick"
     "ptt_slot_1_value": "v",        # key name (str) or button index (str of int)
@@ -38,9 +39,13 @@ def load_config() -> Dict[str, Any]:
                 for key in DEFAULTS:
                     if key in saved:
                         config[key] = saved[key]
-            # Continuous mode is intentionally disabled; coerce legacy values.
-            if config.get("voice_mode") == "continuous":
-                config["voice_mode"] = "disabled"
+            if config.get("voice_mode") not in {"disabled", "push_to_talk", "continuous"}:
+                config["voice_mode"] = DEFAULTS["voice_mode"]
+            try:
+                level = int(config.get("continuous_vad_aggressiveness", DEFAULTS["continuous_vad_aggressiveness"]))
+            except Exception:
+                level = DEFAULTS["continuous_vad_aggressiveness"]
+            config["continuous_vad_aggressiveness"] = max(1, min(10, level))
     except Exception as e:
         logger.warning("Failed to load config: %s", e)
     return config

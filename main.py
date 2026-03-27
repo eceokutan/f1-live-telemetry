@@ -207,13 +207,15 @@ def run_jarvis_live(settings: dict) -> bool:
 
     # Initialize voice input
     voice_mode_setting = settings.get("voice_mode", "disabled")
+    continuous_vad_aggressiveness = settings.get("continuous_vad_aggressiveness", 5)
     if VOICE_AVAILABLE and voice_mode_setting != "disabled":
         voice_mode = "PTT" if enable_ptt else "VAD"
         logger.info("Initializing Voice Input (faster-whisper, %s mode)", voice_mode)
         try:
             voice_thread = VoiceInputWorker(
                 whisper_model_size="base",
-                ptt_mode=enable_ptt
+                ptt_mode=enable_ptt,
+                vad_aggressiveness=continuous_vad_aggressiveness,
             )
             if ai_thread:
                 voice_thread.speech_detected.connect(ai_thread.process_driver_query)
