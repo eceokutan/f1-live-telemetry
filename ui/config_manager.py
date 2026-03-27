@@ -6,13 +6,17 @@ Loads and saves settings to a JSON file next to the executable/script.
 
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
 # Default config file location (next to the script/executable)
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
+if getattr(sys, "frozen", False):
+    CONFIG_FILE = Path(sys.executable).parent / "config.json"
+else:
+    CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS = {
     "voice_mode": "disabled",       # "disabled", "push_to_talk", "continuous"

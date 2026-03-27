@@ -7,6 +7,7 @@ for fast CPU or GPU inference without torch/transformers/peft dependencies.
 
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -58,7 +59,10 @@ class LocalLLMInference:
         # Resolve model path relative to project root
         self.model_path = Path(model_path)
         if not self.model_path.is_absolute():
-            self.model_path = Path(__file__).parent.parent / self.model_path
+            if getattr(sys, "frozen", False):
+                self.model_path = Path(sys.executable).parent / self.model_path
+            else:
+                self.model_path = Path(__file__).parent.parent / self.model_path
 
         auto_download_enabled = (
             os.getenv("LOCAL_LLM_AUTO_DOWNLOAD", "1").strip().lower()

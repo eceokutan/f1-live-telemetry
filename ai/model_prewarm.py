@@ -7,10 +7,18 @@ voice features feel instant during normal app interaction.
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
-DEFAULT_KOKORO_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "kokoro_cache"
+
+def _project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
+
+
+DEFAULT_KOKORO_CACHE_DIR = _project_root() / "data" / "kokoro_cache"
 
 
 def _default_hf_hub_cache() -> Path:
@@ -118,7 +126,7 @@ def is_local_llm_model_available(
     """Check whether the GGUF model file exists on disk."""
     p = Path(model_path)
     if not p.is_absolute():
-        p = Path(__file__).resolve().parent.parent / p
+        p = _project_root() / p
     return p.exists()
 
 

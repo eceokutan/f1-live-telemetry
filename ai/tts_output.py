@@ -12,6 +12,7 @@ import asyncio
 import io
 import logging
 import re
+import sys
 import time
 import wave
 import platform
@@ -26,7 +27,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_KOKORO_VOICE_ID = "bm_lewis"
 DEFAULT_KOKORO_LANG = "en-gb"
 DEFAULT_KOKORO_SPEED = 1.3
-DEFAULT_KOKORO_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "kokoro_cache"
+if getattr(sys, "frozen", False):
+    DEFAULT_KOKORO_CACHE_DIR = Path(sys.executable).parent / "data" / "kokoro_cache"
+else:
+    DEFAULT_KOKORO_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "kokoro_cache"
 
 
 class KokoroTTSClient:

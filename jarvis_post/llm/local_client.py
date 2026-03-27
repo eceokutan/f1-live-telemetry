@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +46,10 @@ class LocalGGUFClient:
             self._model_path = Path(_DEFAULT_MODEL_PATH)
 
         if not self._model_path.is_absolute():
-            self._model_path = Path(__file__).resolve().parent.parent.parent / self._model_path
+            if getattr(sys, "frozen", False):
+                self._model_path = Path(sys.executable).parent / self._model_path
+            else:
+                self._model_path = Path(__file__).resolve().parent.parent.parent / self._model_path
 
         # Context / threading config
         env_n_ctx = (os.getenv("POSTRACE_GGUF_N_CTX") or "").strip()

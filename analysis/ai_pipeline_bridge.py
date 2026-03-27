@@ -337,7 +337,10 @@ class AIPipelineBridge:
             except Exception:
                 logger.warning("Invalid JARVIS_POST_ROOT value: %s", env_root)
 
-        repo_root = Path(__file__).resolve().parent.parent
+        if getattr(sys, "frozen", False):
+            repo_root = Path(sys.executable).parent
+        else:
+            repo_root = Path(__file__).resolve().parent.parent
         if repo_root not in candidates:
             candidates.append(repo_root)
 
@@ -507,7 +510,10 @@ class AIPipelineBridge:
         if env_path:
             return Path(env_path).exists()
 
-        default_path = Path(__file__).resolve().parent.parent / "postrace_gguf" / "granite-postrace-analyst-Q4_K_M.gguf"
+        if getattr(sys, "frozen", False):
+            default_path = Path(sys.executable).parent / "postrace_gguf" / "granite-postrace-analyst-Q4_K_M.gguf"
+        else:
+            default_path = Path(__file__).resolve().parent.parent / "postrace_gguf" / "granite-postrace-analyst-Q4_K_M.gguf"
         if default_path.exists():
             return True
 

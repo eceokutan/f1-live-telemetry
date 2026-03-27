@@ -10,12 +10,12 @@ Receives telemetry samples, detects events, generates AI commentary.
 import asyncio
 import logging
 import math
+import os
 import re
+import sys
 import time
 from typing import Optional, Dict, Any
 from PyQt5 import QtCore
-
-import os
 from ai.race_engineer_core import (
     Event,
     GForces,
@@ -197,7 +197,10 @@ class AIRaceEngineerWorker(QtCore.QThread):
         force_rule_based_fallback = False
         model_file = Path(local_model_path)
         if not model_file.is_absolute():
-            model_file = Path(__file__).parent.parent / model_file
+            if getattr(sys, "frozen", False):
+                model_file = Path(sys.executable).parent / model_file
+            else:
+                model_file = Path(__file__).parent.parent / model_file
 
         if not model_file.exists():
             # Try auto-downloading from Hugging Face Hub
