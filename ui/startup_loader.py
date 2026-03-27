@@ -107,7 +107,7 @@ class LoadingScreen(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
         self._drag_pos = None  # for mouse-drag movement
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
-        self.setFixedSize(720, 620)
+        self.setFixedSize(620, 620)
         self.setStyleSheet(f"background-color: {BG_COLOR};")
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -469,11 +469,29 @@ class StartupLoaderThread(QtCore.QThread):
 
                 local_model_path = DEFAULT_LOCAL_PATH
                 if is_local_llm_model_available(local_model_path) and needs_local_llm_prewarm():
-                    self._download_model_with_progress(
-                        5, "Loading LLM into memory",
-                        lambda: prewarm_local_llm(model_path=local_model_path)
-                    )
-                    self.stage_update.emit(5, STATUS_DONE, "Models downloaded, LLM loaded")
+                    import threading as _th
+                    import time as _time
+                    _prewarm_err = [None]
+                    _prewarm_done = _th.Event()
+                    def _do_prewarm():
+                        try:
+                            prewarm_local_llm(model_path=local_model_path)
+                        except Exception as e:
+                            _prewarm_err[0] = e
+                        finally:
+                            _prewarm_done.set()
+                    _th.Thread(target=_do_prewarm, daemon=True).start()
+                    _t0 = _time.time()
+                    while not _prewarm_done.is_set():
+                        elapsed = int(_time.time() - _t0)
+                        self.stage_update.emit(
+                            5, STATUS_RUNNING,
+                            f"Loading LLM into memory... ({elapsed}s)"
+                        )
+                        _prewarm_done.wait(timeout=1.0)
+                    if _prewarm_err[0]:
+                        raise _prewarm_err[0]
+                    self.stage_update.emit(5, STATUS_DONE, "Models ready, LLM loaded")
                 else:
                     self.stage_update.emit(5, STATUS_DONE, "Models ready")
             except Exception as e:
