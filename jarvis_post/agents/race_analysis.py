@@ -58,14 +58,19 @@ class RaceAnalysisAgent(BaseAgent):
         # --- per-lap data (times + fuel) ---
         lap_times = [round(lap.get("lap_time", 0), 3) for lap in laps]
         valid_flags = [lap.get("valid", True) for lap in laps]
-        incomplete_laps = [i + 1 for i, v in enumerate(valid_flags) if not v]
+        incomplete_laps = [
+            laps[i].get("lap_number", i + 1)
+            for i, v in enumerate(valid_flags)
+            if not v
+        ]
         # Exclude incomplete laps from summary statistics
         valid_times = [t for t, v in zip(lap_times, valid_flags) if t > 0 and v]
 
         # Build enriched per-lap list with fuel data
         laps_with_fuel = []
-        for lap in laps:
+        for i, lap in enumerate(laps):
             lap_entry = {
+                "lap": lap.get("lap_number", i + 1),
                 "lap_time": round(lap.get("lap_time", 0), 3),
                 "fuel_start": round(lap.get("fuel_start", 0) or 0, 2),
                 "fuel_end": round(lap.get("fuel_end", 0) or 0, 2),
@@ -111,7 +116,8 @@ class RaceAnalysisAgent(BaseAgent):
         # Detect pit laps as laps where fuel_start > previous lap fuel_end significantly
         stints = []
         pit_stops = []
-        stint_start = 1
+        stint_start_idx = 0
+        stint_start_lap = laps[0].get("lap_number", 1) if laps else 1
         stint_num = 1
         prev_fuel_end = None
         for i, lap in enumerate(laps):
@@ -124,30 +130,33 @@ class RaceAnalysisAgent(BaseAgent):
                 and fuel_start > prev_fuel_end + 2.0  # >2L increase = refuel
             )
             if is_pit and i > 0:
-                stint_laps = laps[stint_start - 1: i]
+                stint_laps = laps[stint_start_idx: i]
                 stint_times = [l.get("lap_time", 0) for l in stint_laps if l.get("lap_time", 0) > 0]
+                prev_lap_num = laps[i - 1].get("lap_number", i)
                 stints.append({
                     "stint": stint_num,
                     "compound": "UNKNOWN",
-                    "laps": f"{stint_start}-{lap_num - 1}",
+                    "laps": f"{stint_start_lap}-{prev_lap_num}",
                     "length": len(stint_laps),
                     "avg_time": round(sum(stint_times) / len(stint_times), 3) if stint_times else 0,
                     "fastest_time": round(min(stint_times), 3) if stint_times else 0,
                 })
-                pit_stops.append({"lap": lap_num - 1, "duration": None, "inferred": True})
-                stint_start = lap_num
+                pit_stops.append({"lap": prev_lap_num, "duration": None, "inferred": True})
+                stint_start_idx = i
+                stint_start_lap = lap_num
                 stint_num += 1
             if fuel_end is not None:
                 prev_fuel_end = fuel_end
 
         # Final stint
-        final_laps = laps[stint_start - 1:]
+        last_lap_num = laps[-1].get("lap_number", len(laps)) if laps else 0
+        final_laps = laps[stint_start_idx:]
         final_times = [l.get("lap_time", 0) for l in final_laps if l.get("lap_time", 0) > 0]
         if final_laps:
             stints.append({
                 "stint": stint_num,
                 "compound": "UNKNOWN",
-                "laps": f"{stint_start}-{len(laps)}",
+                "laps": f"{stint_start_lap}-{last_lap_num}",
                 "length": len(final_laps),
                 "avg_time": round(sum(final_times) / len(final_times), 3) if final_times else 0,
                 "fastest_time": round(min(final_times), 3) if final_times else 0,

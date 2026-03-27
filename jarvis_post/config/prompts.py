@@ -19,6 +19,12 @@ CRITICAL RULES — FOLLOW THESE STRICTLY:
   Do not reference F1-specific concepts (DRS zones, FIA regulations, energy
   recovery modes, pit window strategies) unless the data explicitly supports them.
 
+DATA FORMAT:
+- The "laps" array contains objects with a "lap" field giving the lap number.
+  Use this field to identify laps; do NOT infer lap numbers from array position.
+- "lap_summary", "stints", "pit_stops", and "car_data" all reference laps by
+  their "lap" number. Cross-reference using that field only.
+
 ANALYSIS PRINCIPLES:
 1. Be specific — reference exact lap numbers, times, and data points from the input
 2. Be data-driven — support every observation with telemetry evidence from the input
