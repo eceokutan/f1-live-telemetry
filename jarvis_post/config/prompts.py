@@ -20,10 +20,8 @@ CRITICAL RULES — FOLLOW THESE STRICTLY:
   recovery modes, pit window strategies) unless the data explicitly supports them.
 
 DATA FORMAT:
-- The "laps" array contains objects with a "lap" field giving the lap number.
-  Use this field to identify laps; do NOT infer lap numbers from array position.
-- "lap_summary", "stints", "pit_stops", and "car_data" all reference laps by
-  their "lap" number. Cross-reference using that field only.
+- Every lap object has a "lap" field. Always use it to identify laps, never
+  array position. All sections cross-reference by this field.
 
 ANALYSIS PRINCIPLES:
 1. Be specific — reference exact lap numbers, times, and data points from the input
