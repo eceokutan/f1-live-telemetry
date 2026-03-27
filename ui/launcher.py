@@ -316,16 +316,13 @@ class LauncherWindow(QtWidgets.QDialog):
 
         self.voice_disabled_radio = QtWidgets.QRadioButton("Disabled")
         self.voice_ptt_radio = QtWidgets.QRadioButton("Push-to-Talk")
-        self.voice_continuous_radio = QtWidgets.QRadioButton("Continuous (always listening)")
 
         self.voice_btn_group = QtWidgets.QButtonGroup(self)
         self.voice_btn_group.addButton(self.voice_disabled_radio)
         self.voice_btn_group.addButton(self.voice_ptt_radio)
-        self.voice_btn_group.addButton(self.voice_continuous_radio)
 
         voice_layout.addWidget(self.voice_disabled_radio)
         voice_layout.addWidget(self.voice_ptt_radio)
-        voice_layout.addWidget(self.voice_continuous_radio)
 
         # PTT binding slots
         self.ptt_key_widget = QtWidgets.QWidget()
@@ -374,11 +371,9 @@ class LauncherWindow(QtWidgets.QDialog):
     def _load_from_config(self):
         c = self.config
 
-        voice = c.get("voice_mode", "push_to_talk")
+        voice = c.get("voice_mode", "disabled")
         if voice == "push_to_talk":
             self.voice_ptt_radio.setChecked(True)
-        elif voice == "continuous":
-            self.voice_continuous_radio.setChecked(True)
         else:
             self.voice_disabled_radio.setChecked(True)
 
@@ -394,8 +389,6 @@ class LauncherWindow(QtWidgets.QDialog):
     def _save_to_config(self):
         if self.voice_ptt_radio.isChecked():
             voice_mode = "push_to_talk"
-        elif self.voice_continuous_radio.isChecked():
-            voice_mode = "continuous"
         else:
             voice_mode = "disabled"
 
