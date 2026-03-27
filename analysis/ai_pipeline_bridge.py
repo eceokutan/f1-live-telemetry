@@ -37,8 +37,17 @@ class AIPipelineBridge:
         self._external_handler: Optional[Any] = None
         self._external_source = ""
         self._jarvis_llm_client: Optional[Any] = None
+        self._jarvis_llm_client_lock = threading.Lock()
         self._jarvis_warmup_started = False
         self._discover_external_pipeline()
+
+    def _get_or_create_llm_client(self, llm_client_cls: Callable[[], Any]) -> Any:
+        """Thread-safe lazy init of the shared LLM client (double-checked locking)."""
+        if self._jarvis_llm_client is None:
+            with self._jarvis_llm_client_lock:
+                if self._jarvis_llm_client is None:
+                    self._jarvis_llm_client = llm_client_cls()
+        return self._jarvis_llm_client
 
     def generate(self, session: Session, lap: Lap) -> AIAnalysisResult:
         """Generate coach + analyst outputs for a specific lap."""
@@ -73,8 +82,7 @@ class AIPipelineBridge:
             return None
 
         try:
-            if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+            self._get_or_create_llm_client(llm_client_cls)
             analyst_agent = race_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
             logger.error("Failed to initialize Jarvis Post analyst: %s", exc, exc_info=True)
@@ -106,8 +114,7 @@ class AIPipelineBridge:
             return None
 
         try:
-            if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+            self._get_or_create_llm_client(llm_client_cls)
             coach_agent = coach_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
             logger.error("Failed to initialize Jarvis Post coach: %s", exc, exc_info=True)
@@ -144,8 +151,7 @@ class AIPipelineBridge:
             return None
 
         try:
-            if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+            self._get_or_create_llm_client(llm_client_cls)
             analyst_agent = race_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
             logger.error("Failed to initialize Jarvis Post analyst: %s", exc, exc_info=True)
@@ -189,8 +195,7 @@ class AIPipelineBridge:
             return None
 
         try:
-            if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+            self._get_or_create_llm_client(llm_client_cls)
             coach_agent = coach_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
             logger.error("Failed to initialize Jarvis Post coach: %s", exc, exc_info=True)
@@ -237,8 +242,7 @@ class AIPipelineBridge:
             return None
 
         try:
-            if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+            self._get_or_create_llm_client(llm_client_cls)
             coach_agent = coach_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
             logger.error("Failed to initialize Jarvis Post coach follow-up: %s", exc, exc_info=True)
@@ -452,8 +456,7 @@ class AIPipelineBridge:
             return None
 
         try:
-            if self._jarvis_llm_client is None:
-                self._jarvis_llm_client = llm_client_cls()
+            self._get_or_create_llm_client(llm_client_cls)
             analyst_agent = race_agent_cls(self._jarvis_llm_client)
             coach_agent = coach_agent_cls(self._jarvis_llm_client)
         except Exception as exc:
@@ -970,8 +973,7 @@ class AIPipelineBridge:
 
         def _warmup() -> None:
             try:
-                if self._jarvis_llm_client is None:
-                    self._jarvis_llm_client = llm_client_cls()
+                self._get_or_create_llm_client(llm_client_cls)
                 warmup_fn = getattr(self._jarvis_llm_client, "warmup_sync", None)
                 if callable(warmup_fn):
                     warmup_fn()
