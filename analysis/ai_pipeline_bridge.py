@@ -348,6 +348,15 @@ class AIPipelineBridge:
 
     def _is_valid_jarvis_post_root(self, root: Path) -> bool:
         """Validate that a root contains the expected local Jarvis Post package."""
+        # In PyInstaller bundles, Python modules are compiled into the archive
+        # and don't exist as loose files — check importability instead.
+        if getattr(sys, "frozen", False):
+            try:
+                importlib.import_module("jarvis_post.agents.coaching")
+                importlib.import_module("jarvis_post.agents.race_analysis")
+                return True
+            except ImportError:
+                return False
         coaching_file = root / "jarvis_post" / "agents" / "coaching.py"
         race_analysis_file = root / "jarvis_post" / "agents" / "race_analysis.py"
         return coaching_file.exists() and race_analysis_file.exists()

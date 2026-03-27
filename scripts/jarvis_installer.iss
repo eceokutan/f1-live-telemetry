@@ -51,3 +51,5 @@ Type: filesandordirs; Name: "{app}\race_engineer_gguf"
 Type: filesandordirs; Name: "{app}\postrace_gguf"
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\config.json"
+; PyInstaller bundle internals
+Type: filesandordirs; Name: "{app}\_internal"

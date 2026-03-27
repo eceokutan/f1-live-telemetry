@@ -67,6 +67,11 @@ a = Analysis(
         'analysis.ai_pipeline_bridge',
         'jarvis_post.llm.local_client',
         'jarvis_post.llm.client',
+        'jarvis_post.agents.race_analysis',
+        'jarvis_post.agents.coaching',
+        'jarvis_post.agents.base',
+        'jarvis_post.config.prompts',
+        'jarvis_post.preprocessing.telemetry',
         # Data (lazy imports in __init__.py)
         'data.session_recorder',
         'data.session_exporter',
